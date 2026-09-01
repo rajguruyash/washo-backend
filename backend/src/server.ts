@@ -98,7 +98,7 @@ const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfa
 const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
 
 
-// Explicit Nodemailer Transporter with Forced IPv4 Lookup
+// Explicit Nodemailer Transporter using Direct DNS IPv4 Resolution
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
@@ -108,7 +108,13 @@ const transporter = nodemailer.createTransport({
     pass: EMAIL_PASS,
   },
   lookup: (hostname: string, options: any, callback: any) => {
-    dns.lookup(hostname, { family: 4 }, callback); // Guarantees an IPv4 IP is returned
+    // Bypasses OS getaddrinfo and forces direct IPv4 A-record resolution
+    dns.resolve4(hostname, (err, addresses) => {
+      if (err || !addresses || addresses.length === 0) {
+        return callback(err || new Error('Could not resolve IPv4 address for SMTP host'));
+      }
+      callback(null, addresses[0], 4);
+    });
   },
 } as any);
 
