@@ -23,6 +23,18 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir));
 
+// Serve built React frontend from root dist folder
+const distPath = path.join(__dirname, '../../dist');
+app.use(express.static(distPath));
+
+// Fallback to index.html for React SPA routes (excluding API requests)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
 // PostgreSQL Connection Config
 const pool = new Pool(
   process.env.DATABASE_URL
