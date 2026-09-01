@@ -13,14 +13,14 @@ const port = process.env.PORT || 5000;
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
-// Serve uploads statically using process.cwd()
+// Serve uploads statically
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 app.use('/uploads', express.static(uploadDir));
 
-// Serve built React frontend safely
+// Serve React build safely
 const distPath = path.join(process.cwd(), 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
@@ -41,7 +41,7 @@ if (fs.existsSync(distPath)) {
   });
 }
 
-// PostgreSQL Connection Config
+// PostgreSQL Connection
 const pool = new Pool(
   process.env.DATABASE_URL
     ? {
@@ -57,7 +57,7 @@ const pool = new Pool(
       }
 );
 
-// Auto-Create PostgreSQL Table on Startup
+// Auto-Create PostgreSQL Table & Add Missing Columns
 const initDatabase = async () => {
   try {
     await pool.query(`
@@ -73,12 +73,15 @@ const initDatabase = async () => {
         flat_number VARCHAR(50) NOT NULL,
         preferred_service VARCHAR(100) NOT NULL,
         payment_image_url TEXT,
+        status VARCHAR(50) DEFAULT 'Pending',
         source VARCHAR(50) DEFAULT 'website',
         timestamp VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('PostgreSQL "leads" table verified/created successfully.');
+    // Ensure status column exists for existing tables
+    await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Pending';`);
+    console.log('PostgreSQL "leads" table verified/updated successfully.');
   } catch (err) {
     console.error('Database initialization error:', err);
   }
@@ -86,7 +89,7 @@ const initDatabase = async () => {
 
 initDatabase();
 
-// Multer Storage Configuration
+// Multer Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -108,7 +111,7 @@ const upload = multer({
   }
 });
 
-// Resend Client
+// Resend HTTP API Client
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Auth Middleware Helper for Admin APIs
@@ -125,108 +128,209 @@ const verifyAdminKey = (req: express.Request, res: express.Response, next: expre
 app.delete('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
     await pool.query('DELETE FROM leads WHERE id = $1', [req.params.id]);
-    res.json({ success: true, message: 'Lead deleted successfully' });
+    res.json({ success: true, message: 'Lead deleted' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to delete lead' });
+    res.status(500).json({ success: false, message: 'Delete failed' });
   }
 });
 
-// Admin API - Update Lead
+// Admin API - Update Lead Status
+app.patch('/api/admin/leads/:id/status', verifyAdminKey, async (req, res) => {
+  try {
+    const { status } = req.body;
+    await pool.query('UPDATE leads SET status = $1 WHERE id = $2', [status, req.params.id]);
+    res.json({ success: true, message: 'Status updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Status update failed' });
+  }
+});
+
+// Admin API - Update Full Lead
 app.put('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
-    const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service } = req.body;
+    const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status } = req.body;
     await pool.query(
-      `UPDATE leads SET name=$1, email=$2, mobile=$3, vehicle_type=$4, vehicle_model=$5, vehicle_registration_number=$6, location=$7, flat_number=$8, preferred_service=$9 WHERE id=$10`,
-      [name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, req.params.id]
+      `UPDATE leads SET name=$1, email=$2, mobile=$3, vehicle_type=$4, vehicle_model=$5, vehicle_registration_number=$6, location=$7, flat_number=$8, preferred_service=$9, status=$10 WHERE id=$11`,
+      [name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status || 'Pending', req.params.id]
     );
-    res.json({ success: true, message: 'Lead updated successfully' });
+    res.json({ success: true, message: 'Lead updated' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to update lead' });
+    res.status(500).json({ success: false, message: 'Update failed' });
   }
 });
 
-// Admin API - Manual Add Lead
+// Admin API - Manual Add
 app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   try {
-    const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service } = req.body;
+    const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status } = req.body;
     await pool.query(
-      `INSERT INTO leads (name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, source, timestamp)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'admin', $10)`,
-      [name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, new Date().toISOString()]
+      `INSERT INTO leads (name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status, source, timestamp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'admin', $11)`,
+      [name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status || 'Pending', new Date().toISOString()]
     );
-    res.json({ success: true, message: 'Lead created successfully' });
+    res.json({ success: true, message: 'Lead created' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to create lead' });
+    res.status(500).json({ success: false, message: 'Creation failed' });
   }
 });
 
-// Mobile Admin Dashboard Interface (CRUD Enabled)
+// Dark Professional Admin Mobile Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
 
   if (adminKey !== SECRET_KEY) {
-    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:sans-serif;">401 Unauthorized</h1>');
+    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:sans-serif; color:#64748b;">401 Unauthorized</h1>');
   }
 
   try {
     const result = await pool.query('SELECT * FROM leads ORDER BY created_at DESC');
     const rows = result.rows;
 
+    const pendingCount = rows.filter(r => (r.status || 'Pending') === 'Pending').length;
+    const completedCount = rows.filter(r => r.status === 'Completed').length;
+
     let html = `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
+        <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>WASHO Admin Panel</title>
+        <title>WASHO Command Center</title>
         <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 15px; background: #f1f5f9; margin: 0; }
-          .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-          h2 { color: #0f172a; margin: 0; }
-          .btn-add { background: #2563eb; color: white; padding: 8px 14px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
-          .card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-          .title { font-weight: bold; font-size: 16px; color: #1e40af; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
-          .field { margin: 4px 0; font-size: 14px; color: #334155; }
-          .badge { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
-          .actions { display: flex; gap: 8px; margin-top: 12px; border-top: 1px solid #f1f5f9; padding-top: 10px; }
-          .btn-edit { background: #e2e8f0; color: #1e293b; padding: 6px 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; flex: 1; }
-          .btn-delete { background: #fee2e2; color: #991b1b; padding: 6px 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; flex: 1; }
-          a { color: #2563eb; word-break: break-all; }
+          :root {
+            --bg: #090d16;
+            --card-bg: #131b2e;
+            --border: #222f47;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --accent: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+          }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text-main); padding: 16px; margin: 0; box-sizing: border-box; }
+          .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+          .brand { display: flex; align-items: center; gap: 8px; }
+          .brand h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; margin: 0; color: #ffffff; }
+          .brand-badge { background: linear-gradient(135deg, #2563eb, #1d4ed8); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
           
+          /* Analytics Row */
+          .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+          .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+          .stat-num { font-size: 20px; font-weight: 700; color: var(--text-main); }
+          .stat-label { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
+
+          /* Controls Bar */
+          .controls { display: flex; gap: 8px; margin-bottom: 16px; }
+          .search-input { flex: 1; background: var(--card-bg); border: 1px solid var(--border); color: var(--text-main); padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+          .search-input:focus { border-color: var(--accent); }
+          .btn { background: var(--accent); color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+          .btn-secondary { background: #1e293b; color: var(--text-main); border: 1px solid var(--border); }
+          
+          /* Cards */
+          .card-list { display: flex; flex-direction: column; gap: 12px; }
+          .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px; position: relative; }
+          .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+          .cust-name { font-size: 16px; font-weight: 700; color: #ffffff; }
+          .service-tag { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+          
+          .grid-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-bottom: 12px; }
+          .info-item { color: var(--text-sub); }
+          .info-item strong { color: var(--text-main); font-weight: 500; }
+
+          /* Status Dropdown inside Card */
+          .status-select { background: #0f172a; border: 1px solid var(--border); color: var(--text-main); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; outline: none; }
+
+          /* Action Buttons */
+          .action-row { display: flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+          .act-btn { flex: 1; text-align: center; padding: 8px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600; border: none; cursor: pointer; }
+          .act-call { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+          .act-wa { background: rgba(37, 211, 102, 0.15); color: #4ade80; border: 1px solid rgba(37, 211, 102, 0.3); }
+          .act-edit { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid var(--border); }
+          .act-del { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
           /* Modal */
-          .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); padding: 15px; box-sizing: border-box; align-items: center; justify-content: center; }
-          .modal-content { background: white; border-radius: 10px; padding: 20px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
-          .form-group { margin-bottom: 10px; }
-          .form-group label { display: block; font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 4px; }
-          .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
-          .modal-actions { display: flex; gap: 10px; margin-top: 15px; }
-          .btn-save { background: #16a34a; color: white; padding: 10px; border: none; border-radius: 6px; flex: 1; font-weight: bold; cursor: pointer; }
-          .btn-cancel { background: #94a3b8; color: white; padding: 10px; border: none; border-radius: 6px; flex: 1; font-weight: bold; cursor: pointer; }
+          .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); padding: 16px; box-sizing: border-box; align-items: center; justify-content: center; z-index: 100; }
+          .modal-box { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+          .modal-box h3 { margin-top: 0; color: #fff; }
+          .form-group { margin-bottom: 12px; }
+          .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 4px; }
+          .form-group input, .form-group select { width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2>WASHO Leads (${rows.length})</h2>
-          <button class="btn-add" onclick="openAddModal()">+ Add Lead</button>
+          <div class="brand">
+            <h1>WASHO</h1>
+            <span class="brand-badge">PRO</span>
+          </div>
+          <button class="btn" onclick="openAddModal()">+ New Booking</button>
         </div>
 
-        <div id="leadList">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-num">${rows.length}</div>
+            <div class="stat-label">Total Leads</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-num" style="color: var(--warning);">${pendingCount}</div>
+            <div class="stat-label">Pending</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-num" style="color: var(--success);">${completedCount}</div>
+            <div class="stat-label">Completed</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search name, phone, reg no..." onkeyup="filterLeads()">
+          <button class="btn btn-secondary" onclick="exportCSV()">📥 CSV</button>
+        </div>
+
+        <div class="card-list" id="cardList">
     `;
 
     rows.forEach((lead) => {
+      const cleanMobile = lead.mobile.replace(/\D/g, '');
+      const waMsg = encodeURIComponent(`Hi ${lead.name}, thank you for choosing WASHO! Regarding your ${lead.preferred_service} request for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
+      const status = lead.status || 'Pending';
+
       html += `
-        <div class="card" id="lead-card-${lead.id}">
-          <div class="title">${lead.name} <span class="badge">${lead.preferred_service}</span></div>
-          <div class="field">📱 <strong>Phone:</strong> ${lead.mobile}</div>
-          <div class="field">✉️ <strong>Email:</strong> ${lead.email}</div>
-          <div class="field">🚗 <strong>Vehicle:</strong> ${lead.vehicle_type} - ${lead.vehicle_model} (${lead.vehicle_registration_number})</div>
-          <div class="field">📍 <strong>Location:</strong> Flat ${lead.flat_number}, ${lead.location}</div>
-          ${lead.payment_image_url ? `<div class="field">🖼️ <strong>Payment:</strong> <a href="${lead.payment_image_url}" target="_blank">View Screenshot</a></div>` : ''}
-          <div class="field" style="color:#94a3b8; font-size:11px; margin-top:8px;">${new Date(lead.created_at).toLocaleString()}</div>
-          
-          <div class="actions">
-            <button class="btn-edit" onclick='openEditModal(${JSON.stringify(lead)})'>✏️ Edit</button>
-            <button class="btn-delete" onclick="deleteLead(${lead.id})">🗑️ Delete</button>
+        <div class="card lead-item" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
+          <div class="card-header">
+            <div>
+              <div class="cust-name">${lead.name}</div>
+              <div style="font-size:12px; color:var(--text-sub); margin-top:2px;">📍 Flat ${lead.flat_number}, ${lead.location}</div>
+            </div>
+            <span class="service-tag">${lead.preferred_service}</span>
+          </div>
+
+          <div class="grid-info">
+            <div class="info-item">🚗 <strong>${lead.vehicle_type}</strong> (${lead.vehicle_model})</div>
+            <div class="info-item">🔢 <strong>${lead.vehicle_registration_number}</strong></div>
+            <div class="info-item">📱 <strong>${lead.mobile}</strong></div>
+            <div class="info-item">✉️ <strong>${lead.email}</strong></div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+            <div>
+              <label style="font-size:11px; color:var(--text-sub); margin-right:6px;">Status:</label>
+              <select class="status-select" onchange="updateStatus(${lead.id}, this.value)">
+                <option value="Pending" ${status === 'Pending' ? 'selected' : ''}>Pending</option>
+                <option value="Scheduled" ${status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
+                <option value="Completed" ${status === 'Completed' ? 'selected' : ''}>Completed</option>
+                <option value="Cancelled" ${status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+              </select>
+            </div>
+            ${lead.payment_image_url ? `<a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:#60a5fa; font-weight:600; text-decoration:none;">🖼️ Payment Receipt</a>` : ''}
+          </div>
+
+          <div class="action-row">
+            <a href="tel:${lead.mobile}" class="act-btn act-call">📞 Call</a>
+            <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="act-btn act-wa">💬 WhatsApp</a>
+            <button class="act-btn act-edit" onclick='openEditModal(${JSON.stringify(lead)})'>✏️ Edit</button>
+            <button class="act-btn act-del" onclick="deleteLead(${lead.id})">🗑️</button>
           </div>
         </div>
       `;
@@ -237,22 +341,30 @@ app.get('/admin', async (req, res) => {
 
         <!-- Add/Edit Modal -->
         <div class="modal" id="leadModal">
-          <div class="modal-content">
-            <h3 id="modalTitle">Edit Lead</h3>
+          <div class="modal-box">
+            <h3 id="modalTitle">Booking Details</h3>
             <input type="hidden" id="editId">
-            <div class="form-group"><label>Name</label><input type="text" id="mName"></div>
-            <div class="form-group"><label>Email</label><input type="email" id="mEmail"></div>
-            <div class="form-group"><label>Mobile</label><input type="text" id="mMobile"></div>
+            <div class="form-group"><label>Customer Name</label><input type="text" id="mName"></div>
+            <div class="form-group"><label>Email Address</label><input type="email" id="mEmail"></div>
+            <div class="form-group"><label>Mobile Phone</label><input type="text" id="mMobile"></div>
             <div class="form-group"><label>Vehicle Type</label><input type="text" id="mVehicleType"></div>
             <div class="form-group"><label>Vehicle Model</label><input type="text" id="mVehicleModel"></div>
-            <div class="form-group"><label>Reg Number</label><input type="text" id="mRegNo"></div>
-            <div class="form-group"><label>Location</label><input type="text" id="mLocation"></div>
+            <div class="form-group"><label>Registration Number</label><input type="text" id="mRegNo"></div>
+            <div class="form-group"><label>Location / Society</label><input type="text" id="mLocation"></div>
             <div class="form-group"><label>Flat Number</label><input type="text" id="mFlat"></div>
-            <div class="form-group"><label>Preferred Service</label><input type="text" id="mService"></div>
+            <div class="form-group"><label>Service</label><input type="text" id="mService"></div>
+            <div class="form-group"><label>Status</label>
+              <select id="mStatus">
+                <option value="Pending">Pending</option>
+                <option value="Scheduled">Scheduled</option>
+                <option value="Completed">Completed</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </div>
             
-            <div class="modal-actions">
-              <button class="btn-save" onclick="saveLead()">Save</button>
-              <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+              <button class="btn" style="flex:1; justify-content:center;" onclick="saveLead()">Save Record</button>
+              <button class="btn btn-secondary" style="flex:1; justify-content:center;" onclick="closeModal()">Cancel</button>
             </div>
           </div>
         </div>
@@ -260,18 +372,37 @@ app.get('/admin', async (req, res) => {
         <script>
           const key = '${adminKey}';
 
+          function filterLeads() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.lead-item').forEach(item => {
+              const text = item.getAttribute('data-search');
+              item.style.display = text.includes(query) ? 'block' : 'none';
+            });
+          }
+
+          function updateStatus(id, newStatus) {
+            fetch('/api/admin/leads/' + id + '/status?key=' + key, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: newStatus })
+            })
+            .then(res => res.json())
+            .then(data => {
+              if (!data.success) alert('Failed to update status');
+            });
+          }
+
           function deleteLead(id) {
-            if (!confirm('Are you sure you want to delete this lead?')) return;
+            if (!confirm('Permanently delete this lead?')) return;
             fetch('/api/admin/leads/' + id + '?key=' + key, { method: 'DELETE' })
               .then(res => res.json())
               .then(data => {
                 if (data.success) location.reload();
-                else alert('Error: ' + data.message);
               });
           }
 
           function openAddModal() {
-            document.getElementById('modalTitle').innerText = 'Add New Lead';
+            document.getElementById('modalTitle').innerText = 'Add Manual Booking';
             document.getElementById('editId').value = '';
             document.getElementById('mName').value = '';
             document.getElementById('mEmail').value = '';
@@ -282,11 +413,12 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mLocation').value = '';
             document.getElementById('mFlat').value = '';
             document.getElementById('mService').value = 'First Wash';
+            document.getElementById('mStatus').value = 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
 
           function openEditModal(lead) {
-            document.getElementById('modalTitle').innerText = 'Edit Lead';
+            document.getElementById('modalTitle').innerText = 'Edit Booking Record';
             document.getElementById('editId').value = lead.id;
             document.getElementById('mName').value = lead.name;
             document.getElementById('mEmail').value = lead.email;
@@ -297,6 +429,7 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mLocation').value = lead.location;
             document.getElementById('mFlat').value = lead.flat_number;
             document.getElementById('mService').value = lead.preferred_service;
+            document.getElementById('mStatus').value = lead.status || 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
 
@@ -316,6 +449,7 @@ app.get('/admin', async (req, res) => {
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
+              status: document.getElementById('mStatus').value,
             };
 
             const url = id ? ('/api/admin/leads/' + id + '?key=' + key) : ('/api/admin/leads?key=' + key);
@@ -329,8 +463,22 @@ app.get('/admin', async (req, res) => {
             .then(res => res.json())
             .then(data => {
               if (data.success) location.reload();
-              else alert('Error: ' + data.message);
+              else alert(data.message);
             });
+          }
+
+          function exportCSV() {
+            const rows = ${JSON.stringify(rows)};
+            let csv = "ID,Name,Email,Mobile,Vehicle Type,Model,Reg No,Location,Flat,Service,Status,Created At\\n";
+            rows.forEach(r => {
+              csv += \`"\${r.id}","\${r.name}","\${r.email}","\${r.mobile}","\${r.vehicle_type}","\${r.vehicle_model}","\${r.vehicle_registration_number}","\${r.location}","\${r.flat_number}","\${r.preferred_service}","\${r.status || 'Pending'}","\${r.created_at}"\\n\`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('download', 'washo_leads.csv');
+            a.click();
           }
         </script>
       </body>
@@ -338,11 +486,11 @@ app.get('/admin', async (req, res) => {
     `;
     res.send(html);
   } catch (err) {
-    res.status(500).send('Error fetching leads from database.');
+    res.status(500).send('Error loading dashboard.');
   }
 });
 
-// Main Public Lead Capture Endpoint
+// Public Lead Submission Endpoint
 app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
   try {
     const {
@@ -366,8 +514,8 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
     const query = `
       INSERT INTO leads (
         name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, 
-        location, flat_number, preferred_service, payment_image_url, source, timestamp
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;
+        location, flat_number, preferred_service, payment_image_url, status, source, timestamp
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Pending', $11, $12) RETURNING id;
     `;
     
     const values = [
@@ -377,7 +525,7 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    // Send Automated Email via Resend
+    // Send Confirmation Email
     try {
       const emailData = await resend.emails.send({
         from: 'WASHO <booking@washo.online>',
@@ -408,7 +556,7 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
           </div>
         `,
       });
-      console.log('Confirmation email sent successfully via Resend:', emailData);
+      console.log('Confirmation email sent via Resend:', emailData);
     } catch (mailErr) {
       console.error('Failed to send confirmation email via Resend:', mailErr);
     }
