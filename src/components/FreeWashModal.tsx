@@ -60,7 +60,7 @@ export default function FreeWashModal({ isOpen, onClose }: FreeWashModalProps) {
         formData.append('paymentImage', paymentImage);
       }
 
-      const response = await fetch('http://localhost:5001/api/leads', {
+      const response = await fetch('https://washo.onrender.com/api/leads', {
         method: 'POST',
         body: formData,
       });
