@@ -116,7 +116,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Auth Middleware Helper
 const verifyAdminKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const key = req.query.key || req.headers['x-admin-key'];
-  const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
+  const SECRET_KEY = process.env.ADMIN_KEY || 'washo7595';
   if (key !== SECRET_KEY) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -173,7 +173,7 @@ app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
 // Depo-Budget Full Width Dashboard Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
-  const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
+  const SECRET_KEY = process.env.ADMIN_KEY || 'washo7595';
 
   if (adminKey !== SECRET_KEY) {
     return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:-apple-system, sans-serif; color:#64748b;">401 Unauthorized Access</h1>');
