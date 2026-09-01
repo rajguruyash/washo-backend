@@ -16,7 +16,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Serve uploads statically using process.cwd() (bypasses import.meta/ES module errors)
+// Serve uploads statically using process.cwd()
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -90,13 +90,29 @@ const upload = multer({
   }
 });
 
-// Nodemailer Transporter Configuration
+// Nodemailer Settings & Sanitization
+const EMAIL_USER = process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.washo@gmail.com';
+const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn';
+const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
+
+// Explicit Nodemailer Transporter Configuration (Render Compatible)
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // TLS
   auth: {
-    user: process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.washo@gmail.com',
-    pass: process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn',
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
   },
+});
+
+// Verify SMTP Connection on Startup
+transporter.verify((error) => {
+  if (error) {
+    console.error('SMTP Connection Error:', error);
+  } else {
+    console.log('SMTP Server is ready to send emails.');
+  }
 });
 
 // Leads Endpoint
@@ -136,7 +152,7 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
 
     // 2. Send Automated Confirmation Email
     const mailOptions = {
-      from: '"WASHO" <contact.washo@gmail.com>',
+      from: `"WASHO" <${EMAIL_USER}>`,
       to: email,
       subject: `Booking Confirmed: ${preferredService} - WASHO`,
       html: `
