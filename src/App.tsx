@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import FreeWashModal from './components/FreeWashModal';
 
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState('First Wash');
+  const [, setSelectedPlan] = useState('First Wash');
 
   const handleOpenModal = (planName = 'First Wash') => {
     setSelectedPlan(planName);

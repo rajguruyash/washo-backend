@@ -23,14 +23,50 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir));
 
-// PostgreSQL Connection
-const pool = new Pool({
-  user: process.env.DB_USER || 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'washo',
-  password: process.env.DB_PASSWORD || 'your_password',
-  port: parseInt(process.env.DB_PORT || '5432'),
-});
+// PostgreSQL Connection Config
+const pool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      }
+    : {
+        user: process.env.DB_USER || 'postgres',
+        host: process.env.DB_HOST || 'localhost',
+        database: process.env.DB_NAME || 'washo',
+        password: process.env.DB_PASSWORD || 'your_password',
+        port: parseInt(process.env.DB_PORT || '5432'),
+      }
+);
+
+// Auto-Create PostgreSQL Table on Startup
+const initDatabase = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        mobile VARCHAR(50) NOT NULL,
+        vehicle_type VARCHAR(50) NOT NULL,
+        vehicle_model VARCHAR(50) NOT NULL,
+        vehicle_registration_number VARCHAR(50) NOT NULL,
+        location VARCHAR(255) NOT NULL,
+        flat_number VARCHAR(50) NOT NULL,
+        preferred_service VARCHAR(100) NOT NULL,
+        payment_image_url TEXT,
+        source VARCHAR(50) DEFAULT 'website',
+        timestamp VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('PostgreSQL "leads" table verified/created successfully.');
+  } catch (err) {
+    console.error('Database initialization error:', err);
+  }
+};
+
+initDatabase();
 
 // Multer Disk Storage Configuration
 const storage = multer.diskStorage({
@@ -58,8 +94,8 @@ const upload = multer({
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.GMAIL_USER || 'contact.washo@gmail.com',
-    pass: process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn', // Paste your 16-character Google App Password here
+    user: process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.washo@gmail.com',
+    pass: process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn',
   },
 });
 
