@@ -95,16 +95,19 @@ const EMAIL_USER = process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.
 const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn';
 const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
 
-// Explicit Nodemailer Transporter Configuration (Render Compatible)
+// Explicit Nodemailer Transporter Configuration (IPv4 Forced)
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // TLS
+  port: 587,
+  secure: false, // TLS via STARTTLS
+  family: 4,     // Forces IPv4 connection to prevent ENETUNREACH errors on Render
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
-});
+} as any);
+
+
 
 // Verify SMTP Connection on Startup
 transporter.verify((error) => {
