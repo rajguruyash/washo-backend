@@ -98,23 +98,26 @@ const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfa
 const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
 
 
-// Explicit Nodemailer Transporter using Direct DNS IPv4 Resolution
+// Explicit Nodemailer Transporter using Port 465 (SSL/TLS + IPv4)
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // TLS via STARTTLS
+  port: 465,
+  secure: true, // Direct SSL/TLS (Bypasses Render's port 587 STARTTLS block)
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
   lookup: (hostname: string, options: any, callback: any) => {
-    // Bypasses OS getaddrinfo and forces direct IPv4 A-record resolution
     dns.resolve4(hostname, (err, addresses) => {
       if (err || !addresses || addresses.length === 0) {
         return callback(err || new Error('Could not resolve IPv4 address for SMTP host'));
       }
       callback(null, addresses[0], 4);
     });
+  },
+  tls: {
+    rejectUnauthorized: false,
+    servername: 'smtp.gmail.com',
   },
 } as any);
 
