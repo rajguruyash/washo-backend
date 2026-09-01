@@ -23,14 +23,14 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir));
 
-// Serve built React frontend from root dist folder safely
+// Serve built React frontend safely
 const distPath = path.join(process.cwd(), 'dist');
-
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+    // Exclude API, uploads, and admin routes from React SPA fallback
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/admin')) {
       return next();
     }
     const indexPath = path.join(distPath, 'index.html');
@@ -101,7 +101,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (allowedTypes.includes(file.mimetype)) {
@@ -114,6 +114,60 @@ const upload = multer({
 
 // Resend HTTP API Client
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Mobile-Friendly Admin Dashboard Route
+app.get('/admin', async (req, res) => {
+  const adminKey = req.query.key;
+  const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
+
+  if (adminKey !== SECRET_KEY) {
+    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:sans-serif;">401 Unauthorized</h1>');
+  }
+
+  try {
+    const result = await pool.query('SELECT * FROM leads ORDER BY created_at DESC');
+    const rows = result.rows;
+
+    let html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WASHO Leads Admin</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 15px; background: #f4f6f8; margin: 0; }
+          h2 { color: #1e293b; margin-bottom: 15px; }
+          .card { background: white; border-radius: 8px; padding: 15px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+          .title { font-weight: bold; font-size: 16px; color: #2563eb; margin-bottom: 6px; }
+          .field { margin: 4px 0; font-size: 14px; color: #334155; }
+          .badge { background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+          a { color: #2563eb; word-break: break-all; }
+        </style>
+      </head>
+      <body>
+        <h2>WASHO Lead Dashboard (${rows.length})</h2>
+    `;
+
+    rows.forEach((lead) => {
+      html += `
+        <div class="card">
+          <div class="title">${lead.name} <span class="badge">${lead.preferred_service}</span></div>
+          <div class="field">📱 <strong>Phone:</strong> ${lead.mobile}</div>
+          <div class="field">✉️ <strong>Email:</strong> ${lead.email}</div>
+          <div class="field">🚗 <strong>Vehicle:</strong> ${lead.vehicle_type} - ${lead.vehicle_model} (${lead.vehicle_registration_number})</div>
+          <div class="field">📍 <strong>Location:</strong> Flat ${lead.flat_number}, ${lead.location}</div>
+          ${lead.payment_image_url ? `<div class="field">🖼️ <strong>Payment:</strong> <a href="${lead.payment_image_url}" target="_blank">View Screenshot</a></div>` : ''}
+          <div class="field" style="color:#94a3b8; font-size:11px; margin-top:8px;">${new Date(lead.created_at).toLocaleString()}</div>
+        </div>
+      `;
+    });
+
+    html += `</body></html>`;
+    res.send(html);
+  } catch (err) {
+    res.status(500).send('Error fetching leads from database.');
+  }
+});
 
 // Leads Endpoint
 app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
@@ -153,8 +207,8 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
     // 2. Send Automated Confirmation Email via Resend REST API
     try {
       const emailData = await resend.emails.send({
-        from: 'WASHO <booking@washo.online>', // Your verified domain
-        to: email, // Delivered directly to the customer's submitted email
+        from: 'WASHO <booking@washo.online>',
+        to: email,
         subject: `Booking Confirmed: ${preferredService} - WASHO`,
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
