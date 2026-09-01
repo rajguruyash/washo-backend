@@ -128,11 +128,11 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    // 2. Send Automated Confirmation Email via Resend REST API (Port 443)
+    // 2. Send Automated Confirmation Email via Resend REST API
     try {
       const emailData = await resend.emails.send({
-        from: 'WASHO <onboarding@resend.dev>',
-        to: email,
+        from: 'WASHO <booking@washo.online>', // Your verified domain
+        to: email, // Delivered directly to the customer's submitted email
         subject: `Booking Confirmed: ${preferredService} - WASHO`,
         html: `
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
@@ -154,7 +154,7 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
             
             <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
             <p style="font-size: 12px; color: #64748b; text-align: center;">
-              This is an automated confirmation email. Please do not reply to this email.
+              This is an automated confirmation email from WASHO. Please do not reply directly to this message.
             </p>
           </div>
         `,
