@@ -1,0 +1,248 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui;
+  --font-heading: Montserrat, Poppins, ui-sans-serif, system-ui;
+
+  --color-washo-blue: #1248B8;
+  --color-washo-dark: #083A9B;
+  --color-washo-navy: #062F80;
+  --color-washo-light: #EAF2FF;
+  --color-washo-lightest: #F5F8FF;
+  --color-dark: #111111;
+  --color-grey: #555555;
+  --color-offer: #FFD84D;
+}
+
+/* Custom base styles */
+html,
+body,
+#root {
+  @apply h-full w-full font-sans bg-white text-dark;
+}
+
+body {
+  @apply antialiased;
+}
+
+/* Custom utility classes */
+.btn-primary {
+  @apply bg-washo-blue text-white px-6 py-3 rounded-lg font-heading font-semibold hover:bg-washo-dark transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
+}
+
+.btn-secondary {
+  @apply bg-offer text-dark px-6 py-3 rounded-lg font-heading font-semibold hover:bg-yellow-400 transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
+}
+
+.btn-outline {
+  @apply border-2 border-washo-blue text-washo-blue px-6 py-3 rounded-lg font-heading font-semibold hover:bg-washo-blue hover:text-white transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
+}
+
+.section-heading {
+  @apply text-3xl font-bold uppercase text-washo-blue mb-8 flex items-center justify-center gap-4;
+}
+
+.section-heading::before,
+.section-heading::after {
+  @apply content-[''] h-0.5 w-[60px] bg-washo-blue;
+}
+
+.section-heading-sm {
+  @apply text-2xl font-bold uppercase text-washo-blue mb-6 flex items-center justify-center gap-2;
+}
+
+.section-heading-sm::before,
+.section-heading-sm::after {
+  @apply content-[''] h-0.5 w-[30px] bg-washo-blue;
+}
+
+.icon-container {
+  @apply flex items-center justify-center w-[50px] h-[50px] bg-washo-light rounded-full mb-4;
+}
+
+.icon-container-sm {
+  @apply flex items-center justify-center w-[40px] h-[40px] bg-washo-light rounded-full mb-3;
+}
+
+/* Responsive container */
+.container-custom {
+  @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12;
+}
+
+/* Card styles */
+.card {
+  @apply bg-white border border-washo-light/50 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-300 transform hover:-translate-y-1;
+}
+
+.card-header {
+  @apply flex items-center gap-3 mb-4;
+}
+
+.card-title {
+  @apply text-washo-blue font-heading font-semibold text-xl;
+}
+
+.card-subtitle {
+  @apply text-washo-dark font-medium text-base mb-2;
+}
+
+.card-price {
+  @apply text-3xl font-bold text-washo-blue mb-4;
+}
+
+.card-original-price {
+  @apply text-washo-dark line-through text-lg mb-2;
+}
+
+.card-savings-badge {
+  @apply bg-offer text-dark px-3 py-1 rounded font-medium inline-block mb-4;
+}
+
+.card-note {
+  @apply text-washo-dark text-sm italic mt-2;
+}
+
+/* Table styles */
+.table-responsive {
+  @apply overflow-x-auto;
+}
+
+.service-table {
+  @apply w-full border-collapse border-washo-light/50 rounded-xl overflow-hidden shadow-sm;
+}
+
+.service-table th {
+  @apply bg-washo-blue text-white px-6 py-4 text-left font-heading font-semibold uppercase tracking-wider;
+}
+
+.service-table td {
+  @apply px-6 py-4 border-t border-washo-light/50;
+}
+
+.service-table tr:nth-child(even) td {
+  @apply bg-washo-lightest;
+}
+
+.service-check {
+  @apply flex items-center gap-2;
+}
+
+.service-check-icon {
+  @apply flex items-center justify-center w-5 h-5 bg-washo-blue text-white rounded-full text-xs font-bold;
+}
+
+.service-check-text {
+  @apply text-washo-dark font-medium;
+}
+
+.form-input {
+  @apply w-full border border-washo-light/50 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-washo-blue focus:border-washo-blue transition-all duration-200;
+}
+
+.form-label {
+  @apply text-washo-dark font-medium mb-2 block;
+}
+
+.modal-backdrop {
+  @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-white rounded-xl p-8 w-full max-w-md relative;
+}
+
+.close-btn {
+  @apply absolute top-4 right-4 text-washo-dark hover:text-washo-blue transition-colors duration-200;
+}
+
+/* Animation utilities */
+.fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.slide-up {
+  animation: slide-up 0.6s ease-out forwards;
+}
+
+.delay-100 {
+  animation-delay: 0.1s;
+}
+
+.delay-200 {
+  animation-delay: 0.2s;
+}
+
+.delay-300 {
+  animation-delay: 0.3s;
+}
+
+/* Keyframes for animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.6s ease-out forwards;
+}
+
+.animation-delay-100 {
+  animation-delay: 0.1s;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-300 {
+  animation-delay: 0.3s;
+}
+
+/* Hover utilities */
+.hover-lift {
+  @apply transition-transform duration-300 hover:-translate-y-1;
+}
+
+.hover-shadow {
+  @apply transition-shadow duration-300 hover:shadow-md;
+}
+
+/* Mobile-specific styles */
+.mobile-sticky-cta {
+  @apply bottom-0 left-0 right-0 bg-offer px-4 py-3 text-center font-heading font-semibold text-dark shadow-lg z-50;
+}
+
+/* Prevent horizontal overflow */
+.overflow-x-hidden {
+  @apply overflow-x-hidden;
+}
