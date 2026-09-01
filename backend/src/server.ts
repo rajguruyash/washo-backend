@@ -170,7 +170,7 @@ app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Depo-Budget Minimalist SaaS Dashboard Interface
+// Depo-Budget Full Width Dashboard Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
@@ -219,7 +219,7 @@ app.get('/admin', async (req, res) => {
           body { background-color: var(--bg-main); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; }
 
           /* App Layout */
-          .dashboard-layout { display: flex; min-height: 100vh; }
+          .dashboard-layout { display: flex; min-height: 100vh; width: 100%; }
           
           /* Left Sidebar */
           .sidebar {
@@ -244,11 +244,17 @@ app.get('/admin', async (req, res) => {
           .nav-item:hover, .nav-item.active { background: var(--bg-subtle); color: var(--text-primary); }
           .nav-item.active { border: 1px solid var(--border); }
 
-          /* Main Section */
-          .main-wrapper { flex: 1; margin-left: 250px; padding: 32px 40px; max-width: 1300px; }
+          /* Main Section (Full Width Layout) */
+          .main-wrapper {
+            flex: 1;
+            margin-left: 250px;
+            padding: 32px 40px;
+            width: calc(100% - 250px);
+            box-sizing: border-box;
+          }
 
           /* Header Bar */
-          .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+          .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; width: 100%; }
           .page-title { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
           .page-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
           .top-actions { display: flex; gap: 12px; }
@@ -258,22 +264,27 @@ app.get('/admin', async (req, res) => {
           .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
           .btn-secondary:hover { border-color: var(--border-hover); background: var(--bg-subtle); }
 
-          /* Metrics Cards */
-          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+          /* Metrics Cards Grid */
+          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; width: 100%; }
           .stat-card { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 20px; transition: border-color 0.2s; }
           .stat-card:hover { border-color: var(--border-hover); }
           .stat-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
           .stat-value { font-size: 28px; font-weight: 800; margin-top: 8px; letter-spacing: -0.5px; }
 
           /* Filter & Search Bar */
-          .filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--bg-card); border: 1px solid var(--border); padding: 8px 12px; border-radius: 14px; }
-          .search-input { background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 14px; width: 320px; padding: 6px 8px; }
+          .filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--bg-card); border: 1px solid var(--border); padding: 8px 12px; border-radius: 14px; width: 100%; }
+          .search-input { background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 14px; width: 380px; padding: 6px 8px; }
           .tabs-group { display: flex; gap: 4px; background: var(--bg-main); padding: 4px; border-radius: 10px; border: 1px solid var(--border); }
           .tab-btn { background: transparent; border: none; color: var(--text-secondary); padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
           .tab-btn.active, .tab-btn:hover { background: var(--bg-card); color: var(--text-primary); }
 
-          /* Lead Grid View (Desktop Clean View) */
-          .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }
+          /* Lead Grid View (Full Width Multi-Column) */
+          .leads-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 18px;
+            width: 100%;
+          }
           .lead-card {
             background-color: var(--bg-card);
             border: 1px solid var(--border);
@@ -305,7 +316,7 @@ app.get('/admin', async (req, res) => {
           .detail-item { color: var(--text-secondary); }
           .detail-item strong { color: var(--text-primary); font-weight: 600; display: block; margin-top: 2px; }
 
-          .card-actions { display: flex; align-items: center; justify-content: space-between; pt: 12px; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+          .card-actions { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
           
           .select-status {
             background: var(--bg-subtle);
@@ -335,7 +346,7 @@ app.get('/admin', async (req, res) => {
           /* Responsive Tweaks */
           @media (max-width: 1024px) {
             .sidebar { display: none; }
-            .main-wrapper { margin-left: 0; padding: 20px; }
+            .main-wrapper { margin-left: 0; width: 100%; padding: 20px; }
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
           }
           @media (max-width: 640px) {
