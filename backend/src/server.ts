@@ -1,12 +1,10 @@
-import dns from 'dns';
-dns.setDefaultResultOrder('ipv4first');
 import express from 'express';
 import cors from 'cors';
 import { Pool } from 'pg';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -92,45 +90,8 @@ const upload = multer({
   }
 });
 
-// Nodemailer Settings & Sanitization
-const EMAIL_USER = process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.washo@gmail.com';
-const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn';
-const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
-
-
-// Explicit Nodemailer Transporter using Port 465 (SSL/TLS + IPv4)
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // Direct SSL/TLS (Bypasses Render's port 587 STARTTLS block)
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
-  lookup: (hostname: string, options: any, callback: any) => {
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err || !addresses || addresses.length === 0) {
-        return callback(err || new Error('Could not resolve IPv4 address for SMTP host'));
-      }
-      callback(null, addresses[0], 4);
-    });
-  },
-  tls: {
-    rejectUnauthorized: false,
-    servername: 'smtp.gmail.com',
-  },
-} as any);
-
-
-
-// Verify SMTP Connection on Startup
-transporter.verify((error) => {
-  if (error) {
-    console.error('SMTP Connection Error:', error);
-  } else {
-    console.log('SMTP Server is ready to send emails.');
-  }
-});
+// Resend HTTP API Client
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Leads Endpoint
 app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
@@ -167,45 +128,41 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
 
     const result = await pool.query(query, values);
 
-    // 2. Send Automated Confirmation Email
-    const mailOptions = {
-      from: `"WASHO" <${EMAIL_USER}>`,
-      to: email,
-      subject: `Booking Confirmed: ${preferredService} - WASHO`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
-          <h2 style="color: #2563eb; margin-top: 0;">Booking Confirmation</h2>
-          <p>Hi <strong>${name}</strong>,</p>
-          <p>Thank you for choosing WASHO! We have received your request and successfully registered your wash preference.</p>
-          
-          <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
-            <h3 style="margin-top: 0; color: #1e293b; font-size: 16px;">Booking Summary:</h3>
-            <ul style="list-style: none; padding: 0; margin: 0;">
-              <li style="padding: 4px 0;"><strong>Selected Service:</strong> ${preferredService}</li>
-              <li style="padding: 4px 0;"><strong>Vehicle:</strong> ${vehicleType} (${vehicleModel})</li>
-              <li style="padding: 4px 0;"><strong>Registration No:</strong> ${vehicleRegistrationNumber}</li>
-              <li style="padding: 4px 0;"><strong>Location:</strong> ${location}, Flat ${flatNumber}</li>
-            </ul>
+    // 2. Send Automated Confirmation Email via Resend REST API (Port 443)
+    try {
+      const emailData = await resend.emails.send({
+        from: 'WASHO <onboarding@resend.dev>',
+        to: email,
+        subject: `Booking Confirmed: ${preferredService} - WASHO`,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
+            <h2 style="color: #2563eb; margin-top: 0;">Booking Confirmation</h2>
+            <p>Hi <strong>${name}</strong>,</p>
+            <p>Thank you for choosing WASHO! We have received your request and successfully registered your wash preference.</p>
+            
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #1e293b; font-size: 16px;">Booking Summary:</h3>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                <li style="padding: 4px 0;"><strong>Selected Service:</strong> ${preferredService}</li>
+                <li style="padding: 4px 0;"><strong>Vehicle:</strong> ${vehicleType} (${vehicleModel})</li>
+                <li style="padding: 4px 0;"><strong>Registration No:</strong> ${vehicleRegistrationNumber}</li>
+                <li style="padding: 4px 0;"><strong>Location:</strong> ${location}, Flat ${flatNumber}</li>
+              </ul>
+            </div>
+
+            <p>Our team will reach out to you if any further coordination is required.</p>
+            
+            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
+            <p style="font-size: 12px; color: #64748b; text-align: center;">
+              This is an automated confirmation email. Please do not reply to this email.
+            </p>
           </div>
-
-          <p>Our team will reach out to you if any further coordination is required.</p>
-          
-          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
-          <p style="font-size: 12px; color: #64748b; text-align: center;">
-            This is an automated confirmation email. Please do not reply to this email.
-          </p>
-        </div>
-      `,
-    };
-
-    // Non-blocking email send
-    transporter.sendMail(mailOptions, (mailErr, info) => {
-      if (mailErr) {
-        console.error('Failed to send confirmation email:', mailErr);
-      } else {
-        console.log('Confirmation email sent successfully:', info.response);
-      }
-    });
+        `,
+      });
+      console.log('Confirmation email sent successfully via Resend:', emailData);
+    } catch (mailErr) {
+      console.error('Failed to send confirmation email via Resend:', mailErr);
+    }
 
     res.status(200).json({
       success: true,
