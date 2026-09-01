@@ -23,17 +23,27 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir));
 
-// Serve built React frontend from root dist folder
-const distPath = path.join(__dirname, '../../dist');
-app.use(express.static(distPath));
+// Serve built React frontend from root dist folder safely
+const distPath = path.join(process.cwd(), 'dist');
 
-// Fallback to index.html for React SPA routes (excluding API requests)
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) {
-    return next();
-  }
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+    next();
+  });
+} else {
+  app.get('/', (req, res) => {
+    res.send('WASHO API is operational.');
+  });
+}
 
 // PostgreSQL Connection Config
 const pool = new Pool(
