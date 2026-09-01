@@ -110,7 +110,7 @@ const upload = multer({
   }
 });
 
-// Resend HTTP API Client
+// Resend Client
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Auth Middleware Helper
@@ -170,13 +170,13 @@ app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   }
 });
 
-// iOS Glassmorphism Admin Interface
+// Depo-Budget Minimalist SaaS Dashboard Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
 
   if (adminKey !== SECRET_KEY) {
-    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:-apple-system, sans-serif; color:#64748b;">401 Unauthorized</h1>');
+    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:-apple-system, sans-serif; color:#64748b;">401 Unauthorized Access</h1>');
   }
 
   try {
@@ -184,6 +184,7 @@ app.get('/admin', async (req, res) => {
     const rows = result.rows;
 
     const pendingCount = rows.filter(r => (r.status || 'Pending') === 'Pending').length;
+    const scheduledCount = rows.filter(r => r.status === 'Scheduled').length;
     const completedCount = rows.filter(r => r.status === 'Completed').length;
 
     let html = `
@@ -191,422 +192,307 @@ app.get('/admin', async (req, res) => {
       <html lang="en">
       <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>WASHO Studio</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WASHO Studio | Dashboard</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         <style>
-          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
-            background-color: #030712;
-            color: #f3f4f6;
-            margin: 0;
-            padding: 0 16px 100px 16px;
-            min-height: 100vh;
-            overflow-x: hidden;
+          :root {
+            --bg-main: #090d16;
+            --bg-card: #111726;
+            --bg-subtle: #182032;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.18);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-blue-soft: rgba(59, 130, 246, 0.12);
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --radius-card: 16px;
+            --radius-btn: 10px;
           }
 
-          /* iOS Ambient Mesh Gradient Glows */
-          body::before {
-            content: '';
-            position: fixed;
-            top: -20vw;
-            left: -10vw;
-            width: 70vw;
-            height: 70vw;
-            background: radial-gradient(circle, rgba(37, 99, 235, 0.28) 0%, rgba(0, 0, 0, 0) 70%);
-            z-index: -1;
-            filter: blur(50px);
-            pointer-events: none;
-          }
-          body::after {
-            content: '';
-            position: fixed;
-            bottom: -20vw;
-            right: -10vw;
-            width: 80vw;
-            height: 80vw;
-            background: radial-gradient(circle, rgba(147, 51, 234, 0.22) 0%, rgba(0, 0, 0, 0) 70%);
-            z-index: -1;
-            filter: blur(60px);
-            pointer-events: none;
-          }
+          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
+          body { background-color: var(--bg-main); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; }
 
-          /* iOS Glass Base Token */
-          .glass {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px) saturate(190%);
-            -webkit-backdrop-filter: blur(20px) saturate(190%);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
-          }
-
-          /* Sticky Header */
-          .header-sticky {
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            margin: 0 -16px 20px -16px;
-            padding: 14px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(3, 7, 18, 0.65);
-            backdrop-filter: blur(24px) saturate(200%);
-            -webkit-backdrop-filter: blur(24px) saturate(200%);
-          }
-          .brand-title {
-            font-size: 20px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            background: linear-gradient(135deg, #ffffff 30%, #93c5fd 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin: 0;
-          }
-          .brand-badge {
-            font-size: 10px;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: 20px;
-            background: rgba(59, 130, 246, 0.2);
-            color: #60a5fa;
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-
-          /* Metrics Grid */
-          .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 18px;
-          }
-          .metric-card {
-            border-radius: 16px;
-            padding: 14px 10px;
-            text-align: center;
-          }
-          .metric-value {
-            font-size: 22px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-          }
-          .metric-label {
-            font-size: 11px;
-            color: #9ca3af;
-            font-weight: 500;
-            margin-top: 3px;
-          }
-
-          /* Search & Filter Bar */
-          .search-bar {
-            margin-bottom: 20px;
-          }
-          .glass-input {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            color: #ffffff;
-            padding: 12px 16px;
-            font-size: 14px;
-            outline: none;
-            transition: all 0.2s ease;
-            backdrop-filter: blur(10px);
-          }
-          .glass-input:focus {
-            border-color: rgba(59, 130, 246, 0.6);
-            box-shadow: 0 0 16px rgba(59, 130, 246, 0.25);
-            background: rgba(255, 255, 255, 0.09);
-          }
-
-          /* Cards Feed */
-          .card-feed {
+          /* App Layout */
+          .dashboard-layout { display: flex; min-height: 100vh; }
+          
+          /* Left Sidebar */
+          .sidebar {
+            width: 250px;
+            background-color: #0d121f;
+            border-right: 1px solid var(--border);
+            padding: 24px 20px;
             display: flex;
             flex-direction: column;
-            gap: 14px;
-          }
-          .lead-card {
-            border-radius: 20px;
-            padding: 18px;
-            transition: transform 0.2s ease;
-          }
-          .lead-card:active {
-            transform: scale(0.985);
-          }
-          .card-top {
-            display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 12px;
+            position: fixed;
+            top: 0; bottom: 0; left: 0;
+            z-index: 20;
           }
-          .cust-name {
-            font-size: 17px;
-            font-weight: 700;
-            color: #ffffff;
-            letter-spacing: -0.3px;
+          .brand-box { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+          .brand-logo { width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #fff; }
+          .brand-name { font-size: 18px; font-weight: 800; letter-spacing: -0.5px; }
+          .brand-badge { font-size: 9px; font-weight: 700; background: var(--accent-blue-soft); color: var(--accent-blue); padding: 2px 6px; border-radius: 6px; text-transform: uppercase; border: 1px solid rgba(59, 130, 246, 0.2); }
+
+          .nav-list { display: flex; flex-direction: column; gap: 6px; }
+          .nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: var(--text-secondary); font-size: 14px; font-weight: 600; text-decoration: none; transition: all 0.2s; cursor: pointer; }
+          .nav-item:hover, .nav-item.active { background: var(--bg-subtle); color: var(--text-primary); }
+          .nav-item.active { border: 1px solid var(--border); }
+
+          /* Main Section */
+          .main-wrapper { flex: 1; margin-left: 250px; padding: 32px 40px; max-width: 1300px; }
+
+          /* Header Bar */
+          .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+          .page-title { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+          .page-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+          .top-actions { display: flex; gap: 12px; }
+
+          .btn-primary { background: var(--accent-blue); color: #fff; border: none; padding: 10px 18px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+          .btn-primary:hover { background: #2563eb; transform: translateY(-1px); }
+          .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+          .btn-secondary:hover { border-color: var(--border-hover); background: var(--bg-subtle); }
+
+          /* Metrics Cards */
+          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+          .stat-card { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 20px; transition: border-color 0.2s; }
+          .stat-card:hover { border-color: var(--border-hover); }
+          .stat-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+          .stat-value { font-size: 28px; font-weight: 800; margin-top: 8px; letter-spacing: -0.5px; }
+
+          /* Filter & Search Bar */
+          .filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--bg-card); border: 1px solid var(--border); padding: 8px 12px; border-radius: 14px; }
+          .search-input { background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 14px; width: 320px; padding: 6px 8px; }
+          .tabs-group { display: flex; gap: 4px; background: var(--bg-main); padding: 4px; border-radius: 10px; border: 1px solid var(--border); }
+          .tab-btn { background: transparent; border: none; color: var(--text-secondary); padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+          .tab-btn.active, .tab-btn:hover { background: var(--bg-card); color: var(--text-primary); }
+
+          /* Lead Grid View (Desktop Clean View) */
+          .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 18px; }
+          .lead-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-card);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 0.2s ease;
           }
-          .cust-loc {
-            font-size: 12px;
-            color: #9ca3af;
-            margin-top: 2px;
-          }
-          .service-pill {
+          .lead-card:hover { border-color: var(--border-hover); transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,0,0,0.3); }
+
+          .lead-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+          .lead-name { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; color: #fff; }
+          .lead-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+          .service-tag {
             font-size: 11px;
             font-weight: 700;
             padding: 4px 10px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(37, 99, 235, 0.1));
-            color: #93c5fd;
-            border: 1px solid rgba(147, 197, 253, 0.2);
-          }
-
-          .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            font-size: 13px;
-            background: rgba(0, 0, 0, 0.2);
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            margin-bottom: 14px;
-          }
-          .info-cell {
-            color: #9ca3af;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            border-radius: 20px;
+            background: var(--accent-blue-soft);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.25);
             white-space: nowrap;
           }
-          .info-cell strong {
-            color: #e5e7eb;
-            font-weight: 600;
-          }
 
-          /* iOS Glass Status Dropdown */
-          .status-picker {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            color: #f3f4f6;
-            padding: 6px 12px;
-            border-radius: 10px;
+          .details-list { background: var(--bg-main); border: 1px solid var(--border); border-radius: 12px; padding: 12px; font-size: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+          .detail-item { color: var(--text-secondary); }
+          .detail-item strong { color: var(--text-primary); font-weight: 600; display: block; margin-top: 2px; }
+
+          .card-actions { display: flex; align-items: center; justify-content: space-between; pt: 12px; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+          
+          .select-status {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 8px;
             font-size: 12px;
             font-weight: 600;
             outline: none;
-            backdrop-filter: blur(10px);
+            cursor: pointer;
           }
 
-          /* Action Dock Buttons inside Card */
-          .action-row {
-            display: flex;
-            gap: 8px;
-            margin-top: 14px;
-          }
-          .btn-action {
-            flex: 1;
-            display: inline-flex;
-            justify-content: center;
-            align-items: center;
-            padding: 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            text-decoration: none;
-            border: none;
-            cursor: pointer;
-            transition: all 0.15s ease;
-          }
-          .btn-call { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
-          .btn-wa { background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.3); }
-          .btn-edit { background: rgba(255, 255, 255, 0.08); color: #d1d5db; border: 1px solid rgba(255, 255, 255, 0.12); }
-          .btn-del { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
-
-          /* Floating Glass Navigation Bar (iOS Dock) */
-          .bottom-dock {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: calc(100% - 32px);
-            max-width: 440px;
-            padding: 8px;
-            border-radius: 24px;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            z-index: 100;
-          }
-          .dock-btn {
-            background: transparent;
-            border: none;
-            color: #9ca3af;
-            font-size: 12px;
-            font-weight: 600;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 3px;
-            cursor: pointer;
-            padding: 6px 16px;
-            border-radius: 16px;
-            transition: all 0.2s ease;
-          }
-          .dock-btn.active, .dock-btn:hover {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.12);
-          }
+          .action-buttons { display: flex; gap: 6px; }
+          .icon-btn { width: 32px; height: 32px; border-radius: 8px; background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-primary); display: flex; align-items: center; justify-content: center; text-decoration: none; cursor: pointer; transition: all 0.2s; font-size: 13px; }
+          .icon-btn:hover { border-color: var(--border-hover); background: rgba(255, 255, 255, 0.1); }
+          .icon-btn.danger:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
 
           /* Modal Styling */
-          .modal-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            padding: 16px;
-            align-items: center;
-            justify-content: center;
-            z-index: 200;
+          .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); padding: 20px; align-items: center; justify-content: center; z-index: 100; }
+          .modal-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; width: 100%; max-width: 480px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+          .form-group { margin-bottom: 14px; }
+          .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+          .form-group input, .form-group select { width: 100%; background: var(--bg-main); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: #fff; font-size: 13px; outline: none; }
+          .form-group input:focus { border-color: var(--accent-blue); }
+
+          /* Responsive Tweaks */
+          @media (max-width: 1024px) {
+            .sidebar { display: none; }
+            .main-wrapper { margin-left: 0; padding: 20px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
           }
-          .modal-glass {
-            border-radius: 24px;
-            padding: 24px;
-            width: 100%;
-            max-width: 480px;
-            max-height: 85vh;
-            overflow-y: auto;
-            background: rgba(17, 24, 39, 0.85);
-          }
-          .form-group { margin-bottom: 12px; }
-          .form-group label { display: block; font-size: 12px; color: #9ca3af; font-weight: 600; margin-bottom: 4px; }
-          .form-group input, .form-group select {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: #ffffff;
-            padding: 10px 14px;
-            border-radius: 12px;
-            font-size: 14px;
-            outline: none;
+          @media (max-width: 640px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .filter-bar { flex-direction: column; align-items: stretch; }
+            .search-input { width: 100%; }
           }
         </style>
       </head>
       <body>
-        <!-- Header -->
-        <div class="header-sticky">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <h1 class="brand-title">WASHO</h1>
-            <span class="brand-badge">STUDIO</span>
-          </div>
-          <div style="font-size:12px; color:#9ca3af; font-weight:500;">Live Sync 🟢</div>
-        </div>
 
-        <!-- Metrics Grid -->
-        <div class="metrics-grid">
-          <div class="metric-card glass">
-            <div class="metric-value" style="color: #ffffff;">${rows.length}</div>
-            <div class="metric-label">Total Leads</div>
-          </div>
-          <div class="metric-card glass">
-            <div class="metric-value" style="color: #f59e0b;">${pendingCount}</div>
-            <div class="metric-label">Pending</div>
-          </div>
-          <div class="metric-card glass">
-            <div class="metric-value" style="color: #10b981;">${completedCount}</div>
-            <div class="metric-label">Completed</div>
-          </div>
-        </div>
+        <div class="dashboard-layout">
+          <!-- Left Navigation Sidebar -->
+          <aside class="sidebar">
+            <div>
+              <div class="brand-box">
+                <div class="brand-logo">W</div>
+                <div>
+                  <div class="brand-name">WASHO</div>
+                  <div class="brand-badge">Studio CRM</div>
+                </div>
+              </div>
 
-        <!-- Search Bar -->
-        <div class="search-bar">
-          <input type="text" id="searchInput" class="glass-input" placeholder="🔍 Search leads by name, phone, reg no..." onkeyup="filterLeads()">
-        </div>
+              <nav class="nav-list">
+                <a class="nav-item active">📊 Overview</a>
+                <a class="nav-item" onclick="openAddModal()">➕ Add Booking</a>
+                <a class="nav-item" onclick="exportCSV()">📥 Export Data</a>
+                <a class="nav-item" onclick="location.reload()">🔄 Sync Refresh</a>
+              </nav>
+            </div>
 
-        <!-- Lead Cards Feed -->
-        <div class="card-feed" id="cardList">
+            <div style="font-size:12px; color:var(--text-muted); padding: 12px; background:var(--bg-card); border-radius:10px; border:1px solid var(--border);">
+              🟢 System Live<br>
+              <span style="font-size:10px;">Connected to PostgreSQL</span>
+            </div>
+          </aside>
+
+          <!-- Main Content Area -->
+          <main class="main-wrapper">
+            
+            <!-- Top Header -->
+            <div class="top-bar">
+              <div>
+                <h1 class="page-title">Dashboard Overview</h1>
+                <p class="page-sub">Manage wash service leads, schedules, and customer inquiries.</p>
+              </div>
+              <div class="top-actions">
+                <button class="btn-secondary" onclick="exportCSV()">📥 Export CSV</button>
+                <button class="btn-primary" onclick="openAddModal()">+ New Booking</button>
+              </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">Total Bookings</div>
+                <div class="stat-value">${rows.length}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label" style="color:var(--accent-amber);">Pending</div>
+                <div class="stat-value" style="color:var(--accent-amber);">${pendingCount}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label" style="color:var(--accent-blue);">Scheduled</div>
+                <div class="stat-value" style="color:var(--accent-blue);">${scheduledCount}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label" style="color:var(--accent-emerald);">Completed</div>
+                <div class="stat-value" style="color:var(--accent-emerald);">${completedCount}</div>
+              </div>
+            </div>
+
+            <!-- Search and Filter Bar -->
+            <div class="filter-bar">
+              <input type="text" id="searchInput" class="search-input" placeholder="🔍  Search by name, phone, registration no..." onkeyup="filterLeads()">
+              <div class="tabs-group">
+                <button class="tab-btn active" onclick="setFilter('all', this)">All</button>
+                <button class="tab-btn" onclick="setFilter('pending', this)">Pending</button>
+                <button class="tab-btn" onclick="setFilter('scheduled', this)">Scheduled</button>
+                <button class="tab-btn" onclick="setFilter('completed', this)">Completed</button>
+              </div>
+            </div>
+
+            <!-- Cards Grid -->
+            <div class="leads-grid" id="leadGrid">
     `;
 
     rows.forEach((lead) => {
       const cleanMobile = lead.mobile.replace(/\D/g, '');
-      const waMsg = encodeURIComponent(`Hi ${lead.name}, thank you for choosing WASHO! Regarding your ${lead.preferred_service} booking for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
+      const waMsg = encodeURIComponent(`Hi ${lead.name}, regarding your ${lead.preferred_service} booking for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
       const status = lead.status || 'Pending';
 
       html += `
-        <div class="lead-card glass lead-item" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
-          <div class="card-top">
-            <div>
-              <div class="cust-name">${lead.name}</div>
-              <div class="cust-loc">📍 Flat ${lead.flat_number}, ${lead.location}</div>
+        <div class="lead-card lead-item" data-status="${status.toLowerCase()}" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
+          <div>
+            <div class="lead-header">
+              <div>
+                <div class="lead-name">${lead.name}</div>
+                <div class="lead-sub">📍 Flat ${lead.flat_number}, ${lead.location}</div>
+              </div>
+              <span class="service-tag">${lead.preferred_service}</span>
             </div>
-            <span class="service-pill">${lead.preferred_service}</span>
+
+            <div class="details-list">
+              <div class="detail-item">Vehicle: <strong>${lead.vehicle_type} (${lead.vehicle_model})</strong></div>
+              <div class="detail-item">Reg No: <strong>${lead.vehicle_registration_number}</strong></div>
+              <div class="detail-item">Phone: <strong>${lead.mobile}</strong></div>
+              <div class="detail-item">Email: <strong>${lead.email}</strong></div>
+            </div>
           </div>
 
-          <div class="info-grid">
-            <div class="info-cell">🚗 <strong>${lead.vehicle_type}</strong> (${lead.vehicle_model})</div>
-            <div class="info-cell">🔢 <strong>${lead.vehicle_registration_number}</strong></div>
-            <div class="info-cell">📱 <strong>${lead.mobile}</strong></div>
-            <div class="info-cell">✉️ <strong>${lead.email}</strong></div>
-          </div>
+          <div>
+            ${lead.payment_image_url ? `<div style="margin-bottom:12px;"><a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:var(--accent-blue); font-weight:600; text-decoration:none;">📄 View Receipt Attachment</a></div>` : ''}
 
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:12px; color:#9ca3af; font-weight:600;">Status:</span>
-              <select class="status-picker" onchange="updateStatus(${lead.id}, this.value)">
+            <div class="card-actions">
+              <select class="select-status" onchange="updateStatus(${lead.id}, this.value)">
                 <option value="Pending" ${status === 'Pending' ? 'selected' : ''}>Pending</option>
                 <option value="Scheduled" ${status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
                 <option value="Completed" ${status === 'Completed' ? 'selected' : ''}>Completed</option>
                 <option value="Cancelled" ${status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
               </select>
-            </div>
-            ${lead.payment_image_url ? `<a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:#60a5fa; font-weight:600; text-decoration:none;">🖼️ Receipt</a>` : ''}
-          </div>
 
-          <div class="action-row">
-            <a href="tel:${lead.mobile}" class="btn-action btn-call">📞 Call</a>
-            <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="btn-action btn-wa">💬 WhatsApp</a>
-            <button class="btn-action btn-edit" onclick='openEditModal(${JSON.stringify(lead)})'>✏️ Edit</button>
-            <button class="btn-action btn-del" onclick="deleteLead(${lead.id})">🗑️</button>
+              <div class="action-buttons">
+                <a href="tel:${lead.mobile}" class="icon-btn" title="Call Customer">📞</a>
+                <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="icon-btn" title="WhatsApp">💬</a>
+                <button class="icon-btn" onclick='openEditModal(${JSON.stringify(lead)})' title="Edit Lead">✏️</button>
+                <button class="icon-btn danger" onclick="deleteLead(${lead.id})" title="Delete Lead">🗑️</button>
+              </div>
+            </div>
           </div>
         </div>
       `;
     });
 
     html += `
-        </div>
-
-        <!-- Floating Glass Bottom Navigation Dock -->
-        <div class="bottom-dock glass">
-          <button class="dock-btn active" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
-            <span style="font-size:16px;">🏠</span> Overivew
-          </button>
-          <button class="dock-btn" onclick="openAddModal()">
-            <span style="font-size:16px;">➕</span> Add Lead
-          </button>
-          <button class="dock-btn" onclick="exportCSV()">
-            <span style="font-size:16px;">📥</span> Export
-          </button>
-          <button class="dock-btn" onclick="location.reload()">
-            <span style="font-size:16px;">🔄</span> Sync
-          </button>
+            </div>
+          </main>
         </div>
 
         <!-- Add/Edit Modal -->
         <div class="modal-overlay" id="leadModal">
-          <div class="modal-glass glass">
-            <h3 id="modalTitle" style="margin-top:0; color:#fff; font-size:18px;">Booking Record</h3>
+          <div class="modal-box">
+            <h3 id="modalTitle" style="margin-bottom: 20px; font-weight: 800; font-size: 18px;">Booking Record</h3>
             <input type="hidden" id="editId">
             <div class="form-group"><label>Customer Name</label><input type="text" id="mName"></div>
             <div class="form-group"><label>Email Address</label><input type="email" id="mEmail"></div>
             <div class="form-group"><label>Mobile Phone</label><input type="text" id="mMobile"></div>
-            <div class="form-group"><label>Vehicle Type</label><input type="text" id="mVehicleType"></div>
-            <div class="form-group"><label>Vehicle Model</label><input type="text" id="mVehicleModel"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div class="form-group"><label>Vehicle Type</label><input type="text" id="mVehicleType"></div>
+              <div class="form-group"><label>Vehicle Model</label><input type="text" id="mVehicleModel"></div>
+            </div>
             <div class="form-group"><label>Registration Number</label><input type="text" id="mRegNo"></div>
-            <div class="form-group"><label>Location / Society</label><input type="text" id="mLocation"></div>
-            <div class="form-group"><label>Flat Number</label><input type="text" id="mFlat"></div>
-            <div class="form-group"><label>Service</label><input type="text" id="mService"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div class="form-group"><label>Location / Society</label><input type="text" id="mLocation"></div>
+              <div class="form-group"><label>Flat Number</label><input type="text" id="mFlat"></div>
+            </div>
+            <div class="form-group"><label>Service Preferred</label><input type="text" id="mService"></div>
             <div class="form-group"><label>Status</label>
               <select id="mStatus">
                 <option value="Pending">Pending</option>
@@ -616,21 +502,33 @@ app.get('/admin', async (req, res) => {
               </select>
             </div>
             
-            <div style="display:flex; gap:10px; margin-top:20px;">
-              <button class="btn-action" style="background:#2563eb; color:#fff;" onclick="saveLead()">Save Record</button>
-              <button class="btn-action btn-edit" onclick="closeModal()">Cancel</button>
+            <div style="display:flex; gap:10px; margin-top:24px;">
+              <button class="btn-primary" style="flex:1; justify-content:center;" onclick="saveLead()">Save Record</button>
+              <button class="btn-secondary" onclick="closeModal()">Cancel</button>
             </div>
           </div>
         </div>
 
         <script>
           const key = '${adminKey}';
+          let currentTab = 'all';
+
+          function setFilter(tab, element) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+            filterLeads();
+          }
 
           function filterLeads() {
             const query = document.getElementById('searchInput').value.toLowerCase();
             document.querySelectorAll('.lead-item').forEach(item => {
               const text = item.getAttribute('data-search');
-              item.style.display = text.includes(query) ? 'block' : 'none';
+              const status = item.getAttribute('data-status');
+              const matchesSearch = text.includes(query);
+              const matchesTab = currentTab === 'all' || status === currentTab;
+
+              item.style.display = (matchesSearch && matchesTab) ? 'flex' : 'none';
             });
           }
 
