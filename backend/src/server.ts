@@ -1,6 +1,5 @@
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
-
 import express from 'express';
 import cors from 'cors';
 import { Pool } from 'pg';
@@ -98,15 +97,18 @@ const EMAIL_USER = process.env.EMAIL_USER || process.env.GMAIL_USER || 'contact.
 const rawPassword = process.env.EMAIL_PASS || process.env.GMAIL_APP_PASS || 'jfaz pqsk urbb lrrn';
 const EMAIL_PASS = rawPassword.replace(/\s+/g, ''); // Strips spaces from App Passwords
 
-// Explicit Nodemailer Transporter Configuration (IPv4 Forced)
+
+// Explicit Nodemailer Transporter with Forced IPv4 Lookup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false, // TLS via STARTTLS
-  family: 4,     // Forces IPv4 connection to prevent ENETUNREACH errors on Render
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
+  },
+  lookup: (hostname: string, options: any, callback: any) => {
+    dns.lookup(hostname, { family: 4 }, callback); // Guarantees an IPv4 IP is returned
   },
 } as any);
 
