@@ -57,7 +57,7 @@ const pool = new Pool(
       }
 );
 
-// Auto-Create PostgreSQL Table & Add Missing Columns
+// Auto-Create Database Table & Verify Schema
 const initDatabase = async () => {
   try {
     await pool.query(`
@@ -79,7 +79,6 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    // Ensure status column exists for existing tables
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Pending';`);
     console.log('PostgreSQL "leads" table verified/updated successfully.');
   } catch (err) {
@@ -114,7 +113,7 @@ const upload = multer({
 // Resend HTTP API Client
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Auth Middleware Helper for Admin APIs
+// Auth Middleware Helper
 const verifyAdminKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const key = req.query.key || req.headers['x-admin-key'];
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
@@ -124,7 +123,7 @@ const verifyAdminKey = (req: express.Request, res: express.Response, next: expre
   next();
 };
 
-// Admin API - Delete Lead
+// Admin API Routes
 app.delete('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
     await pool.query('DELETE FROM leads WHERE id = $1', [req.params.id]);
@@ -134,7 +133,6 @@ app.delete('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Admin API - Update Lead Status
 app.patch('/api/admin/leads/:id/status', verifyAdminKey, async (req, res) => {
   try {
     const { status } = req.body;
@@ -145,7 +143,6 @@ app.patch('/api/admin/leads/:id/status', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Admin API - Update Full Lead
 app.put('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
     const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status } = req.body;
@@ -159,7 +156,6 @@ app.put('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Admin API - Manual Add
 app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   try {
     const { name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, location, flat_number, preferred_service, status } = req.body;
@@ -174,13 +170,13 @@ app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Dark Professional Admin Mobile Interface
+// iOS Glassmorphism Admin Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
 
   if (adminKey !== SECRET_KEY) {
-    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:sans-serif; color:#64748b;">401 Unauthorized</h1>');
+    return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:-apple-system, sans-serif; color:#64748b;">401 Unauthorized</h1>');
   }
 
   try {
@@ -195,142 +191,384 @@ app.get('/admin', async (req, res) => {
       <html lang="en">
       <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>WASHO Command Center</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>WASHO Studio</title>
         <style>
-          :root {
-            --bg: #090d16;
-            --card-bg: #131b2e;
-            --border: #222f47;
-            --text-main: #f8fafc;
-            --text-sub: #94a3b8;
-            --accent: #3b82f6;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
+          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+            margin: 0;
+            padding: 0 16px 100px 16px;
+            min-height: 100vh;
+            overflow-x: hidden;
           }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text-main); padding: 16px; margin: 0; box-sizing: border-box; }
-          .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-          .brand { display: flex; align-items: center; gap: 8px; }
-          .brand h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; margin: 0; color: #ffffff; }
-          .brand-badge { background: linear-gradient(135deg, #2563eb, #1d4ed8); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
-          
-          /* Analytics Row */
-          .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-          .stat-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
-          .stat-num { font-size: 20px; font-weight: 700; color: var(--text-main); }
-          .stat-label { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
 
-          /* Controls Bar */
-          .controls { display: flex; gap: 8px; margin-bottom: 16px; }
-          .search-input { flex: 1; background: var(--card-bg); border: 1px solid var(--border); color: var(--text-main); padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; }
-          .search-input:focus { border-color: var(--accent); }
-          .btn { background: var(--accent); color: white; border: none; padding: 10px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-          .btn-secondary { background: #1e293b; color: var(--text-main); border: 1px solid var(--border); }
-          
-          /* Cards */
-          .card-list { display: flex; flex-direction: column; gap: 12px; }
-          .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 16px; position: relative; }
-          .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-          .cust-name { font-size: 16px; font-weight: 700; color: #ffffff; }
-          .service-tag { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-          
-          .grid-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-bottom: 12px; }
-          .info-item { color: var(--text-sub); }
-          .info-item strong { color: var(--text-main); font-weight: 500; }
+          /* iOS Ambient Mesh Gradient Glows */
+          body::before {
+            content: '';
+            position: fixed;
+            top: -20vw;
+            left: -10vw;
+            width: 70vw;
+            height: 70vw;
+            background: radial-gradient(circle, rgba(37, 99, 235, 0.28) 0%, rgba(0, 0, 0, 0) 70%);
+            z-index: -1;
+            filter: blur(50px);
+            pointer-events: none;
+          }
+          body::after {
+            content: '';
+            position: fixed;
+            bottom: -20vw;
+            right: -10vw;
+            width: 80vw;
+            height: 80vw;
+            background: radial-gradient(circle, rgba(147, 51, 234, 0.22) 0%, rgba(0, 0, 0, 0) 70%);
+            z-index: -1;
+            filter: blur(60px);
+            pointer-events: none;
+          }
 
-          /* Status Dropdown inside Card */
-          .status-select { background: #0f172a; border: 1px solid var(--border); color: var(--text-main); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; outline: none; }
+          /* iOS Glass Base Token */
+          .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px) saturate(190%);
+            -webkit-backdrop-filter: blur(20px) saturate(190%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+          }
 
-          /* Action Buttons */
-          .action-row { display: flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
-          .act-btn { flex: 1; text-align: center; padding: 8px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: 600; border: none; cursor: pointer; }
-          .act-call { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-          .act-wa { background: rgba(37, 211, 102, 0.15); color: #4ade80; border: 1px solid rgba(37, 211, 102, 0.3); }
-          .act-edit { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid var(--border); }
-          .act-del { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+          /* Sticky Header */
+          .header-sticky {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            margin: 0 -16px 20px -16px;
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(3, 7, 18, 0.65);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+          }
+          .brand-title {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #ffffff 30%, #93c5fd 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0;
+          }
+          .brand-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 20px;
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
 
-          /* Modal */
-          .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); padding: 16px; box-sizing: border-box; align-items: center; justify-content: center; z-index: 100; }
-          .modal-box { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
-          .modal-box h3 { margin-top: 0; color: #fff; }
+          /* Metrics Grid */
+          .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 18px;
+          }
+          .metric-card {
+            border-radius: 16px;
+            padding: 14px 10px;
+            text-align: center;
+          }
+          .metric-value {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+          }
+          .metric-label {
+            font-size: 11px;
+            color: #9ca3af;
+            font-weight: 500;
+            margin-top: 3px;
+          }
+
+          /* Search & Filter Bar */
+          .search-bar {
+            margin-bottom: 20px;
+          }
+          .glass-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            color: #ffffff;
+            padding: 12px 16px;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+          }
+          .glass-input:focus {
+            border-color: rgba(59, 130, 246, 0.6);
+            box-shadow: 0 0 16px rgba(59, 130, 246, 0.25);
+            background: rgba(255, 255, 255, 0.09);
+          }
+
+          /* Cards Feed */
+          .card-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+          }
+          .lead-card {
+            border-radius: 20px;
+            padding: 18px;
+            transition: transform 0.2s ease;
+          }
+          .lead-card:active {
+            transform: scale(0.985);
+          }
+          .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+          }
+          .cust-name {
+            font-size: 17px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.3px;
+          }
+          .cust-loc {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 2px;
+          }
+          .service-pill {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(37, 99, 235, 0.1));
+            color: #93c5fd;
+            border: 1px solid rgba(147, 197, 253, 0.2);
+          }
+
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 14px;
+          }
+          .info-cell {
+            color: #9ca3af;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .info-cell strong {
+            color: #e5e7eb;
+            font-weight: 600;
+          }
+
+          /* iOS Glass Status Dropdown */
+          .status-picker {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #f3f4f6;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            outline: none;
+            backdrop-filter: blur(10px);
+          }
+
+          /* Action Dock Buttons inside Card */
+          .action-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 14px;
+          }
+          .btn-action {
+            flex: 1;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .btn-call { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+          .btn-wa { background: rgba(34, 197, 94, 0.18); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.3); }
+          .btn-edit { background: rgba(255, 255, 255, 0.08); color: #d1d5db; border: 1px solid rgba(255, 255, 255, 0.12); }
+          .btn-del { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+          /* Floating Glass Navigation Bar (iOS Dock) */
+          .bottom-dock {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 32px);
+            max-width: 440px;
+            padding: 8px;
+            border-radius: 24px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 100;
+          }
+          .dock-btn {
+            background: transparent;
+            border: none;
+            color: #9ca3af;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+            padding: 6px 16px;
+            border-radius: 16px;
+            transition: all 0.2s ease;
+          }
+          .dock-btn.active, .dock-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.12);
+          }
+
+          /* Modal Styling */
+          .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+          }
+          .modal-glass {
+            border-radius: 24px;
+            padding: 24px;
+            width: 100%;
+            max-width: 480px;
+            max-height: 85vh;
+            overflow-y: auto;
+            background: rgba(17, 24, 39, 0.85);
+          }
           .form-group { margin-bottom: 12px; }
-          .form-group label { display: block; font-size: 12px; color: var(--text-sub); margin-bottom: 4px; }
-          .form-group input, .form-group select { width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+          .form-group label { display: block; font-size: 12px; color: #9ca3af; font-weight: 600; margin-bottom: 4px; }
+          .form-group input, .form-group select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            outline: none;
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <div class="brand">
-            <h1>WASHO</h1>
-            <span class="brand-badge">PRO</span>
+        <!-- Header -->
+        <div class="header-sticky">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <h1 class="brand-title">WASHO</h1>
+            <span class="brand-badge">STUDIO</span>
           </div>
-          <button class="btn" onclick="openAddModal()">+ New Booking</button>
+          <div style="font-size:12px; color:#9ca3af; font-weight:500;">Live Sync 🟢</div>
         </div>
 
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-num">${rows.length}</div>
-            <div class="stat-label">Total Leads</div>
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card glass">
+            <div class="metric-value" style="color: #ffffff;">${rows.length}</div>
+            <div class="metric-label">Total Leads</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-num" style="color: var(--warning);">${pendingCount}</div>
-            <div class="stat-label">Pending</div>
+          <div class="metric-card glass">
+            <div class="metric-value" style="color: #f59e0b;">${pendingCount}</div>
+            <div class="metric-label">Pending</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-num" style="color: var(--success);">${completedCount}</div>
-            <div class="stat-label">Completed</div>
+          <div class="metric-card glass">
+            <div class="metric-value" style="color: #10b981;">${completedCount}</div>
+            <div class="metric-label">Completed</div>
           </div>
         </div>
 
-        <div class="controls">
-          <input type="text" id="searchInput" class="search-input" placeholder="Search name, phone, reg no..." onkeyup="filterLeads()">
-          <button class="btn btn-secondary" onclick="exportCSV()">📥 CSV</button>
+        <!-- Search Bar -->
+        <div class="search-bar">
+          <input type="text" id="searchInput" class="glass-input" placeholder="🔍 Search leads by name, phone, reg no..." onkeyup="filterLeads()">
         </div>
 
-        <div class="card-list" id="cardList">
+        <!-- Lead Cards Feed -->
+        <div class="card-feed" id="cardList">
     `;
 
     rows.forEach((lead) => {
       const cleanMobile = lead.mobile.replace(/\D/g, '');
-      const waMsg = encodeURIComponent(`Hi ${lead.name}, thank you for choosing WASHO! Regarding your ${lead.preferred_service} request for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
+      const waMsg = encodeURIComponent(`Hi ${lead.name}, thank you for choosing WASHO! Regarding your ${lead.preferred_service} booking for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
       const status = lead.status || 'Pending';
 
       html += `
-        <div class="card lead-item" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
-          <div class="card-header">
+        <div class="lead-card glass lead-item" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
+          <div class="card-top">
             <div>
               <div class="cust-name">${lead.name}</div>
-              <div style="font-size:12px; color:var(--text-sub); margin-top:2px;">📍 Flat ${lead.flat_number}, ${lead.location}</div>
+              <div class="cust-loc">📍 Flat ${lead.flat_number}, ${lead.location}</div>
             </div>
-            <span class="service-tag">${lead.preferred_service}</span>
+            <span class="service-pill">${lead.preferred_service}</span>
           </div>
 
-          <div class="grid-info">
-            <div class="info-item">🚗 <strong>${lead.vehicle_type}</strong> (${lead.vehicle_model})</div>
-            <div class="info-item">🔢 <strong>${lead.vehicle_registration_number}</strong></div>
-            <div class="info-item">📱 <strong>${lead.mobile}</strong></div>
-            <div class="info-item">✉️ <strong>${lead.email}</strong></div>
+          <div class="info-grid">
+            <div class="info-cell">🚗 <strong>${lead.vehicle_type}</strong> (${lead.vehicle_model})</div>
+            <div class="info-cell">🔢 <strong>${lead.vehicle_registration_number}</strong></div>
+            <div class="info-cell">📱 <strong>${lead.mobile}</strong></div>
+            <div class="info-cell">✉️ <strong>${lead.email}</strong></div>
           </div>
 
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-            <div>
-              <label style="font-size:11px; color:var(--text-sub); margin-right:6px;">Status:</label>
-              <select class="status-select" onchange="updateStatus(${lead.id}, this.value)">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:12px; color:#9ca3af; font-weight:600;">Status:</span>
+              <select class="status-picker" onchange="updateStatus(${lead.id}, this.value)">
                 <option value="Pending" ${status === 'Pending' ? 'selected' : ''}>Pending</option>
                 <option value="Scheduled" ${status === 'Scheduled' ? 'selected' : ''}>Scheduled</option>
                 <option value="Completed" ${status === 'Completed' ? 'selected' : ''}>Completed</option>
                 <option value="Cancelled" ${status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
               </select>
             </div>
-            ${lead.payment_image_url ? `<a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:#60a5fa; font-weight:600; text-decoration:none;">🖼️ Payment Receipt</a>` : ''}
+            ${lead.payment_image_url ? `<a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:#60a5fa; font-weight:600; text-decoration:none;">🖼️ Receipt</a>` : ''}
           </div>
 
           <div class="action-row">
-            <a href="tel:${lead.mobile}" class="act-btn act-call">📞 Call</a>
-            <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="act-btn act-wa">💬 WhatsApp</a>
-            <button class="act-btn act-edit" onclick='openEditModal(${JSON.stringify(lead)})'>✏️ Edit</button>
-            <button class="act-btn act-del" onclick="deleteLead(${lead.id})">🗑️</button>
+            <a href="tel:${lead.mobile}" class="btn-action btn-call">📞 Call</a>
+            <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="btn-action btn-wa">💬 WhatsApp</a>
+            <button class="btn-action btn-edit" onclick='openEditModal(${JSON.stringify(lead)})'>✏️ Edit</button>
+            <button class="btn-action btn-del" onclick="deleteLead(${lead.id})">🗑️</button>
           </div>
         </div>
       `;
@@ -339,10 +577,26 @@ app.get('/admin', async (req, res) => {
     html += `
         </div>
 
+        <!-- Floating Glass Bottom Navigation Dock -->
+        <div class="bottom-dock glass">
+          <button class="dock-btn active" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+            <span style="font-size:16px;">🏠</span> Overivew
+          </button>
+          <button class="dock-btn" onclick="openAddModal()">
+            <span style="font-size:16px;">➕</span> Add Lead
+          </button>
+          <button class="dock-btn" onclick="exportCSV()">
+            <span style="font-size:16px;">📥</span> Export
+          </button>
+          <button class="dock-btn" onclick="location.reload()">
+            <span style="font-size:16px;">🔄</span> Sync
+          </button>
+        </div>
+
         <!-- Add/Edit Modal -->
-        <div class="modal" id="leadModal">
-          <div class="modal-box">
-            <h3 id="modalTitle">Booking Details</h3>
+        <div class="modal-overlay" id="leadModal">
+          <div class="modal-glass glass">
+            <h3 id="modalTitle" style="margin-top:0; color:#fff; font-size:18px;">Booking Record</h3>
             <input type="hidden" id="editId">
             <div class="form-group"><label>Customer Name</label><input type="text" id="mName"></div>
             <div class="form-group"><label>Email Address</label><input type="email" id="mEmail"></div>
@@ -363,8 +617,8 @@ app.get('/admin', async (req, res) => {
             </div>
             
             <div style="display:flex; gap:10px; margin-top:20px;">
-              <button class="btn" style="flex:1; justify-content:center;" onclick="saveLead()">Save Record</button>
-              <button class="btn btn-secondary" style="flex:1; justify-content:center;" onclick="closeModal()">Cancel</button>
+              <button class="btn-action" style="background:#2563eb; color:#fff;" onclick="saveLead()">Save Record</button>
+              <button class="btn-action btn-edit" onclick="closeModal()">Cancel</button>
             </div>
           </div>
         </div>
@@ -471,7 +725,7 @@ app.get('/admin', async (req, res) => {
             const rows = ${JSON.stringify(rows)};
             let csv = "ID,Name,Email,Mobile,Vehicle Type,Model,Reg No,Location,Flat,Service,Status,Created At\\n";
             rows.forEach(r => {
-              csv += \`"\${r.id}","\${r.name}","\${r.email}","\${r.mobile}","\${r.vehicle_type}","\${r.vehicle_model}","\${r.vehicle_registration_number}","\${r.location}","\${r.flat_number}","\${r.preferred_service}","\${r.status || 'Pending'}","\${r.created_at}"\\n\`;
+              csv += '"' + r.id + '","' + (r.name||'') + '","' + (r.email||'') + '","' + (r.mobile||'') + '","' + (r.vehicle_type||'') + '","' + (r.vehicle_model||'') + '","' + (r.vehicle_registration_number||'') + '","' + (r.location||'') + '","' + (r.flat_number||'') + '","' + (r.preferred_service||'') + '","' + (r.status || 'Pending') + '","' + (r.created_at||'') + '"\\n';
             });
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
@@ -486,7 +740,7 @@ app.get('/admin', async (req, res) => {
     `;
     res.send(html);
   } catch (err) {
-    res.status(500).send('Error loading dashboard.');
+    res.status(500).send('Error loading admin interface.');
   }
 });
 
