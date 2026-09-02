@@ -143,16 +143,22 @@ body {
   @apply text-washo-dark font-medium mb-2 block;
 }
 
+/* Fixed Mobile Modal Styles */
 .modal-backdrop {
-  @apply fixed inset-0 bg-black/50 flex items-center justify-center z-50;
+  @apply fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 sm:p-6 backdrop-blur-sm overflow-hidden;
 }
 
 .modal-content {
-  @apply bg-white rounded-xl p-8 w-full max-w-md relative;
+  @apply bg-white rounded-2xl p-5 sm:p-8 w-full max-w-md relative max-h-[85dvh] flex flex-col shadow-2xl my-auto overflow-hidden;
+}
+
+.modal-body {
+  @apply overflow-y-auto pr-1 flex-1 mt-6 -mr-1;
+  -webkit-overflow-scrolling: touch;
 }
 
 .close-btn {
-  @apply absolute top-4 right-4 text-washo-dark hover:text-washo-blue transition-colors duration-200;
+  @apply absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full text-washo-dark hover:text-washo-blue hover:bg-washo-light/60 transition-colors duration-200 cursor-pointer;
 }
 
 /* Animation utilities */

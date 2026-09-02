@@ -5,201 +5,265 @@ interface FreeWashModalProps {
   onClose: () => void;
 }
 
-export default function FreeWashModal({ isOpen, onClose }: FreeWashModalProps) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [mobile, setMobile] = useState('');
-  const [vehicleType, setVehicleType] = useState('Hatchback');
-  const [vehicleModel, setVehicleModel] = useState('');
-  const [vehicleRegistrationNumber, setVehicleRegistrationNumber] = useState('');
-  const [location, setLocation] = useState('');
-  const [flatNumber, setFlatNumber] = useState('');
-  const [preferredService, setPreferredService] = useState('First Wash');
-  const [paymentImage, setPaymentImage] = useState<File | null>(null);
+export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    mobile: '',
+    location: '',
+    flatNumber: '',
+    vehicleRegistrationNumber: '',
+    vehicleType: 'Car',
+    vehicleModel: '',
+    preferredService: 'Free Wash',
+  });
 
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   if (!isOpen) return null;
 
-  const submitLead = async (e: React.FormEvent) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Automatically transform registration input to UPPERCASE
+  const handleRegNoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData((prev) => ({
+      ...prev,
+      vehicleRegistrationNumber: e.target.value.toUpperCase(),
+    }));
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setPaymentFile(e.target.files[0]);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
     setIsSubmitting(true);
-    setError(null);
-
-    // Email Regex Validation
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Please enter a valid email address.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    // Payment validation
-    if (preferredService !== 'First Wash' && !paymentImage) {
-      setError('Payment screenshot is required for this plan.');
-      setIsSubmitting(false);
-      return;
-    }
 
     try {
-      const formData = new FormData();
-      formData.append('name', name);
-      formData.append('email', email);
-      formData.append('mobile', mobile);
-      formData.append('vehicleType', vehicleType);
-      formData.append('vehicleModel', vehicleModel);
-      formData.append('vehicleRegistrationNumber', vehicleRegistrationNumber);
-      formData.append('location', location);
-      formData.append('flatNumber', flatNumber);
-      formData.append('preferredService', preferredService);
-      formData.append('source', 'website');
-      formData.append('timestamp', new Date().toISOString());
+      const dataPayload = new FormData();
+      dataPayload.append('name', formData.name);
+      dataPayload.append('email', formData.email);
+      dataPayload.append('mobile', formData.mobile);
+      dataPayload.append('location', formData.location);
+      dataPayload.append('flatNumber', formData.flatNumber);
+      dataPayload.append('vehicleRegistrationNumber', formData.vehicleRegistrationNumber.trim().toUpperCase());
+      dataPayload.append('vehicleType', formData.vehicleType);
+      dataPayload.append('vehicleModel', formData.vehicleModel);
+      dataPayload.append('preferredService', formData.preferredService);
 
-      if (preferredService !== 'First Wash' && paymentImage) {
-        formData.append('paymentImage', paymentImage);
+      if (formData.preferredService !== 'Free Wash') {
+        if (!paymentFile) {
+          setErrorMessage('Please upload a payment screenshot for paid plans.');
+          setIsSubmitting(false);
+          return;
+        }
+        dataPayload.append('paymentImage', paymentFile);
       }
 
-      const response = await fetch('https://washo.onrender.com/api/leads', {
+      const response = await fetch('/api/leads', {
         method: 'POST',
-        body: formData,
+        body: dataPayload,
       });
 
       const data = await response.json();
 
-      if (response.ok && data.success) {
-        setSuccess(true);
-      } else {
-        setError(data.message || 'Submission failed');
+      if (!response.ok || !data.success) {
+        setErrorMessage(data.message || 'An error occurred while submitting.');
+        setIsSubmitting(false);
+        return;
       }
+
+      alert('Booking submitted successfully!');
+      onClose();
     } catch (err) {
-      setError('A network error occurred. Please try again.');
+      setErrorMessage('Network error. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/75 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 relative">
-        <button 
-          onClick={onClose} 
-          className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 font-bold"
-        >
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <button className="close-btn" onClick={onClose} aria-label="Close">
           ✕
         </button>
 
-        <h2 className="text-2xl font-bold mb-4 text-gray-800">Book Your Wash</h2>
+        <h3 className="text-xl font-bold text-washo-blue">Book Your Wash</h3>
 
-        {success ? (
-          <div className="text-center py-8">
-            <div className="text-green-500 text-5xl mb-4">✓</div>
-            <h3 className="text-xl font-semibold mb-2">Booking Successful!</h3>
-            <p className="text-gray-600 mb-6">We will contact you shortly to confirm your slot.</p>
-            <button onClick={onClose} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium">Close</button>
+        {errorMessage && (
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-xs sm:text-sm mt-3 font-medium">
+            {errorMessage}
           </div>
-        ) : (
-          <form onSubmit={submitLead} className="space-y-4">
-            {error && <div className="bg-red-50 text-red-600 p-3 rounded text-sm">{error}</div>}
+        )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Full Name *</label>
-                <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="John Doe" />
+        <div className="modal-body">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Full Name *</label>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  value={formData.name}
+                  onChange={handleChange}
+                  placeholder="John Doe"
+                  className="form-input"
+                />
               </div>
 
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Email Address *</label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="john@example.com" />
+              <div>
+                <label className="form-label">Email Address *</label>
+                <input
+                  type="email"
+                  name="email"
+                  required
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="john@example.com"
+                  className="form-input"
+                />
               </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Mobile Number *</label>
-                <input type="tel" required value={mobile} onChange={(e) => setMobile(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="10-digit number" />
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Location / Society *</label>
-                <input list="locations-list" required value={location} onChange={(e) => setLocation(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="Select or type location" />
-                <datalist id="locations-list">
-                  <option value="Yashwin Orizzonte Wing A" />
-                  <option value="Yashwin Orizzonte Wing B" />
-                  <option value="Yashwin Orizzonte Wing C" />
-                  <option value="Yashwin Orizzonte Wing D" />
-                </datalist>
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Flat No. *</label>
-                <input type="text" required value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="e.g. A-101" />
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Vehicle Registration No. *</label>
-                <input type="text" required value={vehicleRegistrationNumber} onChange={(e) => setVehicleRegistrationNumber(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="MH 12 AB 1234" />
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Vehicle Type *</label>
-                <select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500">
-                  <option value="Hatchback">Hatchback</option>
-                  <option value="Sedan">Sedan</option>
-                  <option value="SUV">SUV</option>
-                  <option value="Luxury">Luxury</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-sm font-medium mb-1">Vehicle Model *</label>
-                <input type="text" required value={vehicleModel} onChange={(e) => setVehicleModel(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500" placeholder="e.g. Swift, Nexon" />
-              </div>
-
-              <div className="flex flex-col col-span-1 md:col-span-2">
-                <label className="text-sm font-medium mb-1">Select Service *</label>
-                <select value={preferredService} onChange={(e) => setPreferredService(e.target.value)} className="border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500">
-                  <option value="First Wash">Free First Wash</option>
-                  <option value="Basic Monthly">Basic Monthly Plan</option>
-                  <option value="Premium Monthly">Premium Monthly Plan</option>
-                </select>
-              </div>
-
-              {/* Conditional File Upload */}
-              {preferredService !== 'First Wash' && (
-                <div className="flex flex-col col-span-1 md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <label className="text-sm font-medium mb-2 text-gray-800">Upload Payment Screenshot * (Max 5MB)</label>
-                  <input 
-                    type="file" 
-                    accept="image/jpeg, image/jpg, image/png, image/webp"
-                    required 
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file && file.size > 5 * 1024 * 1024) {
-                        alert('File size exceeds 5MB');
-                        e.target.value = ''; // reset
-                      } else {
-                        setPaymentImage(file || null);
-                      }
-                    }} 
-                    className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
-                  <p className="text-xs text-gray-500 mt-2">Accepted formats: JPG, PNG, WEBP.</p>
-                </div>
-              )}
             </div>
 
-            <div className="pt-4 border-t mt-6 flex justify-end gap-3">
-              <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded font-medium">Cancel</button>
-              <button 
-                type="submit" 
-                disabled={isSubmitting}
-                className="px-6 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Mobile Number *</label>
+                <input
+                  type="tel"
+                  name="mobile"
+                  required
+                  value={formData.mobile}
+                  onChange={handleChange}
+                  placeholder="10-digit number"
+                  className="form-input"
+                />
+              </div>
+
+              <div>
+                <label className="form-label">Location / Society *</label>
+                <input
+                  type="text"
+                  name="location"
+                  required
+                  value={formData.location}
+                  onChange={handleChange}
+                  placeholder="Select or type location"
+                  className="form-input"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="form-label">Flat No. *</label>
+                <input
+                  type="text"
+                  name="flatNumber"
+                  required
+                  value={formData.flatNumber}
+                  onChange={handleChange}
+                  placeholder="e.g. A-101"
+                  className="form-input"
+                />
+              </div>
+
+              {/* Vehicle Registration Field with Auto-Uppercase */}
+              <div>
+                <label className="form-label">Vehicle Registration No. *</label>
+                <input
+                  type="text"
+                  name="vehicleRegistrationNumber"
+                  required
+                  value={formData.vehicleRegistrationNumber}
+                  onChange={handleRegNoChange}
+                  placeholder="MH 12 AB 1234"
+                  className="form-input uppercase"
+                  style={{ textTransform: 'uppercase' }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Updated Vehicle Type Dropdown */}
+              <div>
+                <label className="form-label">Vehicle Type *</label>
+                <select
+                  name="vehicleType"
+                  value={formData.vehicleType}
+                  onChange={handleChange}
+                  className="form-input"
+                >
+                  <option value="Car">Car</option>
+                  <option value="Bike">Bike</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="form-label">Vehicle Model *</label>
+                <input
+                  type="text"
+                  name="vehicleModel"
+                  required
+                  value={formData.vehicleModel}
+                  onChange={handleChange}
+                  placeholder="e.g. Swift, Nexon, Activa"
+                  className="form-input"
+                />
+              </div>
+            </div>
+
+            {/* Updated Service Plans Dropdown */}
+            <div>
+              <label className="form-label">Select Service *</label>
+              <select
+                name="preferredService"
+                value={formData.preferredService}
+                onChange={handleChange}
+                className="form-input"
               >
-                {isSubmitting ? 'Submitting...' : 'Book Wash'}
+                <option value="Bike Plan">Bike Plan</option>
+                <option value="Car Basic">Car Basic</option>
+                <option value="Car Pro">Car Pro</option>
+                <option value="Custom">Custom</option>
+                <option value="Free Wash">Free Wash</option>
+              </select>
+            </div>
+
+            {formData.preferredService !== 'Free Wash' && (
+              <div>
+                <label className="form-label">Payment Screenshot *</label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleFileChange}
+                  required
+                  className="form-input text-xs sm:text-sm"
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4">
+              <button type="button" onClick={onClose} className="btn-outline px-4 py-2 text-sm">
+                Cancel
+              </button>
+              <button type="submit" disabled={isSubmitting} className="btn-primary px-6 py-2 text-sm">
+                {isSubmitting ? 'Checking...' : 'Book Wash'}
               </button>
             </div>
           </form>
-        )}
+        </div>
       </div>
     </div>
   );
-}
+};
