@@ -9,7 +9,7 @@ const initialFormState = {
   name: '',
   email: '',
   mobile: '',
-  location: '',
+  location: 'Yashwin Orizzonte - A Wing',
   flatNumber: '',
   vehicleRegistrationNumber: '',
   vehicleType: 'Car',
@@ -200,15 +200,17 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Location / Society *</label>
-                    <input
-                      type="text"
+                    <select
                       name="location"
-                      required
                       value={formData.location}
                       onChange={handleChange}
-                      placeholder="Select or type location"
                       className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                    />
+                    >
+                      <option value="Yashwin Orizzonte - A Wing">Yashwin Orizzonte - A Wing</option>
+                      <option value="Yashwin Orizzonte - B Wing">Yashwin Orizzonte - B Wing</option>
+                      <option value="Yashwin Orizzonte - C Wing">Yashwin Orizzonte - C Wing</option>
+                      <option value="Yashwin Orizzonte - D Wing">Yashwin Orizzonte - D Wing</option>
+                    </select>
                   </div>
                 </div>
 

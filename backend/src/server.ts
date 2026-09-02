@@ -123,6 +123,78 @@ const verifyAdminKey = (req: express.Request, res: express.Response, next: expre
   next();
 };
 
+// Public Endpoint: Submit Lead / Booking
+app.post('/api/leads', upload.single('paymentImage'), async (req: express.Request, res: express.Response) => {
+  try {
+    const {
+      name,
+      email,
+      mobile,
+      location,
+      flatNumber,
+      vehicleRegistrationNumber,
+      vehicleType,
+      vehicleModel,
+      preferredService,
+    } = req.body;
+
+    const formattedRegNo = (vehicleRegistrationNumber || '').trim().toUpperCase();
+
+    // Check for duplicate vehicle registration number in Postgres
+    const duplicateCheck = await pool.query(
+      'SELECT id FROM leads WHERE UPPER(vehicle_registration_number) = $1',
+      [formattedRegNo]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sorry! A booking has already been registered for this vehicle registration number.',
+      });
+    }
+
+    const paymentImageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const timestamp = new Date().toISOString();
+
+    const insertQuery = `
+      INSERT INTO leads (
+        name, email, mobile, vehicle_type, vehicle_model, 
+        vehicle_registration_number, location, flat_number, 
+        preferred_service, payment_image_url, status, source, timestamp
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *;
+    `;
+
+    const result = await pool.query(insertQuery, [
+      name,
+      email,
+      mobile,
+      vehicleType || 'Car',
+      vehicleModel,
+      formattedRegNo,
+      location,
+      flatNumber,
+      preferredService,
+      paymentImageUrl,
+      'Pending',
+      'website',
+      timestamp,
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Booking submitted successfully!',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Error processing lead submission:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while processing your request.',
+    });
+  }
+});
+
 // Admin API Routes
 app.delete('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
@@ -609,7 +681,7 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mVehicleType').value = 'Car';
             document.getElementById('mVehicleModel').value = '';
             document.getElementById('mRegNo').value = '';
-            document.getElementById('mLocation').value = '';
+            document.getElementById('mLocation').value = 'Yashwin Orizzonte - A Wing';
             document.getElementById('mFlat').value = '';
             document.getElementById('mService').value = 'Free Wash';
             document.getElementById('mStatus').value = 'Pending';
@@ -668,117 +740,49 @@ app.get('/admin', async (req, res) => {
 
           function exportCSV() {
             const rows = ${JSON.stringify(rows)};
-            let csv = "ID,Name,Email,Mobile,Vehicle Type,Model,Reg No,Location,Flat,Service,Status,Created At\\n";
+            if (!rows.length) return alert('No data available to export');
+
+            const headers = ["ID", "Name", "Email", "Mobile", "Vehicle Type", "Vehicle Model", "Reg Number", "Location", "Flat Number", "Service", "Status", "Source", "Date"];
+            const csvRows = [headers.join(",")];
+
             rows.forEach(r => {
-              csv += '"' + r.id + '","' + (r.name||'') + '","' + (r.email||'') + '","' + (r.mobile||'') + '","' + (r.vehicle_type||'') + '","' + (r.vehicle_model||'') + '","' + (r.vehicle_registration_number||'') + '","' + (r.location||'') + '","' + (r.flat_number||'') + '","' + (r.preferred_service||'') + '","' + (r.status || 'Pending') + '","' + (r.created_at||'') + '"\\n';
+              const row = [
+                r.id,
+                \`"\${(r.name || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.email || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.mobile || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.vehicle_type || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.vehicle_model || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.vehicle_registration_number || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.location || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.flat_number || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.preferred_service || '').replace(/"/g, '""')}"\`,
+                \`"\${(r.status || 'Pending').replace(/"/g, '""')}"\`,
+                \`"\${(r.source || 'website').replace(/"/g, '""')}"\`,
+                \`"\${(r.created_at || '').replace(/"/g, '""')}"\`
+              ];
+              csvRows.push(row.join(","));
             });
-            const blob = new Blob([csv], { type: 'text/csv' });
+
+            const blob = new Blob([csvRows.join("\\n")], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.setAttribute('href', url);
-            a.setAttribute('download', 'washo_leads.csv');
+            a.setAttribute('download', \`washo-leads-\${new Date().toISOString().slice(0,10)}.csv\`);
             a.click();
           }
         </script>
       </body>
       </html>
     `;
+
     res.send(html);
   } catch (err) {
-    res.status(500).send('Error loading admin interface.');
-  }
-});
-
-// Public Lead Submission Endpoint
-app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
-  try {
-    const {
-      name, email, mobile, vehicleType, vehicleModel,
-      vehicleRegistrationNumber, location, flatNumber, preferredService, source, timestamp
-    } = req.body;
-
-    if (!name || !email || !mobile || !vehicleType || !vehicleModel || !vehicleRegistrationNumber || !location || !flatNumber || !preferredService) {
-      return res.status(400).json({ success: false, message: 'All fields are required.' });
-    }
-
-    const normalizedRegNo = vehicleRegistrationNumber.trim().toUpperCase();
-
-    // Check duplicate vehicle registration in database
-    const duplicateCheck = await pool.query(
-      `SELECT id FROM leads WHERE UPPER(TRIM(vehicle_registration_number)) = $1`,
-      [normalizedRegNo]
-    );
-
-    if (duplicateCheck.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Sorry! A booking has already been registered for this vehicle registration number.'
-      });
-    }
-
-    let payment_image_url = null;
-    if (preferredService !== 'Free Wash') {
-      if (!req.file) {
-        return res.status(400).json({ success: false, message: 'Payment screenshot is required for paid services.' });
-      }
-      payment_image_url = `/uploads/${req.file.filename}`;
-    }
-
-    // Insert Lead to DB
-    const query = `
-      INSERT INTO leads (
-        name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, 
-        location, flat_number, preferred_service, payment_image_url, status, source, timestamp
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Pending', $11, $12) RETURNING id;
-    `;
-    
-    const values = [
-      name, email, mobile, vehicleType, vehicleModel, normalizedRegNo,
-      location, flatNumber, preferredService, payment_image_url, source || 'website', timestamp || new Date().toISOString()
-    ];
-
-    const result = await pool.query(query, values);
-
-    // Send Email
-    try {
-      await resend.emails.send({
-        from: 'WASHO <booking@washo.online>',
-        to: email,
-        subject: `Booking Confirmed: ${preferredService} - WASHO`,
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
-            <h2 style="color: #2563eb; margin-top: 0;">Booking Confirmation</h2>
-            <p>Hi <strong>${name}</strong>,</p>
-            <p>Thank you for choosing WASHO! We have received your request and registered your service.</p>
-            
-            <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
-              <h3 style="margin-top: 0; color: #1e293b; font-size: 16px;">Booking Summary:</h3>
-              <ul style="list-style: none; padding: 0; margin: 0;">
-                <li style="padding: 4px 0;"><strong>Selected Service:</strong> ${preferredService}</li>
-                <li style="padding: 4px 0;"><strong>Vehicle:</strong> ${vehicleType} (${vehicleModel})</li>
-                <li style="padding: 4px 0;"><strong>Registration No:</strong> ${normalizedRegNo}</li>
-                <li style="padding: 4px 0;"><strong>Location:</strong> ${location}, Flat ${flatNumber}</li>
-              </ul>
-            </div>
-            <p>Our team will reach out to you shortly for coordination.</p>
-          </div>
-        `,
-      });
-    } catch (mailErr) {
-      console.error('Email confirmation error:', mailErr);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Lead saved successfully',
-      id: result.rows[0].id
-    });
-  } catch (error) {
-    console.error('Lead submission error:', error);
-    res.status(500).json({ success: false, message: 'Failed to submit lead. Please try again.' });
+    console.error('Error fetching leads for admin dashboard:', err);
+    res.status(500).send('Database Error');
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`WASHO Backend running on port ${port}`);
 });
