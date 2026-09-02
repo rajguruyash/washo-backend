@@ -153,7 +153,17 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
       });
     }
 
-    const paymentImageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const paidServices = ['Bike Basic', 'Car Basic', 'Car Pro'];
+    const isPaidPlan = paidServices.includes(preferredService);
+
+    if (isPaidPlan && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment screenshot is required for the selected plan.',
+      });
+    }
+
+    const paymentImageUrl = (isPaidPlan && req.file) ? `/uploads/${req.file.filename}` : null;
     const timestamp = new Date().toISOString();
 
     const insertQuery = `
@@ -183,7 +193,9 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
 
     return res.status(200).json({
       success: true,
-      message: 'Booking submitted successfully!',
+      message: isPaidPlan
+        ? 'Booking submitted successfully!'
+        : 'Booking request received! Our team will contact you soon.',
       data: result.rows[0],
     });
   } catch (error) {
@@ -381,7 +393,6 @@ app.get('/admin', async (req, res) => {
           .detail-item { color: var(--text-secondary); }
           .detail-item strong { color: var(--text-primary); font-weight: 600; display: block; margin-top: 2px; }
 
-          /* Payment Image Preview Container */
           .payment-preview-box {
             background: var(--bg-main);
             border: 1px solid var(--border);
@@ -407,9 +418,7 @@ app.get('/admin', async (req, res) => {
             cursor: pointer;
             transition: transform 0.2s ease;
           }
-          .payment-img:hover {
-            transform: scale(1.02);
-          }
+          .payment-img:hover { transform: scale(1.02); }
 
           .card-actions { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px; }
           
@@ -605,10 +614,10 @@ app.get('/admin', async (req, res) => {
             </div>
             <div class="form-group"><label>Service Preferred</label>
               <select id="mService">
-                <option value="Bike Plan">Bike Plan</option>
+                <option value="Bike Basic">Bike Basic</option>
                 <option value="Car Basic">Car Basic</option>
                 <option value="Car Pro">Car Pro</option>
-                <option value="Custom">Custom</option>
+                <option value="Custom Plan">Custom Plan</option>
                 <option value="Free Wash">Free Wash</option>
               </select>
             </div>
@@ -716,60 +725,40 @@ app.get('/admin', async (req, res) => {
               mobile: document.getElementById('mMobile').value,
               vehicle_type: document.getElementById('mVehicleType').value,
               vehicle_model: document.getElementById('mVehicleModel').value,
-              vehicle_registration_number: document.getElementById('mRegNo').value.toUpperCase(),
+              vehicle_registration_number: document.getElementById('mRegNo').value,
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
               status: document.getElementById('mStatus').value,
             };
 
-            const url = id ? ('/api/admin/leads/' + id + '?key=' + key) : ('/api/admin/leads?key=' + key);
+            const url = id ? '/api/admin/leads/' + id + '?key=' + key : '/api/admin/leads?key=' + key;
             const method = id ? 'PUT' : 'POST';
 
             fetch(url, {
-              method: method,
+              method,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
             })
             .then(res => res.json())
             .then(data => {
               if (data.success) location.reload();
-              else alert(data.message);
+              else alert('Error saving lead');
             });
           }
 
           function exportCSV() {
             const rows = ${JSON.stringify(rows)};
-            if (!rows.length) return alert('No data available to export');
-
-            const headers = ["ID", "Name", "Email", "Mobile", "Vehicle Type", "Vehicle Model", "Reg Number", "Location", "Flat Number", "Service", "Status", "Source", "Date"];
-            const csvRows = [headers.join(",")];
-
-            rows.forEach(r => {
-              const row = [
-                r.id,
-                \`"\${(r.name || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.email || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.mobile || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.vehicle_type || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.vehicle_model || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.vehicle_registration_number || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.location || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.flat_number || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.preferred_service || '').replace(/"/g, '""')}"\`,
-                \`"\${(r.status || 'Pending').replace(/"/g, '""')}"\`,
-                \`"\${(r.source || 'website').replace(/"/g, '""')}"\`,
-                \`"\${(r.created_at || '').replace(/"/g, '""')}"\`
-              ];
-              csvRows.push(row.join(","));
-            });
-
-            const blob = new Blob([csvRows.join("\\n")], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.setAttribute('href', url);
-            a.setAttribute('download', \`washo-leads-\${new Date().toISOString().slice(0,10)}.csv\`);
-            a.click();
+            if (!rows.length) return alert('No data to export');
+            const headers = Object.keys(rows[0]).join(',');
+            const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows.map(r => Object.values(r).map(v => '"' + (v || '') + '"').join(','))].join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "washo_leads.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
           }
         </script>
       </body>
@@ -778,7 +767,6 @@ app.get('/admin', async (req, res) => {
 
     res.send(html);
   } catch (err) {
-    console.error('Error fetching leads for admin dashboard:', err);
     res.status(500).send('Database Error');
   }
 });
