@@ -116,7 +116,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Auth Middleware Helper
 const verifyAdminKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const key = req.query.key || req.headers['x-admin-key'];
-  const SECRET_KEY = process.env.ADMIN_KEY || 'washo7595';
+  const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
   if (key !== SECRET_KEY) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -170,10 +170,10 @@ app.post('/api/admin/leads', verifyAdminKey, async (req, res) => {
   }
 });
 
-// Depo-Budget Full Width Dashboard Interface
+// Full Width Admin Dashboard Interface
 app.get('/admin', async (req, res) => {
   const adminKey = req.query.key;
-  const SECRET_KEY = process.env.ADMIN_KEY || 'washo7595';
+  const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
 
   if (adminKey !== SECRET_KEY) {
     return res.status(401).send('<h1 style="text-align:center; margin-top:50px; font-family:-apple-system, sans-serif; color:#64748b;">401 Unauthorized Access</h1>');
@@ -218,10 +218,8 @@ app.get('/admin', async (req, res) => {
           * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; }
           body { background-color: var(--bg-main); color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased; }
 
-          /* App Layout */
           .dashboard-layout { display: flex; min-height: 100vh; width: 100%; }
           
-          /* Left Sidebar */
           .sidebar {
             width: 250px;
             background-color: #0d121f;
@@ -244,7 +242,6 @@ app.get('/admin', async (req, res) => {
           .nav-item:hover, .nav-item.active { background: var(--bg-subtle); color: var(--text-primary); }
           .nav-item.active { border: 1px solid var(--border); }
 
-          /* Main Section (Full Width Layout) */
           .main-wrapper {
             flex: 1;
             margin-left: 250px;
@@ -253,7 +250,6 @@ app.get('/admin', async (req, res) => {
             box-sizing: border-box;
           }
 
-          /* Header Bar */
           .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; width: 100%; }
           .page-title { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
           .page-sub { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
@@ -264,21 +260,18 @@ app.get('/admin', async (req, res) => {
           .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); padding: 10px 18px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
           .btn-secondary:hover { border-color: var(--border-hover); background: var(--bg-subtle); }
 
-          /* Metrics Cards Grid */
           .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; width: 100%; }
           .stat-card { background-color: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 20px; transition: border-color 0.2s; }
           .stat-card:hover { border-color: var(--border-hover); }
           .stat-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
           .stat-value { font-size: 28px; font-weight: 800; margin-top: 8px; letter-spacing: -0.5px; }
 
-          /* Filter & Search Bar */
           .filter-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--bg-card); border: 1px solid var(--border); padding: 8px 12px; border-radius: 14px; width: 100%; }
           .search-input { background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 14px; width: 380px; padding: 6px 8px; }
           .tabs-group { display: flex; gap: 4px; background: var(--bg-main); padding: 4px; border-radius: 10px; border: 1px solid var(--border); }
           .tab-btn { background: transparent; border: none; color: var(--text-secondary); padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
           .tab-btn.active, .tab-btn:hover { background: var(--bg-card); color: var(--text-primary); }
 
-          /* Lead Grid View (Full Width Multi-Column) */
           .leads-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
@@ -312,11 +305,41 @@ app.get('/admin', async (req, res) => {
             white-space: nowrap;
           }
 
-          .details-list { background: var(--bg-main); border: 1px solid var(--border); border-radius: 12px; padding: 12px; font-size: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+          .details-list { background: var(--bg-main); border: 1px solid var(--border); border-radius: 12px; padding: 12px; font-size: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
           .detail-item { color: var(--text-secondary); }
           .detail-item strong { color: var(--text-primary); font-weight: 600; display: block; margin-top: 2px; }
 
-          .card-actions { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+          /* Payment Image Preview Container */
+          .payment-preview-box {
+            background: var(--bg-main);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 14px;
+          }
+          .payment-preview-header {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .payment-img {
+            width: 100%;
+            max-height: 160px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: transform 0.2s ease;
+          }
+          .payment-img:hover {
+            transform: scale(1.02);
+          }
+
+          .card-actions { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px; }
           
           .select-status {
             background: var(--bg-subtle);
@@ -335,7 +358,6 @@ app.get('/admin', async (req, res) => {
           .icon-btn:hover { border-color: var(--border-hover); background: rgba(255, 255, 255, 0.1); }
           .icon-btn.danger:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
 
-          /* Modal Styling */
           .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); padding: 20px; align-items: center; justify-content: center; z-index: 100; }
           .modal-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; width: 100%; max-width: 480px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
           .form-group { margin-bottom: 14px; }
@@ -343,7 +365,6 @@ app.get('/admin', async (req, res) => {
           .form-group input, .form-group select { width: 100%; background: var(--bg-main); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: #fff; font-size: 13px; outline: none; }
           .form-group input:focus { border-color: var(--accent-blue); }
 
-          /* Responsive Tweaks */
           @media (max-width: 1024px) {
             .sidebar { display: none; }
             .main-wrapper { margin-left: 0; width: 100%; padding: 20px; }
@@ -359,7 +380,6 @@ app.get('/admin', async (req, res) => {
       <body>
 
         <div class="dashboard-layout">
-          <!-- Left Navigation Sidebar -->
           <aside class="sidebar">
             <div>
               <div class="brand-box">
@@ -384,10 +404,7 @@ app.get('/admin', async (req, res) => {
             </div>
           </aside>
 
-          <!-- Main Content Area -->
           <main class="main-wrapper">
-            
-            <!-- Top Header -->
             <div class="top-bar">
               <div>
                 <h1 class="page-title">Dashboard Overview</h1>
@@ -399,7 +416,6 @@ app.get('/admin', async (req, res) => {
               </div>
             </div>
 
-            <!-- Stats Grid -->
             <div class="stats-grid">
               <div class="stat-card">
                 <div class="stat-label">Total Bookings</div>
@@ -419,7 +435,6 @@ app.get('/admin', async (req, res) => {
               </div>
             </div>
 
-            <!-- Search and Filter Bar -->
             <div class="filter-bar">
               <input type="text" id="searchInput" class="search-input" placeholder="🔍  Search by name, phone, registration no..." onkeyup="filterLeads()">
               <div class="tabs-group">
@@ -430,7 +445,6 @@ app.get('/admin', async (req, res) => {
               </div>
             </div>
 
-            <!-- Cards Grid -->
             <div class="leads-grid" id="leadGrid">
     `;
 
@@ -456,11 +470,21 @@ app.get('/admin', async (req, res) => {
               <div class="detail-item">Phone: <strong>${lead.mobile}</strong></div>
               <div class="detail-item">Email: <strong>${lead.email}</strong></div>
             </div>
+
+            ${lead.payment_image_url ? `
+              <div class="payment-preview-box">
+                <div class="payment-preview-header">
+                  <span>📷 Payment Screenshot</span>
+                  <a href="${lead.payment_image_url}" target="_blank" style="color:var(--accent-blue); text-decoration:none;">View Full ↗</a>
+                </div>
+                <a href="${lead.payment_image_url}" target="_blank">
+                  <img src="${lead.payment_image_url}" alt="Payment Receipt" class="payment-img" />
+                </a>
+              </div>
+            ` : ''}
           </div>
 
           <div>
-            ${lead.payment_image_url ? `<div style="margin-bottom:12px;"><a href="${lead.payment_image_url}" target="_blank" style="font-size:12px; color:var(--accent-blue); font-weight:600; text-decoration:none;">📄 View Receipt Attachment</a></div>` : ''}
-
             <div class="card-actions">
               <select class="select-status" onchange="updateStatus(${lead.id}, this.value)">
                 <option value="Pending" ${status === 'Pending' ? 'selected' : ''}>Pending</option>
@@ -486,7 +510,6 @@ app.get('/admin', async (req, res) => {
           </main>
         </div>
 
-        <!-- Add/Edit Modal -->
         <div class="modal-overlay" id="leadModal">
           <div class="modal-box">
             <h3 id="modalTitle" style="margin-bottom: 20px; font-weight: 800; font-size: 18px;">Booking Record</h3>
@@ -495,15 +518,28 @@ app.get('/admin', async (req, res) => {
             <div class="form-group"><label>Email Address</label><input type="email" id="mEmail"></div>
             <div class="form-group"><label>Mobile Phone</label><input type="text" id="mMobile"></div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-              <div class="form-group"><label>Vehicle Type</label><input type="text" id="mVehicleType"></div>
+              <div class="form-group"><label>Vehicle Type</label>
+                <select id="mVehicleType">
+                  <option value="Car">Car</option>
+                  <option value="Bike">Bike</option>
+                </select>
+              </div>
               <div class="form-group"><label>Vehicle Model</label><input type="text" id="mVehicleModel"></div>
             </div>
-            <div class="form-group"><label>Registration Number</label><input type="text" id="mRegNo"></div>
+            <div class="form-group"><label>Registration Number</label><input type="text" id="mRegNo" style="text-transform:uppercase;"></div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
               <div class="form-group"><label>Location / Society</label><input type="text" id="mLocation"></div>
               <div class="form-group"><label>Flat Number</label><input type="text" id="mFlat"></div>
             </div>
-            <div class="form-group"><label>Service Preferred</label><input type="text" id="mService"></div>
+            <div class="form-group"><label>Service Preferred</label>
+              <select id="mService">
+                <option value="Bike Plan">Bike Plan</option>
+                <option value="Car Basic">Car Basic</option>
+                <option value="Car Pro">Car Pro</option>
+                <option value="Custom">Custom</option>
+                <option value="Free Wash">Free Wash</option>
+              </select>
+            </div>
             <div class="form-group"><label>Status</label>
               <select id="mStatus">
                 <option value="Pending">Pending</option>
@@ -570,12 +606,12 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mName').value = '';
             document.getElementById('mEmail').value = '';
             document.getElementById('mMobile').value = '';
-            document.getElementById('mVehicleType').value = '4-Wheeler';
+            document.getElementById('mVehicleType').value = 'Car';
             document.getElementById('mVehicleModel').value = '';
             document.getElementById('mRegNo').value = '';
             document.getElementById('mLocation').value = '';
             document.getElementById('mFlat').value = '';
-            document.getElementById('mService').value = 'First Wash';
+            document.getElementById('mService').value = 'Free Wash';
             document.getElementById('mStatus').value = 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
@@ -608,7 +644,7 @@ app.get('/admin', async (req, res) => {
               mobile: document.getElementById('mMobile').value,
               vehicle_type: document.getElementById('mVehicleType').value,
               vehicle_model: document.getElementById('mVehicleModel').value,
-              vehicle_registration_number: document.getElementById('mRegNo').value,
+              vehicle_registration_number: document.getElementById('mRegNo').value.toUpperCase(),
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
@@ -665,15 +701,30 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'All fields are required.' });
     }
 
+    const normalizedRegNo = vehicleRegistrationNumber.trim().toUpperCase();
+
+    // Check duplicate vehicle registration in database
+    const duplicateCheck = await pool.query(
+      `SELECT id FROM leads WHERE UPPER(TRIM(vehicle_registration_number)) = $1`,
+      [normalizedRegNo]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sorry! A booking has already been registered for this vehicle registration number.'
+      });
+    }
+
     let payment_image_url = null;
-    if (preferredService !== 'First Wash') {
+    if (preferredService !== 'Free Wash') {
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'Payment screenshot is required for paid services.' });
       }
       payment_image_url = `/uploads/${req.file.filename}`;
     }
 
-    // Save Lead to PostgreSQL
+    // Insert Lead to DB
     const query = `
       INSERT INTO leads (
         name, email, mobile, vehicle_type, vehicle_model, vehicle_registration_number, 
@@ -682,15 +733,15 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
     `;
     
     const values = [
-      name, email, mobile, vehicleType, vehicleModel, vehicleRegistrationNumber.trim(),
+      name, email, mobile, vehicleType, vehicleModel, normalizedRegNo,
       location, flatNumber, preferredService, payment_image_url, source || 'website', timestamp || new Date().toISOString()
     ];
 
     const result = await pool.query(query, values);
 
-    // Send Confirmation Email
+    // Send Email
     try {
-      const emailData = await resend.emails.send({
+      await resend.emails.send({
         from: 'WASHO <booking@washo.online>',
         to: email,
         subject: `Booking Confirmed: ${preferredService} - WASHO`,
@@ -698,35 +749,28 @@ app.post('/api/leads', upload.single('paymentImage'), async (req, res) => {
           <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px;">
             <h2 style="color: #2563eb; margin-top: 0;">Booking Confirmation</h2>
             <p>Hi <strong>${name}</strong>,</p>
-            <p>Thank you for choosing WASHO! We have received your request and successfully registered your wash preference.</p>
+            <p>Thank you for choosing WASHO! We have received your request and registered your service.</p>
             
             <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
               <h3 style="margin-top: 0; color: #1e293b; font-size: 16px;">Booking Summary:</h3>
               <ul style="list-style: none; padding: 0; margin: 0;">
                 <li style="padding: 4px 0;"><strong>Selected Service:</strong> ${preferredService}</li>
                 <li style="padding: 4px 0;"><strong>Vehicle:</strong> ${vehicleType} (${vehicleModel})</li>
-                <li style="padding: 4px 0;"><strong>Registration No:</strong> ${vehicleRegistrationNumber}</li>
+                <li style="padding: 4px 0;"><strong>Registration No:</strong> ${normalizedRegNo}</li>
                 <li style="padding: 4px 0;"><strong>Location:</strong> ${location}, Flat ${flatNumber}</li>
               </ul>
             </div>
-
-            <p>Our team will reach out to you if any further coordination is required.</p>
-            
-            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #64748b; text-align: center;">
-              This is an automated confirmation email from WASHO. Please do not reply directly to this message.
-            </p>
+            <p>Our team will reach out to you shortly for coordination.</p>
           </div>
         `,
       });
-      console.log('Confirmation email sent via Resend:', emailData);
     } catch (mailErr) {
-      console.error('Failed to send confirmation email via Resend:', mailErr);
+      console.error('Email confirmation error:', mailErr);
     }
 
     res.status(200).json({
       success: true,
-      message: 'Lead saved successfully and confirmation email sent',
+      message: 'Lead saved successfully',
       id: result.rows[0].id
     });
   } catch (error) {
