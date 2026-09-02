@@ -284,3 +284,5 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
     </div>
   );
 };
+
+export default FreeWashModal;
