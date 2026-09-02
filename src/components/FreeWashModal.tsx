@@ -29,7 +29,6 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Automatically transform registration input to UPPERCASE
   const handleRegNoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData((prev) => ({
       ...prev,
@@ -178,7 +177,6 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
                 />
               </div>
 
-              {/* Vehicle Registration Field with Auto-Uppercase */}
               <div>
                 <label className="form-label">Vehicle Registration No. *</label>
                 <input
@@ -195,7 +193,6 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Updated Vehicle Type Dropdown */}
               <div>
                 <label className="form-label">Vehicle Type *</label>
                 <select
@@ -223,7 +220,6 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
               </div>
             </div>
 
-            {/* Updated Service Plans Dropdown */}
             <div>
               <label className="form-label">Select Service *</label>
               <select
@@ -267,3 +263,5 @@ export const FreeWashModal: React.FC<FreeWashModalProps> = ({ isOpen, onClose })
     </div>
   );
 };
+
+export default FreeWashModal;
