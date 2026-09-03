@@ -530,9 +530,10 @@ app.get('/admin', async (req, res) => {
     `;
 
     rows.forEach((lead) => {
-      const cleanMobile = lead.mobile.replace(/\D/g, '');
+      const cleanMobile = (lead.mobile || '').replace(/\D/g, '');
       const waMsg = encodeURIComponent(`Hi ${lead.name}, regarding your ${lead.preferred_service} booking for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
       const status = lead.status || 'Pending';
+      const safeLeadJson = JSON.stringify(lead).replace(/'/g, "&#39;");
 
       html += `
         <div class="lead-card lead-item" data-status="${status.toLowerCase()}" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
@@ -577,7 +578,7 @@ app.get('/admin', async (req, res) => {
               <div class="action-buttons">
                 <a href="tel:${lead.mobile}" class="icon-btn" title="Call Customer">📞</a>
                 <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="icon-btn" title="WhatsApp">💬</a>
-                <button class="icon-btn" onclick='openEditModal(${JSON.stringify(lead)})' title="Edit Lead">✏️</button>
+                <button class="icon-btn" onclick='openEditModal(${safeLeadJson})' title="Edit Lead">✏️</button>
                 <button class="icon-btn danger" onclick="deleteLead(${lead.id})" title="Delete Lead">🗑️</button>
               </div>
             </div>
@@ -639,6 +640,7 @@ app.get('/admin', async (req, res) => {
 
         <script>
           const key = '${adminKey}';
+          const allLeadsData = ${JSON.stringify(rows)};
           let currentTab = 'all';
 
           function setFilter(tab, element) {
@@ -669,7 +671,8 @@ app.get('/admin', async (req, res) => {
             .then(res => res.json())
             .then(data => {
               if (!data.success) alert('Failed to update status');
-            });
+            })
+            .catch(err => alert('Network error updating status'));
           }
 
           function deleteLead(id) {
@@ -678,7 +681,9 @@ app.get('/admin', async (req, res) => {
               .then(res => res.json())
               .then(data => {
                 if (data.success) location.reload();
-              });
+                else alert(data.message || 'Failed to delete');
+              })
+              .catch(err => alert('Network error during deletion'));
           }
 
           function openAddModal() {
@@ -700,15 +705,15 @@ app.get('/admin', async (req, res) => {
           function openEditModal(lead) {
             document.getElementById('modalTitle').innerText = 'Edit Booking Record';
             document.getElementById('editId').value = lead.id;
-            document.getElementById('mName').value = lead.name;
-            document.getElementById('mEmail').value = lead.email;
-            document.getElementById('mMobile').value = lead.mobile;
-            document.getElementById('mVehicleType').value = lead.vehicle_type;
-            document.getElementById('mVehicleModel').value = lead.vehicle_model;
-            document.getElementById('mRegNo').value = lead.vehicle_registration_number;
-            document.getElementById('mLocation').value = lead.location;
-            document.getElementById('mFlat').value = lead.flat_number;
-            document.getElementById('mService').value = lead.preferred_service;
+            document.getElementById('mName').value = lead.name || '';
+            document.getElementById('mEmail').value = lead.email || '';
+            document.getElementById('mMobile').value = lead.mobile || '';
+            document.getElementById('mVehicleType').value = lead.vehicle_type || 'Car';
+            document.getElementById('mVehicleModel').value = lead.vehicle_model || '';
+            document.getElementById('mRegNo').value = lead.vehicle_registration_number || '';
+            document.getElementById('mLocation').value = lead.location || '';
+            document.getElementById('mFlat').value = lead.flat_number || '';
+            document.getElementById('mService').value = lead.preferred_service || 'Free Wash';
             document.getElementById('mStatus').value = lead.status || 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
@@ -729,36 +734,61 @@ app.get('/admin', async (req, res) => {
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
-              status: document.getElementById('mStatus').value,
+              status: document.getElementById('mStatus').value
             };
 
             const url = id ? '/api/admin/leads/' + id + '?key=' + key : '/api/admin/leads?key=' + key;
             const method = id ? 'PUT' : 'POST';
 
             fetch(url, {
-              method,
+              method: method,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
             })
             .then(res => res.json())
             .then(data => {
-              if (data.success) location.reload();
-              else alert('Error saving lead');
-            });
+              if (data.success) {
+                location.reload();
+              } else {
+                alert(data.message || 'Save failed');
+              }
+            })
+            .catch(err => alert('Network error saving record'));
           }
 
           function exportCSV() {
-            const rows = ${JSON.stringify(rows)};
-            if (!rows.length) return alert('No data to export');
-            const headers = Object.keys(rows[0]).join(',');
-            const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows.map(r => Object.values(r).map(v => '"' + (v || '') + '"').join(','))].join("\n");
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "washo_leads.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            if (!allLeadsData || !allLeadsData.length) {
+              alert('No data to export');
+              return;
+            }
+            const headers = ['ID', 'Name', 'Email', 'Mobile', 'Vehicle Type', 'Vehicle Model', 'Reg No', 'Location', 'Flat', 'Service', 'Status', 'Created At'];
+            const csvRows = [headers.join(',')];
+
+            allLeadsData.forEach(row => {
+              const values = [
+                row.id,
+                '"' + (row.name || '').replace(/"/g, '""') + '"',
+                '"' + (row.email || '').replace(/"/g, '""') + '"',
+                '"' + (row.mobile || '').replace(/"/g, '""') + '"',
+                '"' + (row.vehicle_type || '').replace(/"/g, '""') + '"',
+                '"' + (row.vehicle_model || '').replace(/"/g, '""') + '"',
+                '"' + (row.vehicle_registration_number || '').replace(/"/g, '""') + '"',
+                '"' + (row.location || '').replace(/"/g, '""') + '"',
+                '"' + (row.flat_number || '').replace(/"/g, '""') + '"',
+                '"' + (row.preferred_service || '').replace(/"/g, '""') + '"',
+                '"' + (row.status || '').replace(/"/g, '""') + '"',
+                '"' + (row.created_at || '').replace(/"/g, '""') + '"'
+              ];
+              csvRows.push(values.join(','));
+            });
+
+            const blob = new Blob([csvRows.join('\\n')], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'washo_leads_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
           }
         </script>
       </body>
@@ -767,10 +797,11 @@ app.get('/admin', async (req, res) => {
 
     res.send(html);
   } catch (err) {
+    console.error('Error serving admin page:', err);
     res.status(500).send('Database Error');
   }
 });
 
 app.listen(port, () => {
-  console.log(`WASHO Backend running on port ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
