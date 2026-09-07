@@ -89,7 +89,7 @@ const initDatabase = async () => {
 
 initDatabase();
 
-// Multer Storage
+// Multer Storage Configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -111,10 +111,10 @@ const upload = multer({
   }
 });
 
-// Resend Client
+// Resend Client Initialization
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Auth Middleware Helper
+// Admin Auth Middleware Helper
 const verifyAdminKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const key = req.query.key || req.headers['x-admin-key'];
   const SECRET_KEY = process.env.ADMIN_KEY || 'washo123';
@@ -194,39 +194,38 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
 
     const newLead = result.rows[0];
 
-    // Trigger Resend Email Notification
-try {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('⚠️ RESEND_API_KEY missing in .env file. Skipping email dispatch.');
-  } else {
-    // In testing mode, only send to ADMIN_EMAIL to avoid Resend Sandbox 403 errors
-    const targetEmail = process.env.ADMIN_EMAIL || email;
+    // Safe Email Notification via Resend
+    try {
+      if (!process.env.RESEND_API_KEY) {
+        console.warn('⚠️ RESEND_API_KEY missing in .env file. Skipping email dispatch.');
+      } else {
+        const targetEmail = process.env.ADMIN_EMAIL || email;
 
-    const emailResult = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'WASHO <onboarding@resend.dev>',
-      to: [targetEmail],
-      subject: `New WASHO Booking Confirmation: ${preferredService}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
-          <h2 style="color: #3b82f6;">New Booking Received!</h2>
-          <p>A new wash service request has been submitted successfully.</p>
-          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
-          <p><strong>Customer Name:</strong> ${name}</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Mobile:</strong> ${mobile}</p>
-          <p><strong>Vehicle:</strong> ${vehicleType || 'Car'} - ${vehicleModel} (${formattedRegNo})</p>
-          <p><strong>Location:</strong> Flat ${flatNumber}, ${location}</p>
-          <p><strong>Service Selected:</strong> ${preferredService}</p>
-          <p><strong>Submitted At:</strong> ${timestamp}</p>
-        </div>
-      `
-    });
-    
-    console.log('✅ Resend Email Sent:', emailResult);
-  }
-} catch (emailErr) {
-  console.error('❌ Failed to send notification email via Resend:', emailErr);
-}
+        const emailResult = await resend.emails.send({
+          from: process.env.EMAIL_FROM || 'WASHO <onboarding@resend.dev>',
+          to: [targetEmail],
+          subject: `New WASHO Booking Confirmation: ${preferredService}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
+              <h2 style="color: #3b82f6;">New Booking Received!</h2>
+              <p>A new wash service request has been submitted successfully.</p>
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+              <p><strong>Customer Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Mobile:</strong> ${mobile}</p>
+              <p><strong>Vehicle:</strong> ${vehicleType || 'Car'} - ${vehicleModel} (${formattedRegNo})</p>
+              <p><strong>Location:</strong> Flat ${flatNumber}, ${location}</p>
+              <p><strong>Service Selected:</strong> ${preferredService}</p>
+              <p><strong>Submitted At:</strong> ${timestamp}</p>
+            </div>
+          `
+        });
+        
+        console.log('✅ Resend Email Sent:', emailResult);
+      }
+    } catch (emailErr) {
+      console.error('❌ Failed to send notification email via Resend:', emailErr);
+    }
 
     return res.status(200).json({
       success: true,
@@ -245,6 +244,15 @@ try {
 });
 
 // Admin API Routes
+app.get('/api/admin/leads', verifyAdminKey, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM leads ORDER BY created_at DESC');
+    res.json({ success: true, leads: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch leads' });
+  }
+});
+
 app.delete('/api/admin/leads/:id', verifyAdminKey, async (req, res) => {
   try {
     await pool.query('DELETE FROM leads WHERE id = $1', [req.params.id]);
@@ -570,7 +578,6 @@ app.get('/admin', async (req, res) => {
       const cleanMobile = (lead.mobile || '').replace(/\D/g, '');
       const waMsg = encodeURIComponent(`Hi ${lead.name}, regarding your ${lead.preferred_service} booking for ${lead.vehicle_model} (${lead.vehicle_registration_number})...`);
       const status = lead.status || 'Pending';
-      const safeLeadJson = JSON.stringify(lead).replace(/'/g, "&#39;");
 
       html += `
         <div class="lead-card lead-item" data-status="${status.toLowerCase()}" data-search="${(lead.name + ' ' + lead.mobile + ' ' + lead.vehicle_registration_number + ' ' + status).toLowerCase()}">
@@ -615,7 +622,7 @@ app.get('/admin', async (req, res) => {
               <div class="action-buttons">
                 <a href="tel:${lead.mobile}" class="icon-btn" title="Call Customer">📞</a>
                 <a href="https://wa.me/91${cleanMobile}?text=${waMsg}" target="_blank" class="icon-btn" title="WhatsApp">💬</a>
-                <button class="icon-btn" onclick='openEditModal(${safeLeadJson})' title="Edit Lead">✏️</button>
+                <button class="icon-btn" onclick="openEditModalById(${lead.id})" title="Edit Lead">✏️</button>
                 <button class="icon-btn danger" onclick="deleteLead(${lead.id})" title="Delete Lead">🗑️</button>
               </div>
             </div>
@@ -740,6 +747,13 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mService').value = 'Car Basic';
             document.getElementById('mStatus').value = 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
+          }
+
+          function openEditModalById(id) {
+            const lead = allLeadsData.find(l => Number(l.id) === Number(id));
+            if (lead) {
+              openEditModal(lead);
+            }
           }
 
           function openEditModal(lead) {
