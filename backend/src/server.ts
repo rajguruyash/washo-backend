@@ -191,12 +191,41 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
       timestamp,
     ]);
 
+    const newLead = result.rows[0];
+
+    // Trigger Resend Email Notification
+    try {
+      if (process.env.RESEND_API_KEY) {
+        await resend.emails.send({
+          from: process.env.EMAIL_FROM || 'WASHO <onboarding@resend.dev>',
+          to: process.env.ADMIN_EMAIL ? [process.env.ADMIN_EMAIL, email] : [email],
+          subject: `New WASHO Booking Confirmation: ${preferredService}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
+              <h2 style="color: #3b82f6;">New Booking Received!</h2>
+              <p>A new wash service request has been submitted successfully.</p>
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+              <p><strong>Customer Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Mobile:</strong> ${mobile}</p>
+              <p><strong>Vehicle:</strong> ${vehicleType || 'Car'} - ${vehicleModel} (${formattedRegNo})</p>
+              <p><strong>Location:</strong> Flat ${flatNumber}, ${location}</p>
+              <p><strong>Service Selected:</strong> ${preferredService}</p>
+              <p><strong>Submitted At:</strong> ${timestamp}</p>
+            </div>
+          `
+        });
+      }
+    } catch (emailErr) {
+      console.error('Failed to send notification email via Resend:', emailErr);
+    }
+
     return res.status(200).json({
       success: true,
       message: isPaidPlan
         ? 'Booking submitted successfully!'
         : 'Booking request received! Our team will contact you soon.',
-      data: result.rows[0],
+      data: newLead,
     });
   } catch (error) {
     console.error('Error processing lead submission:', error);
@@ -697,7 +726,7 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mRegNo').value = '';
             document.getElementById('mLocation').value = 'Yashwin Orizzonte - A Wing';
             document.getElementById('mFlat').value = '';
-            document.getElementById('mService').value = 'Free Wash';
+            document.getElementById('mService').value = 'Car Basic';
             document.getElementById('mStatus').value = 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
@@ -713,7 +742,7 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mRegNo').value = lead.vehicle_registration_number || '';
             document.getElementById('mLocation').value = lead.location || '';
             document.getElementById('mFlat').value = lead.flat_number || '';
-            document.getElementById('mService').value = lead.preferred_service || 'Free Wash';
+            document.getElementById('mService').value = lead.preferred_service || 'Car Basic';
             document.getElementById('mStatus').value = lead.status || 'Pending';
             document.getElementById('leadModal').style.display = 'flex';
           }
@@ -722,9 +751,17 @@ app.get('/admin', async (req, res) => {
             document.getElementById('leadModal').style.display = 'none';
           }
 
+          // Close modal when clicking outside the box
+          window.onclick = function(event) {
+            const modal = document.getElementById('leadModal');
+            if (event.target === modal) {
+              closeModal();
+            }
+          };
+
           function saveLead() {
             const id = document.getElementById('editId').value;
-            const payload = {
+            const body = {
               name: document.getElementById('mName').value,
               email: document.getElementById('mEmail').value,
               mobile: document.getElementById('mMobile').value,
@@ -734,7 +771,7 @@ app.get('/admin', async (req, res) => {
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
-              status: document.getElementById('mStatus').value
+              status: document.getElementById('mStatus').value,
             };
 
             const url = id ? '/api/admin/leads/' + id + '?key=' + key : '/api/admin/leads?key=' + key;
@@ -743,52 +780,27 @@ app.get('/admin', async (req, res) => {
             fetch(url, {
               method: method,
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
+              body: JSON.stringify(body)
             })
             .then(res => res.json())
             .then(data => {
-              if (data.success) {
-                location.reload();
-              } else {
-                alert(data.message || 'Save failed');
-              }
+              if (data.success) location.reload();
+              else alert(data.message || 'Operation failed');
             })
-            .catch(err => alert('Network error saving record'));
+            .catch(err => alert('Network error during save'));
           }
 
           function exportCSV() {
-            if (!allLeadsData || !allLeadsData.length) {
-              alert('No data to export');
-              return;
-            }
-            const headers = ['ID', 'Name', 'Email', 'Mobile', 'Vehicle Type', 'Vehicle Model', 'Reg No', 'Location', 'Flat', 'Service', 'Status', 'Created At'];
-            const csvRows = [headers.join(',')];
-
-            allLeadsData.forEach(row => {
-              const values = [
-                row.id,
-                '"' + (row.name || '').replace(/"/g, '""') + '"',
-                '"' + (row.email || '').replace(/"/g, '""') + '"',
-                '"' + (row.mobile || '').replace(/"/g, '""') + '"',
-                '"' + (row.vehicle_type || '').replace(/"/g, '""') + '"',
-                '"' + (row.vehicle_model || '').replace(/"/g, '""') + '"',
-                '"' + (row.vehicle_registration_number || '').replace(/"/g, '""') + '"',
-                '"' + (row.location || '').replace(/"/g, '""') + '"',
-                '"' + (row.flat_number || '').replace(/"/g, '""') + '"',
-                '"' + (row.preferred_service || '').replace(/"/g, '""') + '"',
-                '"' + (row.status || '').replace(/"/g, '""') + '"',
-                '"' + (row.created_at || '').replace(/"/g, '""') + '"'
-              ];
-              csvRows.push(values.join(','));
+            let csv = 'ID,Name,Email,Mobile,Vehicle Type,Model,Reg No,Location,Flat,Service,Status,Date\\n';
+            allLeadsData.forEach(r => {
+              csv += \`"\${r.id}","\${r.name}","\${r.email}","\${r.mobile}","\${r.vehicle_type}","\${r.vehicle_model}","\${r.vehicle_registration_number}","\${r.location}","\${r.flat_number}","\${r.preferred_service}","\${r.status}","\${r.created_at}"\\n\`;
             });
-
-            const blob = new Blob([csvRows.join('\\n')], { type: 'text/csv' });
+            const blob = new Blob([csv], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'washo_leads_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.download = 'washo_leads.csv';
             a.click();
-            window.URL.revokeObjectURL(url);
           }
         </script>
       </body>
@@ -797,11 +809,11 @@ app.get('/admin', async (req, res) => {
 
     res.send(html);
   } catch (err) {
-    console.error('Error serving admin page:', err);
-    res.status(500).send('Database Error');
+    console.error('Error fetching admin dashboard:', err);
+    res.status(500).send('Error loading dashboard');
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  console.log(`WASHO Server running on port ${port}`);
 });
