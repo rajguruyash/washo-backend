@@ -196,9 +196,10 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
     // Trigger Resend Email Notification
     try {
       if (process.env.RESEND_API_KEY) {
+        const recipients = process.env.ADMIN_EMAIL ? [process.env.ADMIN_EMAIL, email] : [email];
         await resend.emails.send({
           from: process.env.EMAIL_FROM || 'WASHO <onboarding@resend.dev>',
-          to: process.env.ADMIN_EMAIL ? [process.env.ADMIN_EMAIL, email] : [email],
+          to: recipients,
           subject: `New WASHO Booking Confirmation: ${preferredService}`,
           html: `
             <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
@@ -699,24 +700,27 @@ app.get('/admin', async (req, res) => {
             })
             .then(res => res.json())
             .then(data => {
-              if (!data.success) alert('Failed to update status');
+              if (data.success) location.reload();
+              else alert('Status update failed');
             })
-            .catch(err => alert('Network error updating status'));
+            .catch(() => alert('Error updating status'));
           }
 
           function deleteLead(id) {
-            if (!confirm('Permanently delete this lead?')) return;
-            fetch('/api/admin/leads/' + id + '?key=' + key, { method: 'DELETE' })
-              .then(res => res.json())
-              .then(data => {
-                if (data.success) location.reload();
-                else alert(data.message || 'Failed to delete');
-              })
-              .catch(err => alert('Network error during deletion'));
+            if (!confirm('Are you sure you want to delete this booking?')) return;
+            fetch('/api/admin/leads/' + id + '?key=' + key, {
+              method: 'DELETE'
+            })
+            .then(res => res.json())
+            .then(data => {
+              if (data.success) location.reload();
+              else alert('Delete failed');
+            })
+            .catch(() => alert('Error deleting lead'));
           }
 
           function openAddModal() {
-            document.getElementById('modalTitle').innerText = 'Add Manual Booking';
+            document.getElementById('modalTitle').innerText = 'Add New Booking';
             document.getElementById('editId').value = '';
             document.getElementById('mName').value = '';
             document.getElementById('mEmail').value = '';
@@ -724,7 +728,7 @@ app.get('/admin', async (req, res) => {
             document.getElementById('mVehicleType').value = 'Car';
             document.getElementById('mVehicleModel').value = '';
             document.getElementById('mRegNo').value = '';
-            document.getElementById('mLocation').value = 'Yashwin Orizzonte - A Wing';
+            document.getElementById('mLocation').value = '';
             document.getElementById('mFlat').value = '';
             document.getElementById('mService').value = 'Car Basic';
             document.getElementById('mStatus').value = 'Pending';
@@ -732,7 +736,7 @@ app.get('/admin', async (req, res) => {
           }
 
           function openEditModal(lead) {
-            document.getElementById('modalTitle').innerText = 'Edit Booking Record';
+            document.getElementById('modalTitle').innerText = 'Edit Booking #' + lead.id;
             document.getElementById('editId').value = lead.id;
             document.getElementById('mName').value = lead.name || '';
             document.getElementById('mEmail').value = lead.email || '';
@@ -751,56 +755,63 @@ app.get('/admin', async (req, res) => {
             document.getElementById('leadModal').style.display = 'none';
           }
 
-          // Close modal when clicking outside the box
-          window.onclick = function(event) {
-            const modal = document.getElementById('leadModal');
-            if (event.target === modal) {
-              closeModal();
-            }
-          };
-
           function saveLead() {
             const id = document.getElementById('editId').value;
-            const body = {
+            const payload = {
               name: document.getElementById('mName').value,
               email: document.getElementById('mEmail').value,
               mobile: document.getElementById('mMobile').value,
               vehicle_type: document.getElementById('mVehicleType').value,
               vehicle_model: document.getElementById('mVehicleModel').value,
-              vehicle_registration_number: document.getElementById('mRegNo').value,
+              vehicle_registration_number: document.getElementById('mRegNo').value.toUpperCase(),
               location: document.getElementById('mLocation').value,
               flat_number: document.getElementById('mFlat').value,
               preferred_service: document.getElementById('mService').value,
-              status: document.getElementById('mStatus').value,
+              status: document.getElementById('mStatus').value
             };
 
-            const url = id ? '/api/admin/leads/' + id + '?key=' + key : '/api/admin/leads?key=' + key;
+            const url = id ? ('/api/admin/leads/' + id + '?key=' + key) : ('/api/admin/leads?key=' + key);
             const method = id ? 'PUT' : 'POST';
 
             fetch(url, {
               method: method,
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
+              body: JSON.stringify(payload)
             })
             .then(res => res.json())
             .then(data => {
               if (data.success) location.reload();
-              else alert(data.message || 'Operation failed');
+              else alert(data.message || 'Save failed');
             })
-            .catch(err => alert('Network error during save'));
+            .catch(() => alert('Error saving record'));
           }
 
           function exportCSV() {
-            let csv = 'ID,Name,Email,Mobile,Vehicle Type,Model,Reg No,Location,Flat,Service,Status,Date\\n';
-            allLeadsData.forEach(r => {
-              csv += \`"\${r.id}","\${r.name}","\${r.email}","\${r.mobile}","\${r.vehicle_type}","\${r.vehicle_model}","\${r.vehicle_registration_number}","\${r.location}","\${r.flat_number}","\${r.preferred_service}","\${r.status}","\${r.created_at}"\\n\`;
-            });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'washo_leads.csv';
-            a.click();
+            if (!allLeadsData.length) return alert('No data to export');
+            const headers = ['ID', 'Name', 'Email', 'Mobile', 'Vehicle Type', 'Vehicle Model', 'Reg No', 'Location', 'Flat', 'Service', 'Status', 'Timestamp'];
+            const csvRows = allLeadsData.map(l => [
+              l.id,
+              '"' + (l.name || '') + '"',
+              '"' + (l.email || '') + '"',
+              '"' + (l.mobile || '') + '"',
+              '"' + (l.vehicle_type || '') + '"',
+              '"' + (l.vehicle_model || '') + '"',
+              '"' + (l.vehicle_registration_number || '') + '"',
+              '"' + (l.location || '') + '"',
+              '"' + (l.flat_number || '') + '"',
+              '"' + (l.preferred_service || '') + '"',
+              '"' + (l.status || '') + '"',
+              '"' + (l.timestamp || '') + '"'
+            ]);
+
+            const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...csvRows.map(e => e.join(','))].join('\n');
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement('a');
+            link.setAttribute('href', encodedUri);
+            link.setAttribute('download', 'washo_leads_' + new Date().toISOString().slice(0, 10) + '.csv');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
           }
         </script>
       </body>
@@ -809,8 +820,8 @@ app.get('/admin', async (req, res) => {
 
     res.send(html);
   } catch (err) {
-    console.error('Error fetching admin dashboard:', err);
-    res.status(500).send('Error loading dashboard');
+    console.error('Error rendering admin dashboard:', err);
+    res.status(500).send('Server Error loading admin dashboard');
   }
 });
 
