@@ -316,6 +316,9 @@ app.get('/admin', async (req, res) => {
     const scheduledCount = rows.filter(r => r.status === 'Scheduled').length;
     const completedCount = rows.filter(r => r.status === 'Completed').length;
 
+    // Escaped JSON safe for inline client script injection
+    const safeLeadsJson = JSON.stringify(rows).replace(/</g, '\\u003c');
+
     let html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -684,19 +687,19 @@ app.get('/admin', async (req, res) => {
 
         <script>
           const key = '${adminKey}';
-          const allLeadsData = ${JSON.stringify(rows)};
+          const allLeadsData = ${safeLeadsJson};
           let currentTab = 'all';
 
           function setFilter(tab, element) {
             currentTab = tab;
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
             element.classList.add('active');
             filterLeads();
           }
 
           function filterLeads() {
             const query = document.getElementById('searchInput').value.toLowerCase();
-            document.querySelectorAll('.lead-item').forEach(item => {
+            document.querySelectorAll('.lead-item').forEach(function(item) {
               const text = item.getAttribute('data-search');
               const status = item.getAttribute('data-status');
               const matchesSearch = text.includes(query);
@@ -712,12 +715,12 @@ app.get('/admin', async (req, res) => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ status: newStatus })
             })
-            .then(res => res.json())
-            .then(data => {
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
               if (data.success) location.reload();
               else alert('Status update failed');
             })
-            .catch(() => alert('Error updating status'));
+            .catch(function() { alert('Error updating status'); });
           }
 
           function deleteLead(id) {
@@ -725,12 +728,12 @@ app.get('/admin', async (req, res) => {
             fetch('/api/admin/leads/' + id + '?key=' + key, {
               method: 'DELETE'
             })
-            .then(res => res.json())
-            .then(data => {
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
               if (data.success) location.reload();
               else alert('Delete failed');
             })
-            .catch(() => alert('Error deleting lead'));
+            .catch(function() { alert('Error deleting lead'); });
           }
 
           function openAddModal() {
@@ -750,7 +753,7 @@ app.get('/admin', async (req, res) => {
           }
 
           function openEditModalById(id) {
-            const lead = allLeadsData.find(l => Number(l.id) === Number(id));
+            const lead = allLeadsData.find(function(l) { return Number(l.id) === Number(id); });
             if (lead) {
               openEditModal(lead);
             }
@@ -799,33 +802,35 @@ app.get('/admin', async (req, res) => {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload)
             })
-            .then(res => res.json())
-            .then(data => {
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
               if (data.success) location.reload();
               else alert(data.message || 'Save failed');
             })
-            .catch(() => alert('Error saving record'));
+            .catch(function() { alert('Error saving record'); });
           }
 
           function exportCSV() {
             if (!allLeadsData.length) return alert('No data to export');
             const headers = ['ID', 'Name', 'Email', 'Mobile', 'Vehicle Type', 'Vehicle Model', 'Reg No', 'Location', 'Flat', 'Service', 'Status', 'Timestamp'];
-            const csvRows = allLeadsData.map(l => [
-              l.id,
-              '"' + (l.name || '') + '"',
-              '"' + (l.email || '') + '"',
-              '"' + (l.mobile || '') + '"',
-              '"' + (l.vehicle_type || '') + '"',
-              '"' + (l.vehicle_model || '') + '"',
-              '"' + (l.vehicle_registration_number || '') + '"',
-              '"' + (l.location || '') + '"',
-              '"' + (l.flat_number || '') + '"',
-              '"' + (l.preferred_service || '') + '"',
-              '"' + (l.status || '') + '"',
-              '"' + (l.timestamp || '') + '"'
-            ]);
+            const csvRows = allLeadsData.map(function(l) {
+              return [
+                l.id,
+                '"' + (l.name || '') + '"',
+                '"' + (l.email || '') + '"',
+                '"' + (l.mobile || '') + '"',
+                '"' + (l.vehicle_type || '') + '"',
+                '"' + (l.vehicle_model || '') + '"',
+                '"' + (l.vehicle_registration_number || '') + '"',
+                '"' + (l.location || '') + '"',
+                '"' + (l.flat_number || '') + '"',
+                '"' + (l.preferred_service || '') + '"',
+                '"' + (l.status || '') + '"',
+                '"' + (l.timestamp || '') + '"'
+              ];
+            });
 
-            const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...csvRows.map(e => e.join(','))].join('\n');
+            const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...csvRows.map(function(e) { return e.join(','); })].join('\\n');
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement('a');
             link.setAttribute('href', encodedUri);
