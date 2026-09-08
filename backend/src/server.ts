@@ -194,54 +194,40 @@ app.post('/api/leads', upload.single('paymentImage'), async (req: express.Reques
 
     const newLead = result.rows[0];
 
-    // Safe Email Notification via Resend
-    try {
-      if (!process.env.RESEND_API_KEY) {
-        console.warn('⚠️ RESEND_API_KEY missing in .env file. Skipping email dispatch.');
-      } else {
-        const targetEmail = process.env.ADMIN_EMAIL || email;
+   // Safe Email Notification via Resend (Domain Verified)
+try {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('⚠️ RESEND_API_KEY missing in .env file. Skipping email dispatch.');
+  } else {
+    const adminEmail = process.env.ADMIN_EMAIL || 'contact.washo@gmail.com';
+    const senderAddress = process.env.EMAIL_FROM || 'WASHO <notifications@washo.online>';
 
-        const emailResult = await resend.emails.send({
-          from: process.env.EMAIL_FROM || 'WASHO <onboarding@resend.dev>',
-          to: [targetEmail],
-          subject: `New WASHO Booking Confirmation: ${preferredService}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
-              <h2 style="color: #3b82f6;">New Booking Received!</h2>
-              <p>A new wash service request has been submitted successfully.</p>
-              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
-              <p><strong>Customer Name:</strong> ${name}</p>
-              <p><strong>Email:</strong> ${email}</p>
-              <p><strong>Mobile:</strong> ${mobile}</p>
-              <p><strong>Vehicle:</strong> ${vehicleType || 'Car'} - ${vehicleModel} (${formattedRegNo})</p>
-              <p><strong>Location:</strong> Flat ${flatNumber}, ${location}</p>
-              <p><strong>Service Selected:</strong> ${preferredService}</p>
-              <p><strong>Submitted At:</strong> ${timestamp}</p>
-            </div>
-          `
-        });
-        
-        console.log('✅ Resend Email Sent:', emailResult);
-      }
-    } catch (emailErr) {
-      console.error('❌ Failed to send notification email via Resend:', emailErr);
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: isPaidPlan
-        ? 'Booking submitted successfully!'
-        : 'Booking request received! Our team will contact you soon.',
-      data: newLead,
+    // Send confirmation directly to customer & alert copy to admin
+    const emailResult = await resend.emails.send({
+      from: senderAddress,
+      to: [email, adminEmail],
+      subject: `WASHO Booking Confirmation: ${preferredService}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; background-color: #f8fafc; border-radius: 10px;">
+          <h2 style="color: #3b82f6;">Booking Received!</h2>
+          <p>Hi ${name}, thank you for choosing WASHO. Here are your booking details:</p>
+          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+          <p><strong>Customer Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Mobile:</strong> ${mobile}</p>
+          <p><strong>Vehicle:</strong> ${vehicleType || 'Car'} - ${vehicleModel} (${formattedRegNo})</p>
+          <p><strong>Location:</strong> Flat ${flatNumber}, ${location}</p>
+          <p><strong>Service Selected:</strong> ${preferredService}</p>
+          <p><strong>Submitted At:</strong> ${timestamp}</p>
+        </div>
+      `
     });
-  } catch (error) {
-    console.error('Error processing lead submission:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error while processing your request.',
-    });
+    
+    console.log('✅ Resend Email Sent:', emailResult);
   }
-});
+} catch (emailErr) {
+  console.error('❌ Failed to send notification email via Resend:', emailErr);
+}
 
 // Admin API Routes
 app.get('/api/admin/leads', verifyAdminKey, async (req, res) => {
