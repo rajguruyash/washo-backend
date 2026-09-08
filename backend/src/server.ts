@@ -229,6 +229,15 @@ try {
   console.error('❌ Failed to send notification email via Resend:', emailErr);
 }
 
+    // Properly return success response and close the app.post route
+    res.status(200).json({ success: true, lead: newLead });
+  } catch (err) {
+    console.error('Error creating lead:', err);
+    res.status(500).json({ success: false, message: 'Server error saving booking.' });
+  }
+});
+
+
 // Admin API Routes
 app.get('/api/admin/leads', verifyAdminKey, async (req, res) => {
   try {
@@ -840,3 +849,4 @@ app.get('/admin', async (req, res) => {
 app.listen(port, () => {
   console.log(`WASHO Server running on port ${port}`);
 });
+
