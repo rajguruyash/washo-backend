@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarCheck, Camera, Droplets, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
 import { AvatarFull } from '../components/brand/Avatar';
-import { ServiceArt } from '../components/brand/ServiceArt';
+import { ServicePhoto } from '../components/ServicePhoto';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
@@ -29,8 +29,6 @@ const why = [
   { icon: ShieldCheck, title: 'Safe for paint', text: 'Microfibre and pH-balanced foam. Scratch-free by design.' },
   { icon: Users, title: 'Verified crew', text: 'Skilled professionals who are known to your society.' },
 ];
-
-const art = (code: string) => (code.startsWith('bike') ? 'bike_wash' : code.startsWith('suv') ? 'suv_deep_clean' : code.includes('deep') ? 'car_deep_clean' : 'car_body_wash');
 
 export default function Landing() {
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -115,7 +113,7 @@ export default function Landing() {
             return (
               <Reveal key={s.id} delay={i * 0.05}>
                 <SpotlightCard spotlightColor="rgba(63, 124, 255, 0.28)" className="h-full rounded-3xl! border-white/[0.09]! bg-white/[0.045]! p-0! backdrop-blur-xl">
-                  <div className="aspect-[400/260]"><ServiceArt scene={art(s.code)} /></div>
+                  <ServicePhoto code={s.code} name={s.name} className="aspect-[4/3]" />
                   <div className="p-5"><h3 className="font-bold">{s.name}</h3><p className="mt-1 text-sm text-fog">{s.tagline ?? s.description}</p>{own != null && <p className="mt-3 font-display text-2xl font-extrabold">{rupees(own)}</p>}</div>
                 </SpotlightCard>
               </Reveal>
