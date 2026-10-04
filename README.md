@@ -1,272 +1,61 @@
-# WASHO Website - Premium Car & Bike Washing Service
+# WASHO website
 
-A premium, modern, responsive one-page website for WASHO car & bike washing service, designed to match the exact visual identity of the WASHO flyer.
+Doorstep car and bike washing for Kharadi, Pune. React 19 + Vite + Tailwind 4 frontend, and a thin Express server.
 
-## Features
+**Supabase is the single backend**, shared with the mobile app: Postgres (with row-level security and all business rules as
+functions), Auth (phone OTP via Twilio Verify), Razorpay edge functions and Storage. This repo's server contains no business
+logic and no database of its own; it signs people in, calls the database functions *as the signed-in person*, and relays the
+Razorpay edge functions. The mobile app is not touched by anything in this repo.
 
-- **Pixel-perfect flyer replication**: Transforms the physical WASHO flyer into a premium digital experience
-- **Responsive design**: Optimized for mobile (NFC/QR code access), tablet, and desktop
-- **Lead capture system**: Beautiful form for collecting customer information with source tracking
-- **Source tracking**: Tracks leads from NFC, QR codes, WhatsApp, pamphlets, and events
-- **Premium UI/UX**: Clean, trustworthy, professional design matching WASHO brand identity
-- **Performance optimized**: Fast loading with excellent Lighthouse scores
-- **SEO friendly**: Proper metadata, semantic HTML, and structured data
-- **Accessibility**: WCAG compliant with proper contrast and keyboard navigation
+## What the website does
 
-## Tech Stack
+- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1/2/3 washes a week → Body/Deep
+  combination and days → 1/3/6/12 months → start date and time slot → request. WASHO reviews it and sets the price; the customer
+  sees a fully itemised quote (every discount is its own line), accepts, pays through Razorpay, and only after the payment is
+  **verified** does the membership activate and every wash get scheduled. Also: dashboard, membership detail with rescheduling
+  (washes can be rescheduled, not cancelled), single washes, booking details with before/after photos, vehicles, addresses.
+- **Specialist** (`/worker`, email + password): Today / In progress / Upcoming / Completed / Cancelled-moved queues, only the
+  washes assigned to them; call customer → customer confirmed or call not picked up (wash stays scheduled) → start → before photos
+  → after photos → complete; issues and notes.
+- **Admin** (`/admin`, email + password, role from `profiles.role`): requests (quote with a labelled adjustment, or reject),
+  washes (assign, reschedule, cancel, history, photos), memberships (regular specialist), customers and specialists, and payments
+  or refunds that need a human.
+- No credit system anywhere.
 
-- **Framework**: React 18 with TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **State Management**: React hooks
-- **API Integration**: Ready for backend connection
-
-## Project Structure
-
-```
-src/
-├── components/
-│   ├── Navbar.tsx
-│   ├── Hero.tsx
-│   ├── WhyWasho.tsx
-│   ├── Pricing.tsx
-│   ├── ServicesComparison.tsx
-│   ├── SubscribeSection.tsx
-│   ├── LeadForm.tsx
-│   ├── Contact.tsx
-│   └── Footer.tsx
-├── lib/
-│   ├── tracking.ts    # Source parameter tracking (NFC/QR/WhatsApp/etc.)
-│   └── api.ts         # API service layer for backend integration
-├── assets/            # Logo, hero image, icons (to be added)
-├── App.tsx
-├── main.tsx
-└── index.css
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 16+ 
-- npm or yarn
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-### Development
-
-To start the development server:
+## Run it locally (no Supabase project needed)
 
 ```bash
-npm run dev
+npm install
+npm run dev:stack      # local fake Supabase (Auth, edge functions, Storage) over a real local copy of the production schema + all migrations
+PORT=5001 npm run dev  # in a second terminal: Vite, proxying /api to the stack
 ```
 
-The website will be available at `http://localhost:5173`
+Customer OTP is `123456`. Admin `admin@washo.test` / `Admin-pass-1`, specialist `worker@washo.test` / `Worker-pass-1`.
+Razorpay is simulated locally. Needs a local Postgres and the production schema dump (see `supabase/README.md`).
 
-### Building for Production
+## Against a Supabase branch / test project
 
-To create a production build:
+Apply `supabase/migrations/*` (and `supabase/cutover/*` on a **branch only**; see below), deploy the edge functions, set the
+`.env` values from `.env.example`, then `npm run backend:dev`. Never point this at production until the checklist in
+`supabase/README.md` is done.
 
-```bash
-npm run build
-```
+> The website needs `supabase/cutover/20261005000001_*` (credit-free wash completion). The cutover files must not be applied to
+> production until the mobile app release that no longer needs the retired functions is live.
 
-The built files will be in the `dist/` directory.
+## Tests
 
-### Preview Production Build
+| Command | What it proves |
+|---|---|
+| `npm run typecheck` | frontend + server |
+| `npm test` | pure unit tests (formatting, Razorpay signature helpers) |
+| `npm run db:test:baseline` | the production vulnerabilities reproduce on the unmodified schema |
+| `npm run db:test` | safe migrations (rolled-back transactions on a local replica) |
+| `npm run db:test:full` | safe + cutover: end-to-end membership and worker lifecycle |
+| `npm run test:api` | the website server over HTTP against the fake Supabase and the real database rules |
+| `npm run test:all` | everything above except the baseline |
 
-To preview the production build locally:
+## Layout
 
-```bash
-npm run preview
-```
-
-## Key Implementation Details
-
-### Source Tracking (NFC/QR Code Support)
-
-The website automatically captures URL parameters for tracking marketing channels:
-
-- `?source=nfc` - NFC tag scans
-- `?source=pamphlet` - Pamphlet distribution
-- `?source=whatsapp` - WhatsApp shares
-- `?source=event` - Event marketing
-
-The source parameter is preserved through the user's session and included in lead submissions.
-
-### Lead Form API Endpoint
-
-The lead form is designed to submit to `/api/leads` endpoint with this payload structure:
-
-```json
-{
-  "name": "John Doe",
-  "phone": "9876543210",
-  "vehicleType": "car",
-  "vehicleModel": "Honda City",
-  "location": "Kharadi",
-  "preferredService": "first-wash",
-  "source": "nfc",
-  "timestamp": "2026-08-30T10:30:00Z"
-}
-```
-
-### Components
-
-All components are reusable and follow the WASHO brand guidelines:
-
-- **Navbar**: Sticky navigation with logo, menu links, and CTA button
-- **Hero**: Premium hero section with logo, tagline, headline, offer, and CTAs
-- **WhyWasho**: Six benefits with icons and descriptions
-- **Pricing**: Four plan cards (Bike, Car Basic, Car Pro, Custom) with savings badges
-- **ServicesComparison**: Responsive comparison table of services included
-- **SubscribeSection**: Lifestyle illustration with four key benefits
-- **LeadForm**: Conversion-focused form with validation and success state
-- **Contact**: Phone, WhatsApp, email, and location information
-- **Footer**: Blue footer with contact info and social media
-
-## Design Specifications Implemented
-
-### Colors
-- Primary WASHO Blue: `#1248B8`
-- Dark Blue: `#083A9B`
-- Deep Navy: `#062F80`
-- Light Blue: `#EAF2FF`
-- Very Light Blue: `#F5F8FF`
-- White: `#FFFFFF`
-- Dark Text: `#111111`
-- Secondary Grey: `#555555`
-- Offer Yellow: `#FFD84D`
-
-### Typography
-- Headings: Montserrat/Poppins (700-800 weight)
-- Body: Inter/Poppins (400-500 weight)
-- Prices: Montserrat/Poppins (700-800 weight)
-
-### Visual Elements
-- Exact WASHO logo treatment preserved
-- Blue circular icon containers
-- Yellow offer highlights
-- Clean automotive photography style
-- Professional card-based layouts
-- Subtle animations and hover effects
-- Mobile-optimized experience
-
-## Deployment
-
-The built files in `dist/` can be deployed to any static hosting service:
-
-- Vercel
-- Netlify
-- AWS S3 + CloudFront
-- Firebase Hosting
-- GitHub Pages
-- Traditional web hosting
-
-### Example Deployment Commands
-
-**Vercel:**
-```bash
-vercel
-```
-
-**Netlify:**
-```bash
-netlify deploy --prod --dir=dist
-```
-
-**AWS S3:**
-```bash
-aws s3 sync dist/ s3://your-bucket-name/
-```
-
-## Backend Integration Notes
-
-### API Endpoints Needed
-
-1. **POST `/api/leads`** - Lead form submission
-2. **GET `/api/service-area`** - Service area information (optional)
-
-### Environment Variables
-
-Create a `.env` file with:
-```
-VITE_API_URL=https://your-api-domain.com/api
-```
-
-### Security Considerations
-
-- Implement CORS restrictions on API endpoints
-- Add rate limiting to prevent form spam
-- Validate and sanitize all input data
-- Use HTTPS in production
-- Consider CAPTCHA for high-volume scenarios
-
-## Browser Support
-
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
-- Mobile Chrome/Android
-- Mobile Safari/iOS
-
-## Performance Optimizations Implemented
-
-- Tailwind CSS purging for minimal CSS
-- Lazy loading images (where implemented)
-- Efficient React rendering with proper keys
-- Optimized bundle size with Vite
-- Minimal third-party dependencies
-- CSS optimization through Tailwind JIT
-- Efficient event handling and state updates
-
-## Accessibility Features
-
-- Semantic HTML structure
-- Proper ARIA labels where needed
-- Sufficient color contrast (WCAG AA)
-- Keyboard navigable interface
-- Focus visible states
-- Responsive text scaling
-- Alt text for all meaningful images
-
-## Customization
-
-To customize the website for your specific needs:
-
-1. **Logo**: Replace the placeholder logo in Hero component with actual WASHO logo asset
-2. **Images**: Add actual hero image and lifestyle illustrations to `/assets/` directory
-3. **Icons**: Replace emoji placeholders with proper icon set (Font Awesome, Heroicons, or custom SVGs)
-4. **Colors**: Adjust in `tailwind.config.cjs` if brand colors change
-5. **Content**: Update text content in components as needed
-6. **API**: Update `src/lib/api.ts` with actual endpoint URLs
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Image not loading**: Ensure images are in `/public/` directory or imported correctly
-2. **Tailwind classes not working**: Check `tailwind.config.cjs` content paths
-3. **Form not submitting**: Verify API endpoint is accessible and CORS is configured
-4. **Source tracking not working**: Check that URL parameters are being captured correctly
-
-### Getting Help
-
-If you encounter issues:
-1. Check browser console for errors
-2. Verify network requests in dev tools
-3. Check that Tailwind CSS is properly compiled
-4. Ensure all dependencies are installed with `npm install`
-
----
-
-**Note**: This website is designed to be an exact digital transformation of the WASHO flyer. All colors, typography, layout, and branding elements are carefully crafted to match the source material while providing a premium, modern web experience optimized for lead generation through NFC, QR codes, and mobile access.
-
-Built with ❤️ for WASHO - Professional Car & Bike Washing at Your Doorstep
+- `src/`: React app (`pages/app`, `pages/worker`, `pages/admin`, `components`, `lib`)
+- `backend/src/`: Express (auth relay, database calls as the user, edge-function relay, photo storage)
+- `supabase/`: migrations, cutover migrations, edge functions, importer, test harness (`supabase/README.md`)

@@ -1,254 +1,159 @@
 @import "tailwindcss";
 
+/* ───────────── WASHO design tokens ─────────────
+   Dark, automotive, WASHO blue. Glass is used for floating surfaces only
+   (cards that sit on the atmosphere, sheets, nav) — not for every block. */
 @theme {
-  --font-sans: Inter, ui-sans-serif, system-ui;
-  --font-heading: Montserrat, Poppins, ui-sans-serif, system-ui;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  --color-washo-blue: #1248B8;
-  --color-washo-dark: #083A9B;
-  --color-washo-navy: #062F80;
-  --color-washo-light: #EAF2FF;
-  --color-washo-lightest: #F5F8FF;
-  --color-dark: #111111;
-  --color-grey: #555555;
-  --color-offer: #FFD84D;
+  --color-ink-950: #05080f;
+  --color-ink-900: #0a101c;
+  --color-ink-850: #0d1527;
+  --color-ink-800: #111a2f;
+  --color-ink-700: #1a2542;
+  --color-ink-600: #27355c;
+
+  /* 700 is the brand blue from the flyer; lighter steps are for text/glow on dark */
+  --color-washo-300: #9bbfff;
+  --color-washo-400: #6a9cff;
+  --color-washo-500: #3f7cff;
+  --color-washo-600: #2a62e6;
+  --color-washo-700: #1248b8;
+  --color-washo-800: #083a9b;
+  --color-washo-900: #062f80;
+
+  --color-fog: #93a1bf;
+  --color-mist: #c4cde0;
+  --color-offer: #ffd84d;
+  --color-ok: #3dd9a0;
+  --color-warn: #ffb547;
+  --color-bad: #ff6b7a;
+
+  --shadow-glow: 0 0 0 1px rgb(63 124 255 / 0.35), 0 12px 40px -8px rgb(42 98 230 / 0.55);
+  --shadow-card: 0 1px 0 0 rgb(255 255 255 / 0.05) inset, 0 20px 40px -24px rgb(0 0 0 / 0.7);
+
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-shake: shake 0.4s ease-in-out;
+  --animate-orbit: orbit 28s ease-in-out infinite alternate;
+  /* React Bits StarBorder */
+  --animate-star-movement-bottom: star-movement-bottom 6s linear infinite alternate;
+  --animate-star-movement-top: star-movement-top 6s linear infinite alternate;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+  @keyframes star-movement-bottom {
+    0% { transform: translate(0%, 0%); opacity: 1; }
+    100% { transform: translate(-100%, 0%); opacity: 0; }
+  }
+  @keyframes star-movement-top {
+    0% { transform: translate(0%, 0%); opacity: 1; }
+    100% { transform: translate(100%, 0%); opacity: 0; }
+  }
+  @keyframes orbit {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    100% { transform: translate3d(40px, -30px, 0) scale(1.12); }
+  }
 }
 
-/* Custom base styles */
-html,
-body,
-#root {
-  @apply h-full w-full font-sans bg-white text-dark;
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
-  @apply antialiased;
+  @apply bg-ink-950 font-sans text-white antialiased;
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
 }
 
-/* Custom utility classes */
-.btn-primary {
-  @apply bg-washo-blue text-white px-6 py-3 rounded-lg font-heading font-semibold hover:bg-washo-dark transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
+#root { min-height: 100dvh; }
+
+h1, h2, h3, h4 { @apply font-display tracking-tight; }
+
+::selection { background: rgb(63 124 255 / 0.4); }
+
+:focus-visible {
+  outline: 2px solid var(--color-washo-400);
+  outline-offset: 2px;
 }
 
-.btn-secondary {
-  @apply bg-offer text-dark px-6 py-3 rounded-lg font-heading font-semibold hover:bg-yellow-400 transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
-}
+/* Hide the number-input spinners, keep inputs tidy on iOS */
+input, select, textarea { font-size: 16px; }
+@media (min-width: 640px) { input, select, textarea { font-size: 14px; } }
 
-.btn-outline {
-  @apply border-2 border-washo-blue text-washo-blue px-6 py-3 rounded-lg font-heading font-semibold hover:bg-washo-blue hover:text-white transition-colors duration-200 hover:shadow-lg transform hover:-translate-y-0.5;
-}
-
-.section-heading {
-  @apply text-3xl font-bold uppercase text-washo-blue mb-8 flex items-center justify-center gap-4;
-}
-
-.section-heading::before,
-.section-heading::after {
-  @apply content-[''] h-0.5 w-[60px] bg-washo-blue;
-}
-
-.section-heading-sm {
-  @apply text-2xl font-bold uppercase text-washo-blue mb-6 flex items-center justify-center gap-2;
-}
-
-.section-heading-sm::before,
-.section-heading-sm::after {
-  @apply content-[''] h-0.5 w-[30px] bg-washo-blue;
-}
-
-.icon-container {
-  @apply flex items-center justify-center w-[50px] h-[50px] bg-washo-light rounded-full mb-4;
-}
-
-.icon-container-sm {
-  @apply flex items-center justify-center w-[40px] h-[40px] bg-washo-light rounded-full mb-3;
-}
-
-/* Responsive container */
-.container-custom {
-  @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12;
-}
-
-/* Card styles */
-.card {
-  @apply bg-white border border-washo-light/50 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-300 transform hover:-translate-y-1;
-}
-
-.card-header {
-  @apply flex items-center gap-3 mb-4;
-}
-
-.card-title {
-  @apply text-washo-blue font-heading font-semibold text-xl;
-}
-
-.card-subtitle {
-  @apply text-washo-dark font-medium text-base mb-2;
-}
-
-.card-price {
-  @apply text-3xl font-bold text-washo-blue mb-4;
-}
-
-.card-original-price {
-  @apply text-washo-dark line-through text-lg mb-2;
-}
-
-.card-savings-badge {
-  @apply bg-offer text-dark px-3 py-1 rounded font-medium inline-block mb-4;
-}
-
-.card-note {
-  @apply text-washo-dark text-sm italic mt-2;
-}
-
-/* Table styles */
-.table-responsive {
-  @apply overflow-x-auto;
-}
-
-.service-table {
-  @apply w-full border-collapse border-washo-light/50 rounded-xl overflow-hidden shadow-sm;
-}
-
-.service-table th {
-  @apply bg-washo-blue text-white px-6 py-4 text-left font-heading font-semibold uppercase tracking-wider;
-}
-
-.service-table td {
-  @apply px-6 py-4 border-t border-washo-light/50;
-}
-
-.service-table tr:nth-child(even) td {
-  @apply bg-washo-lightest;
-}
-
-.service-check {
-  @apply flex items-center gap-2;
-}
-
-.service-check-icon {
-  @apply flex items-center justify-center w-5 h-5 bg-washo-blue text-white rounded-full text-xs font-bold;
-}
-
-.service-check-text {
-  @apply text-washo-dark font-medium;
-}
-
-.form-input {
-  @apply w-full border border-washo-light/50 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-washo-blue focus:border-washo-blue transition-all duration-200;
-}
-
-.form-label {
-  @apply text-washo-dark font-medium mb-2 block;
-}
-
-/* Fixed Mobile Modal Styles */
-.modal-backdrop {
-  @apply fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 sm:p-6 backdrop-blur-sm overflow-hidden;
-}
-
-.modal-content {
-  @apply bg-white rounded-2xl p-5 sm:p-8 w-full max-w-md relative max-h-[85dvh] flex flex-col shadow-2xl my-auto overflow-hidden;
-}
-
-.modal-body {
-  @apply overflow-y-auto pr-1 flex-1 mt-6 -mr-1;
-  -webkit-overflow-scrolling: touch;
-}
-
-.close-btn {
-  @apply absolute top-3 right-3 sm:top-4 sm:right-4 z-20 p-2 rounded-full text-washo-dark hover:text-washo-blue hover:bg-washo-light/60 transition-colors duration-200 cursor-pointer;
-}
-
-/* Animation utilities */
-.fade-in {
-  animation: fade-in 0.6s ease-out forwards;
-}
-
-.slide-up {
-  animation: slide-up 0.6s ease-out forwards;
-}
-
-.delay-100 {
-  animation-delay: 0.1s;
-}
-
-.delay-200 {
-  animation-delay: 0.2s;
-}
-
-.delay-300 {
-  animation-delay: 0.3s;
-}
-
-/* Keyframes for animations */
-@keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+@layer components {
+  /* Floating glass surface. Backdrop blur is capped so it stays smooth on phones. */
+  .glass {
+    @apply rounded-3xl border border-white/[0.09] bg-white/[0.045] backdrop-blur-xl;
+    box-shadow: var(--shadow-card);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  .glass-strong {
+    @apply rounded-3xl border border-white/[0.14] bg-ink-800/80 backdrop-blur-2xl;
+    box-shadow: var(--shadow-card);
+  }
+  /* Quiet panel: no blur, just a hairline — for dense, repeated content */
+  .panel {
+    @apply rounded-2xl border border-white/[0.07] bg-white/[0.03];
+  }
+  .hairline { @apply border-white/[0.08]; }
+
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-washo-300;
+  }
+
+  .skeleton {
+    @apply rounded-xl bg-white/[0.06];
+    background-image: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.07), transparent);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .text-gradient {
+    background-image: linear-gradient(120deg, #ffffff 20%, var(--color-washo-300) 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
-@keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+@keyframes art-bubble {
+  0%, 100% { transform: translateY(0); opacity: .9; }
+  50% { transform: translateY(-9px); opacity: .5; }
 }
-
-.animate-fade-in {
-  animation: fade-in 0.6s ease-out forwards;
+@keyframes art-twinkle {
+  0%, 100% { transform: scale(.6) rotate(0); opacity: .35; }
+  50% { transform: scale(1.1) rotate(20deg); opacity: 1; }
 }
-
-.animate-slide-up {
-  animation: slide-up 0.6s ease-out forwards;
-}
-
-.animation-delay-100 {
-  animation-delay: 0.1s;
-}
-
-.animation-delay-200 {
-  animation-delay: 0.2s;
-}
-
-.animation-delay-300 {
-  animation-delay: 0.3s;
-}
-
-/* Hover utilities */
-.hover-lift {
-  @apply transition-transform duration-300 hover:-translate-y-1;
-}
-
-.hover-shadow {
-  @apply transition-shadow duration-300 hover:shadow-md;
-}
-
-/* Mobile-specific styles */
-.mobile-sticky-cta {
-  @apply bottom-0 left-0 right-0 bg-offer px-4 py-3 text-center font-heading font-semibold text-dark shadow-lg z-50;
-}
-
-/* Prevent horizontal overflow */
-.overflow-x-hidden {
-  @apply overflow-x-hidden;
+@keyframes art-spray {
+  to { stroke-dashoffset: -22; }
 }

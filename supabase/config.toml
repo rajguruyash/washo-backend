@@ -1,0 +1,11 @@
+# Function settings to merge into the project's supabase/config.toml.
+# Razorpay cannot send a Supabase JWT, so ONLY the webhook skips JWT verification; its HMAC signature
+# (RAZORPAY_WEBHOOK_SECRET) is its authentication. The other two require a signed-in user.
+[functions.create-razorpay-order]
+verify_jwt = true
+
+[functions.verify-razorpay-payment]
+verify_jwt = true
+
+[functions.razorpay-webhook]
+verify_jwt = false
