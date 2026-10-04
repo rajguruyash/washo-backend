@@ -41,6 +41,17 @@ export const config = {
     ssl: (process.env.DATABASE_SSL as 'require' | 'verify' | 'off' | undefined) || undefined,
   },
 
+  // Razorpay Standard Checkout. Set both in the server's environment (Render). The secret never reaches the browser.
+  razorpay: {
+    keyId: process.env.RAZORPAY_KEY_ID || '',
+    keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    get configured() {
+      return Boolean(this.keyId && this.keySecret);
+    },
+    // Only tests point this somewhere else (a local stand-in for Razorpay's API).
+    apiBase: (process.env.RAZORPAY_API_BASE || 'https://api.razorpay.com').replace(/\/+$/, ''),
+  },
+
   email: {
     resendKey: process.env.RESEND_API_KEY || '',
     from: process.env.EMAIL_FROM || 'WASHO <notifications@washo.online>',

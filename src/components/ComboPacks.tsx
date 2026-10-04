@@ -109,7 +109,7 @@ export function ComboPacks() {
                   ) : (
                     <Skeleton className="h-10 w-36" />
                   )}
-                  <p className="mt-1 text-xs text-fog">Estimate for a {vehicleLabel[vehicle].toLowerCase()}, 1 month. WASHO confirms the final price.</p>
+                  <p className="mt-1 text-xs text-fog">Price for a {vehicleLabel[vehicle].toLowerCase()}, 1 month. Change the days, mix and length when you build your plan.</p>
                   <ButtonLink to={`/app/membership/new?perWeek=${n}&type=${vehicle}`} full size="lg" className="mt-4">Choose this pack</ButtonLink>
                 </div>
               </motion.div>

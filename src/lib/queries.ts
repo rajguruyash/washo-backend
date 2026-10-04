@@ -165,13 +165,9 @@ export interface MembershipRequestInput {
   customer_notes?: string;
 }
 
-export const useCreateRequest = () => {
-  const refresh = useRefreshAll();
-  return useMutation({
-    mutationFn: (body: MembershipRequestInput) => post<{ id: string; reference_code: string }>('/membership-requests', body),
-    onSuccess: () => refresh(),
-  });
-};
+/** Pay for a custom membership straight away: the server prices it from the rate card and opens the Razorpay order. */
+export const useStartMembershipPayment = () =>
+  useMutation({ mutationFn: async (body: MembershipRequestInput) => (await post<{ order: Order }>('/payments/membership-checkout', body)).order });
 
 export const useAcceptQuote = () => useMutation({ mutationFn: async (id: string) => (await post<{ order: Order }>(`/membership-requests/${id}/accept`)).order });
 

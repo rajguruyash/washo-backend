@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { notifyAdminOfRequest } from '../notify';
-import { invokeFunction } from '../supabase';
+import { openOrder } from '../razorpay';
 
 export const membershipsRouter = Router();
 membershipsRouter.use(['/membership-requests', '/memberships'], requireSession, requireRole('customer'));
@@ -67,14 +67,14 @@ membershipsRouter.post(
   })
 );
 
-// Accept WASHO's quote: the edge function runs accept_membership_quote AS THE CUSTOMER (the database creates a PENDING
-// payment for exactly the quoted amount) and opens the Razorpay order for that amount. No membership exists yet.
+// Pay for a quoted request (earlier requests WASHO has already priced): the database opens a PENDING payment for exactly the quoted
+// amount as the customer, then the server opens the Razorpay order for that amount. No membership exists until payment is verified.
 membershipsRouter.post(
   '/membership-requests/:id/accept',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    const order = await invokeFunction('create-razorpay-order', { type: 'membership', request_id: id }, req.session!.accessToken);
-    res.json({ success: true, order });
+    const intent = await req.db(async (c) => (await c.query('SELECT public.accept_membership_quote($1) AS r', [id])).rows[0].r);
+    res.json({ success: true, order: await openOrder(req.session!.profile, intent) });
   })
 );
 

@@ -4,20 +4,19 @@ import { ServicePhoto } from '../components/ServicePhoto';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
-import CountUp from '../components/reactbits/CountUp';
 import SpotlightCard from '../components/reactbits/SpotlightCard';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
-import { percent, rupees } from '../lib/format';
+import { rupees } from '../lib/format';
 import { useCatalog } from '../lib/queries';
 
 const steps = [
   { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, 1 to 7 washes a week, the days, and how long. The estimate updates as you go.' },
-  { icon: MessageSquareText, title: 'WASHO sends your price', text: 'We review your request and send a clear quote. Every discount is a labelled line.' },
-  { icon: Wallet, title: 'Accept and pay securely', text: 'Pay only after you accept. Your washes are scheduled once the payment is verified.' },
+  { icon: Wallet, title: 'Pay securely online', text: 'Pay with Razorpay. Your washes are scheduled as soon as the payment is verified.' },
+  { icon: MessageSquareText, title: 'Your specialist calls ahead', text: 'We confirm with you before every wash, so you are never caught out.' },
   { icon: Camera, title: 'We wash at your parking spot', text: 'A specialist calls ahead, washes, and you see the before and after photos.' },
 ];
 
@@ -33,8 +32,6 @@ const why = [
 export default function Landing() {
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const { data: catalog, isLoading } = useCatalog();
-  const freq = catalog?.discounts.filter((d) => d.kind === 'frequency' && d.discount_bp > 0) ?? [];
-  const dur = catalog?.discounts.filter((d) => d.kind === 'duration' && d.discount_bp > 0) ?? [];
 
   return (
     <>
@@ -49,7 +46,7 @@ export default function Landing() {
                 {reduceMotion ? <span className="block text-washo-300">washed on schedule, at your doorstep.</span> : <BlurText text="washed on schedule, at your doorstep." delay={90} animateBy="words" direction="top" className="flex-wrap text-washo-300" />}
               </div>
             </div>
-            <p className="mt-5 max-w-xl text-lg text-mist">Build a custom WASHO membership: 1 to 7 washes a week, on the days you choose. We quote it, you approve it, and we take care of the rest.</p>
+            <p className="mt-5 max-w-xl text-lg text-mist">Build a custom WASHO membership: 1 to 7 washes a week, on the days you choose. Pay securely online and we take care of the rest.</p>
             <div className="mt-8 flex flex-wrap gap-3">
               {/* React Bits StarBorder: the primary call to action */}
               <StarBorder as={Link} to="/app/membership/new" color="#6a9cff" speed="5s" backgroundColor="#1248b8" borderColor="rgba(155,191,255,0.35)" className="rounded-2xl" aria-label="Build my membership">
@@ -79,10 +76,10 @@ export default function Landing() {
       <ComboPacks />
 
       <section id="membership" className="mx-auto max-w-7xl scroll-mt-24 px-4 pb-20 sm:px-6 lg:px-8">
-        <div className="glass grid gap-8 p-6 md:p-10 lg:grid-cols-2">
+        <div className="glass grid items-center gap-8 p-6 md:p-10 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <p className="eyebrow">Custom membership</p>
-            <h2 className="mt-2 text-3xl font-extrabold md:text-4xl">You design it. WASHO prices it.</h2>
+            <h2 className="mt-2 text-3xl font-extrabold md:text-4xl">You design it. We take care of the rest.</h2>
             <ul className="mt-6 space-y-3 text-mist">
               <li><strong className="text-white">1 to 7 washes a week:</strong> you choose the number and the days.</li>
               <li><strong className="text-white">1 a week:</strong> one wash type, Body or Deep.</li>
@@ -90,17 +87,11 @@ export default function Landing() {
               <li><strong className="text-white">3 or more:</strong> a mix of Body washes and Deep cleanings.</li>
               <li><strong className="text-white">1, 3, 6 or 12 months.</strong> Reschedule any wash anytime.</li>
             </ul>
-            <ButtonLink to="/app/membership/new" className="mt-8" iconRight={<ArrowRight className="h-5 w-5" />}>Start my request</ButtonLink>
+            <ButtonLink to="/app/membership/new" className="mt-8" iconRight={<ArrowRight className="h-5 w-5" />}>Build my plan</ButtonLink>
           </div>
-          <div>
-            <p className="eyebrow">Transparent discounts</p>
-            {isLoading ? <Skeleton className="mt-4 h-40" /> : (
-              <div className="mt-4 space-y-3">
-                {freq.map((d) => <div key={`f${d.key}`} className="panel flex items-center justify-between p-4"><span>{d.label || `${d.key} washes a week`}</span><Badge tone="yellow"><CountUp to={d.discount_bp / 100} duration={1.2} />% off</Badge></div>)}
-                {dur.map((d) => <div key={`d${d.key}`} className="panel flex items-center justify-between p-4"><span>{d.label || `${d.key} months`}</span><Badge tone="yellow"><CountUp to={d.discount_bp / 100} duration={1.2} />% off</Badge></div>)}
-                {catalog && <p className="text-xs text-fog">Discounts combine up to {percent(catalog.max_total_discount_bp)} in total. Your quote shows each one as its own line.</p>}
-              </div>
-            )}
+          <div className="panel space-y-3 p-6">
+            <p className="eyebrow">Pay once, we start</p>
+            <p className="text-sm text-mist">See your price as you build the plan, pay securely with Razorpay, and your washes are scheduled as soon as the payment is verified.</p>
           </div>
         </div>
       </section>

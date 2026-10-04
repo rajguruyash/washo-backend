@@ -1,9 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, Info, Plus, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CreditCard, Info, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
-import { AvatarHead } from '../../components/brand/Avatar';
 import { Plate } from '../../components/brand/Plate';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { QuoteBreakdownView } from '../../components/Quote';
@@ -11,15 +10,15 @@ import { VehiclePicker } from '../../components/VehiclePicker';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { TextArea } from '../../components/ui/Field';
-import { useToast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
 import { addDays, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { defaultPattern, useAddresses, useCatalog, useCreateRequest, useEstimate, useVehicles } from '../../lib/queries';
+import { defaultPattern, useAddresses, useCatalog, useEstimate, useStartMembershipPayment, useVehicles } from '../../lib/queries';
+import { usePay } from '../../lib/usePay';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
-const STEPS = ['Vehicle', 'Washes a week', 'Days & washes', 'Length', 'Start & time', 'Review'] as const;
+const STEPS = ['Vehicle', 'Washes a week', 'Days & washes', 'Length', 'Start & time', 'Review & pay'] as const;
 const MONTHS = [1, 3, 6, 12] as const;
 const PER_WEEK = [1, 2, 3, 4, 5, 6, 7] as const;
 
@@ -46,12 +45,12 @@ function DurationPrice({ vehicleType, pattern, months }: { vehicleType: VehicleT
 
 export default function MembershipWizard() {
   const navigate = useNavigate();
-  const toast = useToast();
   const [params] = useSearchParams();
   const { data: catalog } = useCatalog();
   const { data: vehicles } = useVehicles();
   const { data: addresses } = useAddresses();
-  const create = useCreateRequest();
+  const checkout = useStartMembershipPayment();
+  const { pay, paying } = usePay();
 
   const [step, setStep] = useState(0);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -68,7 +67,6 @@ export default function MembershipWizard() {
   const [notes, setNotes] = useState('');
   const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
-  const [sent, setSent] = useState<{ id: string; ref: string } | null>(null);
 
   // Preselect from ?vehicle= (Vehicles page) or the only vehicle.
   useEffect(() => {
@@ -151,44 +149,31 @@ export default function MembershipWizard() {
     Boolean(addressId),
   ][step];
 
+  // Pay now: the server prices the plan from the rate card and opens the Razorpay order; the membership and its washes are
+  // created only once the payment is verified.
   const submit = async () => {
     if (!vehicle || !perWeek || !months || !slot || !start) return;
     setError('');
     try {
-      const res = await create.mutateAsync({
-        vehicle_id: vehicle.id,
-        weekly_pattern: sortedDays.map((d) => ({ weekday: d, kind: bike ? 'body' : kindByDay[d] ?? 'body' })),
-        duration_months: months,
-        time_slot: slot,
-        start_date: start,
-        address_id: addressId,
-        parking_location: address?.parking_location,
-        customer_notes: notes.trim() || undefined,
-      });
-      setSent({ id: res.id, ref: res.reference_code });
+      const result = await pay(
+        () => checkout.mutateAsync({
+          vehicle_id: vehicle.id,
+          weekly_pattern: sortedDays.map((d) => ({ weekday: d, kind: bike ? 'body' : kindByDay[d] ?? 'body' })),
+          duration_months: months,
+          time_slot: slot,
+          start_date: start,
+          address_id: addressId,
+          parking_location: address?.parking_location,
+          customer_notes: notes.trim() || undefined,
+        }),
+        `WASHO membership · ${perWeek} a week · ${months} month${months > 1 ? 's' : ''}`
+      );
+      if (result?.membership_id) navigate(`/app/membership/${result.membership_id}?new=1`, { replace: true });
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : 'Something went wrong. Please try again.';
-      setError(msg);
-      toast.error(msg);
+      // usePay reports payment problems itself; this covers plan problems the database refused (shown under the button)
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     }
   };
-
-  if (sent) {
-    return (
-      <div className="mx-auto max-w-lg py-10 text-center">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="glass p-8">
-          <AvatarHead className="mx-auto h-24 w-24" />
-          <h1 className="mt-6 text-3xl font-extrabold">Request sent</h1>
-          <p className="mt-2 text-fog">Reference <span className="font-semibold text-white">{sent.ref}</span></p>
-          <p className="mx-auto mt-4 max-w-sm text-sm text-mist">WASHO will review it and send you a price. You pay nothing until you accept that price.</p>
-          <div className="mt-8 flex flex-col gap-3">
-            <Button size="lg" full onClick={() => navigate(`/app/membership/requests/${sent.id}`, { replace: true })}>See my request</Button>
-            <Button variant="ghost" full onClick={() => navigate('/app', { replace: true })}>Back home</Button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
 
   const slide = { initial: { opacity: 0, x: 24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -24 }, transition: { duration: 0.2 } };
 
@@ -237,13 +222,13 @@ export default function MembershipWizard() {
                     {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} a week</Badge>}
                   </div>
                   <div className="text-right">
-                    <p className="eyebrow">Estimate</p>
+                    <p className="eyebrow">Price</p>
                     <p className="font-display text-3xl font-extrabold tabular-nums">{monthly.data ? rupees(monthly.data.final_cents) : '…'}<span className="ml-1 text-sm font-medium text-fog">/ month</span></p>
                     <p className="text-xs text-fog">{planReady ? 'for your mix' : 'with a typical mix; changes with your choice'}</p>
                   </div>
                 </div>
                 <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
-                  Base price per wash: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body ${rupees(basePrice('body'))} · Deep cleaning ${rupees(basePrice('deep'))}`}. WASHO reviews your request and confirms the final price before you pay anything.
+                  Base price per wash: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body ${rupees(basePrice('body'))} · Deep cleaning ${rupees(basePrice('deep'))}`}.
                 </p>
               </div>
             ) : (
@@ -293,7 +278,7 @@ export default function MembershipWizard() {
             </div>
             {days.length === perWeek && comp && <p role="alert" className="mt-4 flex items-start gap-2 text-sm text-warn"><Info className="mt-0.5 h-4 w-4 shrink-0" /> {comp}</p>}
             {days.length < perWeek && <p className="mt-4 text-sm text-fog">{perWeek - days.length} more day{perWeek - days.length > 1 ? 's' : ''} to choose.</p>}
-            {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Estimate for this mix: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
+            {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Price for this mix: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
           </motion.section>
         )}
 
@@ -330,8 +315,8 @@ export default function MembershipWizard() {
 
         {step === 5 && vehicle && perWeek && months && slot && start && (
           <motion.section key="s5" {...slide}>
-            <h1 className="text-3xl font-extrabold">Review your request</h1>
-            <p className="mt-1.5 mb-6 text-fog">WASHO will check it and confirm your price.</p>
+            <h1 className="text-3xl font-extrabold">Review and pay</h1>
+            <p className="mt-1.5 mb-6 text-fog">Check your plan, then pay securely. Your washes are scheduled as soon as the payment is verified.</p>
             <div className="glass divide-y divide-white/[0.07]">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="p-5">
@@ -367,11 +352,11 @@ export default function MembershipWizard() {
             </div>
             {chosenEstimate.data && (
               <div className="glass mt-5 p-5">
-                <div className="mb-1 flex items-center justify-between gap-3"><h2 className="font-bold">Estimated price</h2><Badge tone="amber">Estimate</Badge></div>
+                <div className="mb-1 flex items-center justify-between gap-3"><h2 className="font-bold">Your price</h2></div>
                 <QuoteBreakdownView q={{ ...chosenEstimate.data, adjustment: { cents: 0, reason: null } }} />
               </div>
             )}
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> This is a request, not a purchase. WASHO reviews it and confirms the final price. You pay only after you accept it.</div>
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> You pay once, now, with Razorpay. Your membership and every wash are created when the payment is verified.</div>
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
           </motion.section>
         )}
@@ -383,7 +368,7 @@ export default function MembershipWizard() {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!canNext} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <Button size="lg" full disabled={!canNext} loading={create.isPending} onClick={() => void submit()} icon={<Send className="h-5 w-5" />}>Send request to WASHO</Button>
+            <Button size="lg" full disabled={!canNext || !chosenEstimate.data} loading={checkout.isPending || paying} onClick={() => void submit()} icon={<CreditCard className="h-5 w-5" />}>Pay {chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}</Button>
           )}
         </div>
       </div>

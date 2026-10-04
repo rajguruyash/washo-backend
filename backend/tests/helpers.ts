@@ -23,6 +23,9 @@ export async function boot() {
   process.env.SUPABASE_ANON_KEY = FAKE.anonKey;
   process.env.SUPABASE_JWT_SECRET = FAKE.jwtSecret;
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE.serviceKey;
+  process.env.RAZORPAY_KEY_ID = FAKE.razorpayKeyId;
+  process.env.RAZORPAY_KEY_SECRET = FAKE.razorpayKeySecret;
+  process.env.RAZORPAY_API_BASE = fake.razorpayBase;
   process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   const { createApp } = await import('../src/app');
   server = createApp().listen(0);
@@ -94,7 +97,8 @@ export class Client {
 }
 
 let n = 0;
-export const randomPhone = () => `9${String(800000000 + ++n * 7919 + Math.floor(Math.random() * 1000)).slice(0, 9)}`;
+// Unique across files and runs (the test database is shared): a collision would hand a "new" customer someone else's data.
+export const randomPhone = () => `9${String(crypto.randomInt(0, 1_000_000_000)).padStart(9, '0')}`;
 
 /** A date `days` from today in Pune, as YYYY-MM-DD. */
 export function istDate(days = 0): string {
@@ -136,17 +140,15 @@ export async function staffClient(role: 'worker' | 'admin', o: { name?: string; 
   return { c, ...s };
 }
 
-/** Request -> WASHO quote -> accept -> pay -> verified: returns the active membership id. */
-export async function activeMembership(o: { type?: 'bike' | 'car' | 'suv'; pattern?: unknown[]; months?: number; admin: Client; notes?: string }) {
+/** Build a plan -> pay -> verified: returns the customer and their active membership. (No WASHO approval step.) */
+export async function activeMembership(o: { type?: 'bike' | 'car' | 'suv'; pattern?: unknown[]; months?: number; admin?: Client; notes?: string } = {}) {
   const cust = await customerWithVehicle(o.type ?? 'car');
-  const created = expectOk(
-    await cust.c.post('/api/membership-requests', {
+  const order = expectOk(
+    await cust.c.post('/api/payments/membership-checkout', {
       vehicle_id: cust.vehicle.id, weekly_pattern: o.pattern ?? PATTERN_3, duration_months: o.months ?? 1, time_slot: 'morning',
       start_date: istDate(4), address_id: cust.addr.id, customer_notes: o.notes ?? 'Gate code 4321',
     })
-  ).body;
-  expectOk(await o.admin.post(`/api/admin/membership-requests/${created.id}/review`, { action: 'quote' }));
-  const order = expectOk(await cust.c.post(`/api/membership-requests/${created.id}/accept`)).body.order;
+  ).body.order;
   const paid = expectOk(await cust.c.post('/api/payments/verify', fake.checkout(order.order_id))).body.result;
-  return { ...cust, requestId: created.id as string, membershipId: paid.membership_id as string };
+  return { ...cust, membershipId: paid.membership_id as string };
 }

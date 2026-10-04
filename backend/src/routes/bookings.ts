@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { config } from '../config';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
-import { invokeFunction, photoStorage } from '../supabase';
+import { openOrder, verifyAndSettle } from '../razorpay';
+import { photoStorage } from '../supabase';
 
 export const bookingsRouter = Router();
 bookingsRouter.use(['/bookings', '/payments'], requireSession);
@@ -160,21 +161,57 @@ bookingsRouter.post(
   requireRole('customer'),
   asyncHandler(async (req, res) => {
     const b = parse(onDemandSchema, req.body);
-    const order = await invokeFunction('create-razorpay-order', { type: 'on_demand', ...b, source: 'website' }, req.session!.accessToken);
-    res.json({ success: true, order });
+    const intent = await req.db(async (c) =>
+      (
+        await c.query('SELECT public.create_booking_payment_intent($1, $2, $3::date, $4::public.time_slot, $5, $6, $7, $8) AS r', [
+          b.vehicle_id, b.service_id, b.scheduled_date, b.time_slot, b.address_id ?? null, b.parking_location ?? null, b.target_completion_time ?? null, 'website',
+        ])
+      ).rows[0].r
+    );
+    res.json({ success: true, order: await openOrder(req.session!.profile, intent) });
   })
 );
 
+const membershipCheckoutSchema = z.object({
+  vehicle_id: z.string().uuid('Choose a vehicle.'),
+  weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1, 'Choose your washes for the week.').max(7),
+  duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
+  time_slot: slot,
+  start_date: isoDate,
+  address_id: z.string().uuid().nullish(),
+  parking_location: z.string().trim().max(160).optional(),
+  customer_notes: z.string().trim().max(500).optional(),
+});
+
+// Pay for a custom membership straight away. The database validates the plan, prices it from the rate card (every discount explicit)
+// and opens the pending payment; the server opens the Razorpay order for exactly that amount. The membership and its washes are
+// created only when the payment is verified.
+bookingsRouter.post(
+  '/payments/membership-checkout',
+  requireRole('customer'),
+  asyncHandler(async (req, res) => {
+    const m = parse(membershipCheckoutSchema, req.body);
+    const intent = await req.db(async (c) =>
+      (
+        await c.query('SELECT public.start_membership_checkout($1, $2::jsonb, $3, $4::public.time_slot, $5::date, $6, $7, $8) AS r', [
+          m.vehicle_id, JSON.stringify(m.weekly_pattern), m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null,
+        ])
+      ).rows[0].r
+    );
+    res.json({ success: true, order: await openOrder(req.session!.profile, intent) });
+  })
+);
+
+// Checkout succeeded in the browser: verify Razorpay's signature and Razorpay's own record of the payment, then settle in the database.
 bookingsRouter.post(
   '/payments/verify',
   requireRole('customer'),
   asyncHandler(async (req, res) => {
-    const body = parse(
-      z.object({ razorpay_order_id: z.string().min(5).max(64), razorpay_payment_id: z.string().min(5).max(64), razorpay_signature: z.string().min(10).max(128) }),
-      req.body
-    );
-    const result = await invokeFunction('verify-razorpay-payment', body, req.session!.accessToken);
-    res.json({ success: true, result });
+    const body = z
+      .object({ razorpay_order_id: z.string().min(5).max(64), razorpay_payment_id: z.string().min(5).max(64), razorpay_signature: z.string().min(10).max(128) })
+      .safeParse(req.body);
+    if (!body.success) throw new HttpError(400, 'missing_fields', 'Missing payment details.');
+    res.json({ success: true, result: await verifyAndSettle(req.session!.profile, body.data) });
   })
 );
 

@@ -4,7 +4,6 @@ import { HttpError } from './errors';
 /**
  * The only places this server talks to Supabase over HTTP:
  *   - Auth (phone OTP via Twilio Verify, which is configured inside Supabase)
- *   - the Razorpay edge functions, called with the CUSTOMER'S OWN token (so the database applies their identity)
  *   - Storage, for wash photos
  */
 
@@ -86,25 +85,6 @@ export const gotrue = {
     await auth('/logout?scope=local', { method: 'POST', bearer: accessToken }).catch(() => undefined);
   },
 };
-
-/** Calls a Supabase edge function as the signed-in customer. The function (and the database behind it) decide everything. */
-export async function invokeFunction<T = any>(name: string, body: unknown, accessToken: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${config.supabase.url}/functions/v1/${name}`, {
-      method: 'POST',
-      headers: { apikey: config.supabase.anonKey, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    console.error(`Edge function ${name} unreachable:`, (err as Error).message);
-    throw new HttpError(503, 'payments_unavailable', 'Payments are unavailable right now. Please try again shortly.');
-  }
-  const payload = await readJson(res);
-  if (res.ok) return payload as T;
-  const message = typeof payload.error === 'string' ? payload.error : 'Something went wrong. Please try again.';
-  throw new HttpError(res.status === 401 ? 401 : res.status >= 500 ? 502 : 422, 'payment_error', message);
-}
 
 // ───────────────────────── Storage (wash photos) ─────────────────────────
 function storageHeaders(extra: Record<string, string> = {}) {

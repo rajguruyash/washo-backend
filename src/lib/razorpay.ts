@@ -34,7 +34,13 @@ export class PaymentDismissed extends Error {
  * Opens Razorpay Checkout for an order the DATABASE priced, then asks the server to verify. The browser's word is never
  * enough: the edge function checks Razorpay's signature AND Razorpay's own record before anything is activated.
  */
-export async function payWithRazorpay(o: { order: Order; description: string; prefill: { name?: string | null; email?: string | null; contact?: string } }): Promise<VerifyResult> {
+export async function payWithRazorpay(o: {
+  order: Order;
+  description: string;
+  prefill: { name?: string | null; email?: string | null; contact?: string };
+  /** Called when Razorpay reports a failed attempt. The modal stays open so the customer can retry or pick another method. */
+  onFailed?: (reason: string) => void;
+}): Promise<VerifyResult> {
   await loadCheckoutScript();
   return new Promise<VerifyResult>((resolve, reject) => {
     const rzp = new window.Razorpay!({
@@ -55,8 +61,8 @@ export async function payWithRazorpay(o: { order: Order; description: string; pr
         }
       },
     });
-    rzp.on('payment.failed', () => {
-      /* Checkout shows its own retry UI; we only act on success or dismissal. */
+    rzp.on('payment.failed', (r: { error?: { description?: string; reason?: string } }) => {
+      o.onFailed?.(r?.error?.description || 'The payment did not go through. You can try again.');
     });
     rzp.open();
   });

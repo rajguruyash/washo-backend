@@ -3,8 +3,8 @@
  * (the production schema + every migration). Used by the API tests and by `npm run dev:stack`.
  *
  *   Auth       phone OTP (code is always 123456 locally), email+password, refresh, logout   (GoTrue's wire format)
- *   Functions  create-razorpay-order and verify-razorpay-payment: the same steps as supabase/functions/*, run
- *              against the real database functions. Razorpay itself is simulated.
+ *   Razorpay   a stand-in for Razorpay's REST API (orders, payments, capture) under /rzp; the website server talks to it exactly as
+ *              it talks to api.razorpay.com. Checkout itself is simulated by checkout().
  *   Storage    upload / sign / serve
  *
  * It contains NO business rules: pricing, quotes, settlement, worker rules all run inside Postgres.
@@ -13,12 +13,6 @@ import crypto from 'crypto';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { Pool, PoolClient } from 'pg';
-
-// Same two rules as supabase/functions/_shared/razorpay.ts (unit-tested there). Repeated here so this file also runs under
-// plain ts-node (dev:stack), where that ESM file cannot be required.
-const verifyCheckoutSignature = (orderId: string, paymentId: string, signature: string, secret: string) =>
-  crypto.createHmac('sha256', secret).update(`${orderId}|${paymentId}`).digest('hex') === signature;
-const httpStatusForSettle = (status: string) => (['fulfilled', 'already_settled', 'unfulfilled'].includes(status) ? 200 : status === 'not_captured' ? 409 : status === 'unknown_order' ? 404 : 400);
 
 
 export const FAKE = {
@@ -48,6 +42,10 @@ export interface FakeSupabase {
   objects: Map<string, { bytes: Buffer; contentType: string }>;
   otpSent: string[];
   makeSession(authUserId: string, extra?: Record<string, unknown>): { access_token: string; refresh_token: string; expires_in: number };
+  /** The Razorpay API base URL the website server should use. */
+  razorpayBase: string;
+  /** Make the next Razorpay API call fail with this HTTP status. */
+  failNextRazorpayCall(status?: number): void;
   /** Make the next /auth/v1/otp call fail the way Supabase does when it throttles. */
   throttleNextOtp(): void;
   /** Create an email+password staff account (what admin_create_worker does) with the given role. */
@@ -73,6 +71,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     objects: new Map<string, { bytes: Buffer; contentType: string }>(),
     otpSent: [] as string[],
     throttle: false,
+    rzpFail: 0,
   };
 
   const session = (authUserId: string, extra: Record<string, unknown> = {}) => {
@@ -122,64 +121,6 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(body));
   };
-
-  // ───────── the two edge functions, same steps as supabase/functions/*/index.ts ─────────
-  async function createOrder(req: http.IncomingMessage, res: http.ServerResponse, body: any) {
-    const sub = verifyBearer(req);
-    if (!sub) return send(res, 401, { error: 'Sign in to continue' });
-    try {
-      let payment: any;
-      if (body.type === 'membership') {
-        payment = await asRole('authenticated', sub, async (c) => (await c.query('SELECT public.accept_membership_quote($1) AS r', [body.request_id])).rows[0].r);
-      } else if (body.type === 'on_demand') {
-        payment = await asRole('authenticated', sub, async (c) =>
-          (
-            await c.query('SELECT public.create_booking_payment_intent($1,$2,$3::date,$4::public.time_slot,$5,$6,$7,$8) AS r', [
-              body.vehicle_id, body.service_id, body.scheduled_date, body.time_slot, body.address_id ?? null, body.parking_location ?? null, body.target_completion_time ?? null,
-              body.source === 'website' ? 'website' : 'mobile_app',
-            ])
-          ).rows[0].r
-        );
-      } else return send(res, 400, { error: 'Unknown payment type' });
-
-      const u = await userRow(sub);
-      const prefill = { contact: u?.phone ?? '', email: u?.email ?? '' };
-      if (payment.provider_order_id) {
-        return send(res, 200, { order_id: payment.provider_order_id, amount: payment.amount_cents, currency: payment.currency, key_id: FAKE.razorpayKeyId, payment_id: payment.payment_id, prefill });
-      }
-      const orderId = `order_${crypto.randomBytes(6).toString('hex')}`;
-      state.orders.set(orderId, { amount: payment.amount_cents, currency: 'INR', receipt: payment.receipt });
-      await asRole('service_role', null, async (c) => {
-        const pid = (await c.query('SELECT public.svc_profile_id_for_auth_user($1) AS id', [sub])).rows[0].id;
-        await c.query('SELECT public.svc_attach_provider_order($1,$2,$3)', [payment.payment_id, orderId, pid]);
-      });
-      return send(res, 200, { order_id: orderId, amount: payment.amount_cents, currency: payment.currency, key_id: FAKE.razorpayKeyId, payment_id: payment.payment_id, prefill });
-    } catch (e) {
-      return send(res, 400, { error: (e as Error).message });
-    }
-  }
-
-  async function verifyPayment(req: http.IncomingMessage, res: http.ServerResponse, body: any) {
-    const sub = verifyBearer(req);
-    if (!sub) return send(res, 401, { error: 'Sign in to continue' });
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return send(res, 400, { error: 'Missing payment details' });
-    if (!verifyCheckoutSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, FAKE.razorpayKeySecret)) {
-      return send(res, 400, { error: 'We could not verify this payment. If money was deducted it will be reconciled automatically.' });
-    }
-    const p = state.payments.get(razorpay_payment_id);
-    if (!p) return send(res, 502, { error: 'Could not confirm the payment with Razorpay. Please wait a moment and refresh.' });
-    if (p.order_id !== razorpay_order_id) return send(res, 400, { error: 'Payment does not match the order' });
-    try {
-      const result = await asRole('service_role', null, async (c) => {
-        const pid = (await c.query('SELECT public.svc_profile_id_for_auth_user($1) AS id', [sub])).rows[0].id;
-        return (await c.query('SELECT public.svc_settle_payment($1,$2,$3,$4,$5,$6,$7) AS r', [razorpay_order_id, razorpay_payment_id, p.amount, p.currency, p.status, pid, 'verify'])).rows[0].r;
-      });
-      return send(res, httpStatusForSettle(result.status), result);
-    } catch (e) {
-      return send(res, 500, { error: 'We received your payment but could not finish the booking.' });
-    }
-  }
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -231,9 +172,34 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       }
       if (path === '/auth/v1/logout' && req.method === 'POST') return send(res, 204, {});
 
-      // ───────── Edge functions ─────────
-      if (path === '/functions/v1/create-razorpay-order' && req.method === 'POST') return createOrder(req, res, json());
-      if (path === '/functions/v1/verify-razorpay-payment' && req.method === 'POST') return verifyPayment(req, res, json());
+      // ───────── Razorpay REST API (orders, payments, capture) ─────────
+      if (path.startsWith('/rzp/v1/')) {
+        const ok = req.headers.authorization === 'Basic ' + Buffer.from(`${FAKE.razorpayKeyId}:${FAKE.razorpayKeySecret}`).toString('base64');
+        if (!ok) return send(res, 401, { error: { code: 'BAD_REQUEST_ERROR', description: 'Authentication failed' } });
+        if (state.rzpFail) {
+          const code = state.rzpFail;
+          state.rzpFail = 0;
+          return send(res, code, { error: { code: 'SERVER_ERROR', description: 'Simulated Razorpay failure' } });
+        }
+        if (path === '/rzp/v1/orders' && req.method === 'POST') {
+          const b = json();
+          if (!Number.isInteger(b.amount) || b.amount < 100) return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'Order amount less than minimum amount allowed' } });
+          const id = `order_${crypto.randomBytes(7).toString('hex')}`;
+          state.orders.set(id, { amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt ?? '' });
+          return send(res, 200, { id, entity: 'order', amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt, status: 'created' });
+        }
+        const pm = path.match(/^\/rzp\/v1\/payments\/([^/]+)(\/capture)?$/);
+        if (pm) {
+          const p = state.payments.get(decodeURIComponent(pm[1]));
+          if (!p) return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'The id provided does not exist' } });
+          if (pm[2] && req.method === 'POST') {
+            if (p.status !== 'authorized') return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'This payment has already been captured' } });
+            p.status = 'captured';
+          }
+          return send(res, 200, { id: decodeURIComponent(pm[1]), entity: 'payment', order_id: p.order_id, amount: p.amount, currency: p.currency, status: p.status });
+        }
+        return send(res, 404, { error: { description: 'not found' } });
+      }
 
       // ───────── Storage ─────────
       const upload = path.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/);
@@ -274,6 +240,10 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     payments: state.payments,
     objects: state.objects,
     otpSent: state.otpSent,
+    razorpayBase: `${url}/rzp`,
+    failNextRazorpayCall: (status = 500) => {
+      state.rzpFail = status;
+    },
     makeSession: session,
     throttleNextOtp: () => {
       state.throttle = true;

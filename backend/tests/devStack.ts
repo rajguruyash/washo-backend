@@ -14,6 +14,9 @@ async function main() {
   process.env.SUPABASE_ANON_KEY = FAKE.anonKey;
   process.env.SUPABASE_JWT_SECRET = FAKE.jwtSecret;
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE.serviceKey;
+  process.env.RAZORPAY_KEY_ID = FAKE.razorpayKeyId;
+  process.env.RAZORPAY_KEY_SECRET = FAKE.razorpayKeySecret;
+  process.env.RAZORPAY_API_BASE = fake.razorpayBase;
   process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   process.env.PORT ||= '5001';
 

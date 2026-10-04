@@ -29,7 +29,7 @@ export default function Membership() {
 
   return (
     <>
-      <PageHeader title="Membership" subtitle="Your custom plan: you choose the washes, days and length. WASHO confirms the price." action={<ButtonLink to="/app/membership/new" icon={<Plus className="h-4 w-4" />}>New request</ButtonLink>} />
+      <PageHeader title="Membership" subtitle="Your custom plan: you choose the washes, days and length, then pay." action={<ButtonLink to="/app/membership/new" icon={<Plus className="h-4 w-4" />}>New plan</ButtonLink>} />
       {memberships.isError || requests.isError ? (
         <ErrorState onRetry={() => { void memberships.refetch(); void requests.refetch(); }} />
       ) : memberships.isLoading ? (
@@ -38,7 +38,7 @@ export default function Membership() {
         <div className="space-y-10">
           {reqs.length > 0 && (
             <section aria-labelledby="reqs">
-              <h2 id="reqs" className="mb-3 text-lg font-bold">Requests</h2>
+              <h2 id="reqs" className="mb-3 text-lg font-bold">Earlier requests</h2>
               <div className="space-y-3">
                 {reqs.map((r) => (
                   <Link key={r.id} to={`/app/membership/requests/${r.id}`} className="glass group flex items-center gap-4 p-4 transition-colors hover:border-washo-400/40">

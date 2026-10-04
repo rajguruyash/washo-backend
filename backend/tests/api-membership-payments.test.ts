@@ -222,7 +222,7 @@ describe('accept -> pay -> verified -> activated -> scheduled', () => {
 
     const good = fake.checkout(order.order_id);
     const forged = await c.post('/api/payments/verify', { ...good, razorpay_signature: 'f'.repeat(64) });
-    expect(forged.status).toBe(422);
+    expect(forged.status).toBe(400);
     expect(forged.body.message).toMatch(/could not verify/);
 
     const cheap = fake.checkout(order.order_id, { amount: 100 });
@@ -289,7 +289,7 @@ describe('on-demand payment', () => {
     const go = (cust: typeof bike, vehicleId: string, service: string, date = istDate(3), slot = 'morning') =>
       cust.c.post('/api/payments/on-demand', { vehicle_id: vehicleId, service_id: service, scheduled_date: date, time_slot: slot });
     expect((await go(bike, bike.vehicle.id, await svc('car-deep-cleaning'))).body.message).toMatch(/not available for your vehicle/);
-    expect((await go(bike, other.vehicle.id, await svc('bike-body-wash'))).status).toBe(422);
+    expect((await go(bike, other.vehicle.id, await svc('bike-body-wash'))).status).toBe(404);
     expect((await go(bike, bike.vehicle.id, await svc('bike-body-wash'), istDate(-1))).body.message).toMatch(/too soon/);
 
     const ok = expectOk(await go(bike, bike.vehicle.id, await svc('bike-body-wash'), istDate(5)));

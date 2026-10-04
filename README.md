@@ -9,10 +9,9 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
 
 ## What the website does
 
-- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1 to 7 washes a week (a toggle, with a live price estimate) → Body/Deep
-  combination and days → 1/3/6/12 months → start date and time slot → request. WASHO reviews it and sets the price; the customer
-  sees a fully itemised quote (every discount is its own line), accepts, pays through Razorpay, and only after the payment is
-  **verified** does the membership activate and every wash get scheduled. Also: dashboard, membership detail with rescheduling
+- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1 to 7 washes a week (a toggle, with the price updating) → Body/Deep
+  combination and days → 1/3/6/12 months → start date and time slot → review and **pay**. The price is the rate card with every discount
+  as its own line; there is no approval step. Only after the Razorpay payment is **verified** does the membership activate and every wash get scheduled. Also: dashboard, membership detail with rescheduling
   (washes can be rescheduled, not cancelled), single washes, booking details with before/after photos, vehicles, addresses.
 - **Specialist** (`/worker`, email + password): Today / In progress / Upcoming / Completed / Cancelled-moved queues, only the
   washes assigned to them; call customer → customer confirmed or call not picked up (wash stays scheduled) → start → before photos
@@ -31,7 +30,7 @@ PORT=5001 npm run dev  # in a second terminal: Vite, proxying /api to the stack
 ```
 
 Customer OTP is `123456`. Admin `admin@washo.test` / `Admin-pass-1`, specialist `worker@washo.test` / `Worker-pass-1`.
-Razorpay is simulated locally. Needs a local Postgres and the production schema dump (see `supabase/README.md`).
+Razorpay is simulated locally (a stand-in for its API; `GET /__dev/checkout?order=<id>` returns what Checkout would send). Needs a local Postgres and the production schema dump (see `supabase/README.md`).
 
 ## Against a Supabase branch / test project
 
@@ -41,6 +40,17 @@ Apply `supabase/migrations/*` (and `supabase/cutover/*` on a **branch only**; se
 
 > The website needs `supabase/cutover/20261005000001_*` (credit-free wash completion). The cutover files must not be applied to
 > production until the mobile app release that no longer needs the retired functions is live.
+
+## Payments (Razorpay Standard Checkout)
+
+The website server does the Razorpay work; the database decides the amount and settles the result.
+
+1. `POST /api/payments/membership-checkout` (or `/api/payments/on-demand`): the database validates and prices the order, the server creates the Razorpay order for exactly that amount (never a browser-supplied amount) and returns `{ order_id, amount, currency, key_id }`.
+2. The browser opens the Razorpay Checkout modal with that order (dismissal and `payment.failed` are handled and shown).
+3. `POST /api/payments/verify` with `razorpay_order_id`, `razorpay_payment_id`, `razorpay_signature`: HMAC-SHA256(`order_id|payment_id`, `RAZORPAY_KEY_SECRET`) is checked (400 on mismatch or missing fields; nothing is marked paid), then Razorpay's own record of the payment (captured, same order and amount), then the database settles it. The membership and its washes are created only at that point.
+
+Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in Render's environment. Not configured: payment routes answer 503 `payments_unavailable`.
+The Supabase edge functions in `supabase/functions` are not used by the website.
 
 ## Production database checklist
 
@@ -52,7 +62,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0010` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0011` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

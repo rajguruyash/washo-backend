@@ -20,7 +20,7 @@ export function usePay() {
     setPaying(true);
     try {
       const order = await getOrder();
-      const result = await payWithRazorpay({ order, description, prefill: { name: user?.full_name, email: user?.email, contact: user?.phone ?? undefined } });
+      const result = await payWithRazorpay({ order, description, prefill: { name: user?.full_name, email: user?.email, contact: user?.phone ?? undefined }, onFailed: (reason) => toast.error(reason) });
       await refresh();
       if (result.status === 'unfulfilled') {
         toast.error('We received your payment but could not finish the booking. WASHO has been alerted and will refund or fix it.');
