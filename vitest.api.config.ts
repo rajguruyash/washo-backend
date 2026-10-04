@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     include: ['backend/tests/**/*.test.ts'],
+    // legacy-schema tests need a database WITHOUT the migrations: run them with `run.sh legacy`
+    exclude: ['backend/tests/legacy-*.test.ts', 'node_modules/**'],
     environment: 'node',
     fileParallelism: false,
     testTimeout: 30_000,

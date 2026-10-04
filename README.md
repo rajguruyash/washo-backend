@@ -42,6 +42,17 @@ Apply `supabase/migrations/*` (and `supabase/cutover/*` on a **branch only**; se
 > The website needs `supabase/cutover/20261005000001_*` (credit-free wash completion). The cutover files must not be applied to
 > production until the mobile app release that no longer needs the retired functions is live.
 
+## Production database checklist
+
+Sign-in itself needs only the original schema, and works on a database that has none of the new migrations (it reads
+`profiles` tolerantly and takes email from the Supabase token until `profiles.email` exists). Everything else in the app
+needs the migrations. Apply them **in order, on a branch or backup first**; they are additive and re-runnable:
+
+1. `supabase/migrations/20261004000001` … `…0009` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
+
+`./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.
+
 ## Tests
 
 | Command | What it proves |
@@ -51,6 +62,7 @@ Apply `supabase/migrations/*` (and `supabase/cutover/*` on a **branch only**; se
 | `npm run db:test:baseline` | the production vulnerabilities reproduce on the unmodified schema |
 | `npm run db:test` | safe migrations (rolled-back transactions on a local replica) |
 | `npm run db:test:full` | safe + cutover: end-to-end membership and worker lifecycle |
+| `./supabase/tests/run.sh legacy` | sign-in (customer OTP, worker, admin) against a database shaped like production today |
 | `npm run test:api` | the website server over HTTP against the fake Supabase and the real database rules |
 | `npm run test:all` | everything above except the baseline |
 

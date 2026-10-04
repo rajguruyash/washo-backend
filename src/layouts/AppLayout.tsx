@@ -14,13 +14,29 @@ const homeFor = (role: Role) => (role === 'admin' ? '/admin' : role === 'worker'
 
 /** Signed-in, with the right role. Staff who open the customer app are sent to their own console, and vice versa. */
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, error, logout } = useAuth();
   const { pathname, search } = useLocation();
   if (loading) {
     return (
       <div className="grid min-h-dvh place-items-center">
         <Atmosphere />
         <Logo className="animate-pulse" />
+      </div>
+    );
+  }
+  // Signed in, but the session or profile could not be loaded: say so, rather than bouncing back to the login page.
+  if (!user && error) {
+    return (
+      <div className="grid min-h-dvh place-items-center px-4">
+        <Atmosphere />
+        <div className="glass-strong relative max-w-md p-8 text-center" role="alert">
+          <h1 className="text-xl font-bold">We couldn't open your account</h1>
+          <p className="mt-2 text-sm text-fog">{error.message}</p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button onClick={() => window.location.reload()} className="rounded-2xl bg-washo-600 px-5 py-2.5 text-sm font-semibold hover:bg-washo-500">Try again</button>
+            <button onClick={() => void logout().then(() => window.location.assign('/login'))} className="rounded-2xl border border-white/15 px-5 py-2.5 text-sm font-semibold hover:bg-white/10">Sign out</button>
+          </div>
+        </div>
       </div>
     );
   }

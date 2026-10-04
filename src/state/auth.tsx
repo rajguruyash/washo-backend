@@ -1,14 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
-import { onUnauthenticated, post } from '../lib/http';
+import { ApiError, onUnauthenticated, post } from '../lib/http';
 import { fetchMe, keys, useMe } from '../lib/queries';
 import type { User } from '../lib/types';
 
 interface AuthValue {
   user: User | null;
   loading: boolean;
-  /** Refetch the session after OTP verification. */
-  refresh: () => Promise<User | null>;
+  /** Set when the session could not be loaded for a reason other than "not signed in" (e.g. the profile lookup failed). */
+  error: ApiError | null;
+  /** Refetch the session after sign-in. Rejects with the server's message if the profile cannot be loaded. */
+  refresh: () => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -29,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(async () => {
-    return qc.fetchQuery({ queryKey: keys.me, queryFn: fetchMe, staleTime: 0 }).catch(() => null);
+    return qc.fetchQuery({ queryKey: keys.me, queryFn: fetchMe, staleTime: 0 });
   }, [qc]);
 
   const logout = useCallback(async () => {
@@ -42,8 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const value = useMemo<AuthValue>(
-    () => ({ user: me.data ?? null, loading: me.isLoading, refresh, logout }),
-    [me.data, me.isLoading, refresh, logout]
+    () => ({
+      user: me.data ?? null,
+      loading: me.isLoading,
+      error: me.error instanceof ApiError && me.error.status !== 401 ? me.error : me.error && !(me.error instanceof ApiError) ? new ApiError(0, 'network', "We couldn't reach WASHO. Check your connection and try again.") : null,
+      refresh,
+      logout,
+    }),
+    [me.data, me.isLoading, me.error, refresh, logout]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

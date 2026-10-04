@@ -23,7 +23,7 @@ export async function boot() {
   process.env.SUPABASE_ANON_KEY = FAKE.anonKey;
   process.env.SUPABASE_JWT_SECRET = FAKE.jwtSecret;
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE.serviceKey;
-  process.env.DATABASE_URL = `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
+  process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   const { createApp } = await import('../src/app');
   server = createApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

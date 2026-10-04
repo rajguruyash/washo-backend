@@ -98,12 +98,14 @@ export default function Login() {
     setProblem(null);
     try {
       await post('/auth/otp/verify', { phone: digits, code: value, source: getSource() });
-      setStep('done');
+      // Signed in at the server. Load the profile before saying so: if that fails, show why instead of going quiet.
       const me = await refresh();
-      setTimeout(() => navigate(next ?? (me ? homeFor(me.role) : '/app'), { replace: true }), 800);
+      setStep('done');
+      setTimeout(() => navigate(next && next.startsWith(homeFor(me.role)) ? next : homeFor(me.role), { replace: true }), 800);
     } catch (err) {
       setVerifying(false);
       setCode('');
+      setStep('otp');
       if (err instanceof ApiError) {
         const invalid = err.code === 'otp_invalid';
         setProblem({ kind: invalid ? 'invalid' : err.status === 429 ? 'throttled' : 'network', message: err.message });
@@ -128,8 +130,9 @@ export default function Login() {
     setStaffBusy(true);
     try {
       const res = await post<{ role: Role }>('/auth/staff/login', { email, password });
-      await refresh();
-      navigate(next ?? homeFor(res.role), { replace: true });
+      const me = await refresh();
+      const home = homeFor(me.role ?? res.role);
+      navigate(next && next.startsWith(home) ? next : home, { replace: true });
     } catch (err) {
       setStaffError(err instanceof ApiError ? err.fields.email ?? err.fields.password ?? err.message : 'Something went wrong. Please try again.');
       setStaffBusy(false);

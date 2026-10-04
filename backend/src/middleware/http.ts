@@ -5,17 +5,10 @@ import { config } from '../config';
 import { Claims, withUser } from '../db';
 import { HttpError, fromPg } from '../errors';
 import { verifyAccessToken } from '../jwt';
+import { Profile, Role, profileFor } from '../profile';
 import { AuthSession, gotrue } from '../supabase';
 
-export type Role = 'customer' | 'worker' | 'admin';
-
-export interface Profile {
-  id: string;
-  role: Role;
-  full_name: string | null;
-  phone: string | null;
-  email: string | null;
-}
+export type { Profile, Role } from '../profile';
 
 export interface SessionInfo {
   accessToken: string;
@@ -97,13 +90,7 @@ export const requireSession = asyncHandler(async (req, res, next) => {
   }
 
   const claims: Claims = { sub: verified.sub, phone: verified.phone, email: verified.email };
-  const profile = await withUser(claims, async (c) => {
-    const { rows } = await c.query<Profile>(
-      `SELECT id, role::text AS role, full_name, phone, email FROM public.profiles WHERE auth_user_id = auth.uid()`
-    );
-    return rows[0];
-  });
-  if (!profile) throw new HttpError(403, 'no_profile', 'Your account is not set up yet. Please contact WASHO.');
+  const profile = await profileFor(claims);
 
   req.session = { accessToken: token, claims, profile };
   req.db = (fn) => withUser(claims, fn);

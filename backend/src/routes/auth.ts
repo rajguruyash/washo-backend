@@ -4,6 +4,7 @@ import { HttpError, parse } from '../errors';
 import { ACCESS_COOKIE, REFRESH_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireSession, setSessionCookies } from '../middleware/http';
 import { withUser } from '../db';
 import { phoneSchema } from '../phone';
+import { Profile, profileFor } from '../profile';
 import { gotrue } from '../supabase';
 import { verifyAccessToken } from '../jwt';
 
@@ -37,13 +38,29 @@ authRouter.post(
     setSessionCookies(res, session);
 
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    const profile = await withUser(claims, async (c) => {
-      // First-touch attribution is write-once in the database; a returning customer's call is a no-op.
-      if (source) await c.query('SELECT public.record_signup_source($1)', [source.toLowerCase()]).catch(() => undefined);
-      const { rows } = await c.query(`SELECT role::text AS role, full_name FROM public.profiles WHERE auth_user_id = auth.uid()`);
-      return rows[0] as { role: string; full_name: string | null } | undefined;
-    });
-    res.json({ success: true, role: profile?.role ?? 'customer', needs_profile: !profile?.full_name });
+    // First-touch attribution is write-once in the database. It runs in a savepoint: if the database does not have the function
+    // yet, or refuses, that must never undo or abort the sign-in.
+    await withUser(claims, async (c) => {
+      if (!source) return;
+      await c.query('SAVEPOINT src');
+      try {
+        await c.query('SELECT public.record_signup_source($1)', [source.toLowerCase()]);
+        await c.query('RELEASE SAVEPOINT src');
+      } catch (err) {
+        await c.query('ROLLBACK TO SAVEPOINT src');
+        console.warn('record_signup_source skipped:', (err as Error).message);
+      }
+    }).catch((err) => console.warn('signup source not recorded:', (err as Error).message));
+
+    let profile: Profile;
+    try {
+      profile = await profileFor(claims);
+    } catch (err) {
+      // Signed in at Supabase but unusable here: do not leave half a session behind, and say why.
+      clearSessionCookies(res);
+      throw err;
+    }
+    res.json({ success: true, role: profile.role, needs_profile: profile.role === 'customer' && !profile.full_name });
   })
 );
 
@@ -56,8 +73,14 @@ authRouter.post(
     const { email, password } = parse(z.object({ email: z.email('Enter your email address.'), password: z.string().min(1, 'Enter your password.').max(200) }), req.body);
     const session = await gotrue.passwordLogin(email.trim().toLowerCase(), password);
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    const profile = await withUser(claims, async (c) => (await c.query(`SELECT role::text AS role FROM public.profiles WHERE auth_user_id = auth.uid()`)).rows[0] as { role: string } | undefined);
-    if (!profile || (profile.role !== 'worker' && profile.role !== 'admin')) {
+    let profile: Profile;
+    try {
+      profile = await profileFor(claims);
+    } catch (err) {
+      await gotrue.logout(session.access_token);
+      throw err;
+    }
+    if (profile.role !== 'worker' && profile.role !== 'admin') {
       await gotrue.logout(session.access_token);
       throw new HttpError(403, 'not_staff', 'This sign-in is for WASHO staff. Customers sign in with their mobile number.');
     }

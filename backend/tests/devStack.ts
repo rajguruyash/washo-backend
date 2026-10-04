@@ -14,7 +14,7 @@ async function main() {
   process.env.SUPABASE_ANON_KEY = FAKE.anonKey;
   process.env.SUPABASE_JWT_SECRET = FAKE.jwtSecret;
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE.serviceKey;
-  process.env.DATABASE_URL = `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
+  process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   process.env.PORT ||= '5001';
 
   await fake.createStaff('admin', { email: 'admin@washo.test', password: 'Admin-pass-1', name: 'WASHO Admin', phone: '9000000001' });

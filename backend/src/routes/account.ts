@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { loadProfile } from '../profile';
 
 export const accountRouter = Router();
 accountRouter.use(['/me', '/addresses', '/vehicles', '/notifications'], requireSession);
@@ -19,15 +20,23 @@ accountRouter.put(
       }),
       req.body
     );
-    const row = await req.db(async (c) => {
-      const { rows } = await c.query(
-        `UPDATE public.profiles SET full_name = $1, email = COALESCE(NULLIF($2, ''), email), updated_at = now()
-          WHERE auth_user_id = auth.uid() RETURNING id, role::text AS role, full_name, phone, email`,
-        [body.full_name, body.email ?? '']
-      );
-      return rows[0];
+    const user = await req.db(async (c) => {
+      await c.query('UPDATE public.profiles SET full_name = $1, updated_at = now() WHERE auth_user_id = auth.uid()', [body.full_name]);
+      if (body.email) {
+        // profiles.email comes with migration 20261004000003. Until a database has it, saving the name must still work.
+        await c.query('SAVEPOINT em');
+        try {
+          await c.query('UPDATE public.profiles SET email = $1 WHERE auth_user_id = auth.uid()', [body.email]);
+          await c.query('RELEASE SAVEPOINT em');
+        } catch (err) {
+          if ((err as { code?: string }).code !== '42703') throw err; // undefined_column
+          await c.query('ROLLBACK TO SAVEPOINT em');
+          console.warn('profiles.email is missing in this database: apply supabase/migrations/20261004000003_schema_additions.sql');
+        }
+      }
+      return loadProfile(c, req.session!.claims);
     });
-    res.json({ success: true, user: { ...row, needs_profile: false } });
+    res.json({ success: true, user: { ...user, needs_profile: false } });
   })
 );
 

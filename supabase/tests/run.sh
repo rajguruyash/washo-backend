@@ -4,6 +4,8 @@
 #   supabase/tests/run.sh safe          # apply supabase/migrations/*  and run the "after" suites
 #   supabase/tests/run.sh full          # also apply supabase/cutover/* (needs the mobile app update)
 #   supabase/tests/run.sh dev           # local fake Supabase + website API on PORT (default 5001), to click through the site
+#   supabase/tests/run.sh legacy        # sign-in against a database shaped like production today (no new migrations)
+#   supabase/tests/run.sh devlegacy     # click-through stack on that same database
 #   supabase/tests/run.sh api           # full schema + the website API tests (fake Supabase Auth/functions/Storage)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -18,6 +20,17 @@ fi
 
 DB="washo_mig_$MODE"
 dropdb --if-exists "$DB"; createdb -T "$BASE" "$DB"
+
+# A database exactly like production today: the schema dump, NO new migrations. The website connects like Supabase's pooler
+# user does (a privileged role that can SET ROLE authenticated), not as washo_api, which does not exist there yet.
+if [ "$MODE" = "legacy" ]; then
+  SB_TEST_DB="$DB" SB_API_DB_URL="postgresql://localhost:5432/$DB" npx vitest run --config vitest.api-legacy.config.ts "${@:2}"
+  exit $?
+fi
+if [ "$MODE" = "devlegacy" ]; then
+  SB_TEST_DB="$DB" SB_API_DB_URL="postgresql://localhost:5432/$DB" TS_NODE_PROJECT=backend/tsconfig.json node -r ts-node/register/transpile-only backend/tests/devStack.ts
+  exit $?
+fi
 apply() { for f in "$@"; do [ -f "$f" ] || continue; echo "  applying $(basename "$f")"; psql -q -d "$DB" -v ON_ERROR_STOP=1 -f "$f" >/dev/null; done; }
 # Supabase keeps pgcrypto in the `extensions` schema; admin_create_worker calls extensions.crypt/gen_salt. Locally it lives in public.
 psql -q -d "$DB" -c "CREATE SCHEMA IF NOT EXISTS extensions; CREATE OR REPLACE FUNCTION extensions.crypt(text, text) RETURNS text LANGUAGE sql AS 'SELECT public.crypt(\$1, \$2)'; CREATE OR REPLACE FUNCTION extensions.gen_salt(text) RETURNS text LANGUAGE sql AS 'SELECT public.gen_salt(\$1)'; GRANT USAGE ON SCHEMA extensions TO authenticated, service_role, anon;"
