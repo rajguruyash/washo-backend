@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { AddressSheet } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
 import { Logo } from '../../components/brand/Logo';
+import { PhoneVerify } from '../../components/PhoneVerify';
 import { VehicleSheet } from '../../components/VehicleSheet';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
@@ -19,6 +20,9 @@ export default function Welcome() {
   const save = useSaveProfile();
   const { data: addresses } = useAddresses();
   const [step, setStep] = useState<0 | 1 | 2>(user && !user.needs_profile ? 1 : 0);
+  // Signed in with Google: no mobile number yet. It is confirmed with a code before the first booking, right after the details.
+  const [detailsSaved, setDetailsSaved] = useState(Boolean(user?.full_name));
+  const needsPhone = Boolean(user) && !user?.phone;
   const [form, setForm] = useState({ full_name: user?.full_name ?? '', email: user?.email ?? '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
@@ -32,7 +36,8 @@ export default function Welcome() {
     setFormError('');
     try {
       await save.mutateAsync(form);
-      setStep(1);
+      setDetailsSaved(true);
+      if (!needsPhone) setStep(1);
     } catch (err) {
       if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields);
       else setFormError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
@@ -54,7 +59,12 @@ export default function Welcome() {
       </div>
 
       <AnimatePresence mode="wait" initial={false}>
-        {step === 0 && (
+        {step === 0 && needsPhone && detailsSaved && (
+          <motion.div key="a-phone" {...slide} className="glass p-6 sm:p-8">
+            <PhoneVerify onVerified={() => setStep(1)} />
+          </motion.div>
+        )}
+        {step === 0 && !(needsPhone && detailsSaved) && (
           <motion.form key="a" {...slide} onSubmit={submit} className="glass space-y-5 p-6 sm:p-8" noValidate>
             <div className="flex items-center gap-4">
               <AvatarHead className="h-16 w-16" />

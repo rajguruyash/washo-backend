@@ -42,7 +42,7 @@ export function RequireRole({ role, children }: { role: Role; children: ReactNod
   }
   if (!user) {
     const next = `next=${encodeURIComponent(pathname + search)}`;
-    return <Navigate to={role === 'customer' ? `/login?${next}` : `/login?staff=1&${next}`} replace />;
+    return <Navigate to={role === 'customer' ? `/login?${next}` : `/login?mode=email&${next}`} replace />;
   }
   if (user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
   if (role === 'customer' && user.needs_profile && pathname !== '/app/welcome') return <Navigate to="/app/welcome" replace />;

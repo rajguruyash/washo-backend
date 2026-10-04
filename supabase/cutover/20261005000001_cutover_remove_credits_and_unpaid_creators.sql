@@ -5,9 +5,7 @@
 --
 --   * credits are retired: no entitlement is read or written by any live function
 --   * worker_complete_wash completes a wash; it no longer consumes anything
---   * cancel_customer_booking: fixed (it wrote an event the CHECK rejected), no credit logic,
---     membership washes can be rescheduled but not cancelled by the customer, paid on-demand
---     cancellations raise a refund REQUEST for WASHO to review
+--   * cancel_customer_booking now lives in migration 12 (refund workflow), not here
 --   * create_on_demand_booking / create_custom_membership / book_membership_credit_wash /
 --     consume_membership_entitlement_for_booking become stubs that refuse
 --
@@ -49,48 +47,8 @@ BEGIN
 END $$;
 
 -- ───────────────────────── cancellation ─────────────────────────
-CREATE OR REPLACE FUNCTION public.cancel_customer_booking(p_booking_id uuid, p_reason text DEFAULT 'Customer requested cancellation')
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_actor uuid := public.current_profile_id();
-  v_admin boolean := public.is_admin();
-  v_booking public.bookings%ROWTYPE;
-  v_pay public.payments%ROWTYPE;
-  v_reason text := COALESCE(NULLIF(trim(p_reason), ''), 'Customer requested cancellation');
-BEGIN
-  IF v_actor IS NULL THEN RAISE EXCEPTION 'Not authenticated' USING ERRCODE = '42501'; END IF;
-  SELECT * INTO v_booking FROM public.bookings WHERE id = p_booking_id FOR UPDATE;
-  IF NOT FOUND OR (v_booking.customer_profile_id <> v_actor AND NOT v_admin) THEN RAISE EXCEPTION 'Booking not found'; END IF;
-
-  IF v_booking.status NOT IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up') THEN
-    RAISE EXCEPTION 'This booking can no longer be cancelled (it is %)', v_booking.status;
-  END IF;
-  IF v_booking.booking_type = 'membership' AND NOT v_admin THEN
-    RAISE EXCEPTION 'Membership washes can be rescheduled but not cancelled. Please reschedule it, or contact WASHO.';
-  END IF;
-
-  UPDATE public.bookings
-     SET status = 'cancelled', cancel_reason = v_reason, updated_at = now(),
-         notes = COALESCE(notes || E'\n', '') || 'Cancelled: ' || v_reason
-   WHERE id = p_booking_id;
-  IF v_booking.membership_schedule_occurrence_id IS NOT NULL THEN
-    UPDATE public.membership_schedule_occurrences SET status = 'cancelled', updated_at = now() WHERE id = v_booking.membership_schedule_occurrence_id;
-  END IF;
-  UPDATE public.worker_assignments SET is_active = false, unassigned_at = now() WHERE booking_id = p_booking_id AND is_active;
-
-  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
-  VALUES (p_booking_id, 'cancelled', v_actor, jsonb_build_object('reason', v_reason, 'cancelled_by', CASE WHEN v_admin THEN 'admin' ELSE 'customer' END));
-
-  -- A paid on-demand wash that is cancelled raises a refund REQUEST. WASHO decides and pays it out.
-  SELECT * INTO v_pay FROM public.payments WHERE booking_id = p_booking_id AND status = 'paid' ORDER BY paid_at DESC LIMIT 1;
-  IF FOUND AND NOT EXISTS (SELECT 1 FROM public.refunds WHERE payment_id = v_pay.id AND status <> 'reversed') THEN
-    INSERT INTO public.refunds (payment_id, booking_id, customer_profile_id, amount_cents, reason, status)
-    VALUES (v_pay.id, p_booking_id, v_pay.customer_profile_id, v_pay.amount_cents, 'Booking cancelled: ' || v_reason, 'requested');
-    INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
-    VALUES (p_booking_id, 'refund_requested', v_actor, jsonb_build_object('payment_id', v_pay.id, 'amount_cents', v_pay.amount_cents));
-  END IF;
-  RETURN true;
-END $$;
+-- cancel_customer_booking() (credit-free, raises a full-refund request that only an admin can release) now ships in
+-- supabase/migrations/20261004000012_refund_workflow.sql so it works before this cutover. Nothing to do here.
 
 -- ───────────────────────── admin_update_booking: no credit refunds ─────────────────────────
 -- The original refunded a "wash credit" and extended entitlements when WASHO cancelled a membership wash. Credits are gone;

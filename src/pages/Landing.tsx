@@ -1,16 +1,14 @@
 import { ArrowRight, CalendarCheck, Camera, Droplets, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
 import { AvatarFull } from '../components/brand/Avatar';
-import { ServicePhoto } from '../components/ServicePhoto';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
-import SpotlightCard from '../components/reactbits/SpotlightCard';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
+import { ServiceCarousel } from '../components/ServiceCarousel';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
-import { rupees } from '../lib/format';
 import { useCatalog } from '../lib/queries';
 
 const steps = [
@@ -98,24 +96,12 @@ export default function Landing() {
 
       <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
         <Reveal><p className="eyebrow">Single washes</p><h2 className="mt-2 text-3xl font-extrabold md:text-4xl">Or book one wash</h2></Reveal>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {isLoading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64" />) : catalog?.services.map((s, i) => {
-            const own = s.unit_prices?.find((p) => p.vehicle_type === s.vehicle_type)?.price_cents;
-            return (
-              <Reveal key={s.id} delay={i * 0.05}>
-                <SpotlightCard spotlightColor="rgba(63, 124, 255, 0.28)" className="h-full rounded-3xl! border-white/[0.09]! bg-white/[0.045]! p-0! backdrop-blur-xl">
-                  <ServicePhoto code={s.code} name={s.name} className="aspect-[4/3]" />
-                  <div className="p-5"><h3 className="font-bold">{s.name}</h3><p className="mt-1 text-sm text-fog">{s.tagline ?? s.description}</p>{own != null && <p className="mt-3 font-display text-2xl font-extrabold">{rupees(own)}</p>}</div>
-                </SpotlightCard>
-              </Reveal>
-            );
-          })}
-        </div>
+        <div className="mt-6">{isLoading || !catalog ? <Skeleton className="h-[560px]" /> : <ServiceCarousel services={catalog.services} />}</div>
         <p className="mt-4 text-xs text-fog">SUVs use the car Body wash rate and the SUV Deep cleaning rate.</p>
       </section>
 
       <section className="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
-        <Reveal><p className="eyebrow">Why WASHO</p><h2 className="mt-2 text-3xl font-extrabold md:text-4xl">Care your vehicle can feel</h2></Reveal>
+        <Reveal><p className="eyebrow">Why WASHO</p><h2 className="mt-2 text-3xl font-extrabold md:text-4xl">A careful wash, right at your parking spot</h2></Reveal>
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {why.map((w, i) => (
             <Reveal key={w.title} delay={i * 0.04} className="panel p-6"><w.icon className="h-6 w-6 text-washo-300" /><h3 className="mt-3 font-bold">{w.title}</h3><p className="mt-1.5 text-sm text-fog">{w.text}</p></Reveal>

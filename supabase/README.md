@@ -81,7 +81,7 @@ Idempotent. Payment screenshots are not copied; their old path is kept.
 - The website backend and UI still use their own local schema. Switching them to these Supabase functions, removing the credit UI, and building the membership-request wizard is the next step.
 - The mobile app needs: the intent-based payment flow, the membership-request screens, `worker_pool()`, signed photo URLs, removal of credit screens.
 - Edge functions could not be run here (no Deno). Their pure logic is unit-tested; they need a deploy to a branch and a Razorpay test-mode payment.
-- Refund payout is manual: refunds are created as `requested` for WASHO to approve and pay in Razorpay.
+- Refunds: a cancelled paid wash creates a `requested` refund for the full amount (migration 12); an admin approves it and the website server asks Razorpay to pay it back. There is no Razorpay webhook.
 - Coupons: the old edge function read a column that does not exist (`discount_percent`); coupons are not wired into the new intent flow.
 
 
@@ -94,3 +94,11 @@ Idempotent. Payment screenshots are not copied; their old path is kept.
 - `migrations/20261004000006` now has one shared reschedule core used by customers and admins; a moved wash returns to the membership's regular specialist.
 - `cutover/20261005000001` also replaces `admin_update_booking` without credit logic.
 - Website API tests: `./supabase/tests/run.sh api`. Local click-through: `./supabase/tests/run.sh dev`.
+
+## Refund workflow (migration 12)
+
+- `cancel_customer_booking()` (moved here from `cutover/20261005000001`, so it works before the cutover): cancelling a paid on-demand wash raises a `requested` refund for the FULL amount paid; membership washes still cannot be cancelled by customers. No credit logic.
+- `admin_begin_refund(id)` claims it (`approved`, `approved_at`); a claim younger than two minutes is refused so two admins cannot both pay.
+- `admin_finish_refund(id, razorpay_refund_id)` records `processed`, marks the payment `refunded`, adds the `refunded` booking event. Idempotent for the same Razorpay refund id.
+- `admin_fail_refund(id, reason)` records `failed` with `failure_reason` (retryable). `admin_resolve_refund` still records a refund paid by hand and now does the same bookkeeping for `processed`.
+- Adds `refunds.approved_at` and `refunds.failure_reason`. Tests: `supabase/tests/after-12-refund-workflow.test.ts`, `backend/tests/api-refunds.test.ts`.

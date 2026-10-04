@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { refundPayment } from '../razorpay';
 import { photoStorage } from '../supabase';
 
 export const adminRouter = Router();
@@ -223,7 +224,7 @@ adminRouter.get(
 );
 
 // Money that arrived but could not be turned into a booking/membership, and the refund requests that follow.
-// Paying a refund out is a manual step in the Razorpay dashboard; this just makes sure nobody misses one.
+// An admin approves a refund and the server asks Razorpay to pay it back (below); nothing is refunded without that approval.
 adminRouter.get(
   '/admin/attention',
   asyncHandler(async (req, res) => {
@@ -234,12 +235,31 @@ adminRouter.get(
                         WHERE pay.fulfilment_status = 'unfulfilled' ORDER BY pay.updated_at DESC LIMIT 50`)
       ).rows,
       refunds: (
-        await c.query(`SELECT r.id, r.amount_cents, r.reason, r.status::text AS status, r.created_at, p.full_name AS customer_name, p.phone AS customer_phone
+        await c.query(`SELECT r.id, r.amount_cents, r.reason, r.status::text AS status, r.failure_reason, r.created_at, p.full_name AS customer_name, p.phone AS customer_phone
                          FROM public.refunds r JOIN public.profiles p ON p.id = r.customer_profile_id
                         WHERE r.status IN ('requested', 'approved', 'failed') ORDER BY r.created_at DESC LIMIT 50`)
       ).rows,
     }));
     res.json({ success: true, ...out });
+  })
+);
+
+// Approve and pay: the database claims the refund (so two admins cannot pay it twice), Razorpay refunds the ORIGINAL payment
+// for the full amount, and only then is it recorded as processed. If Razorpay says no, the reason is kept and it can be retried.
+adminRouter.post(
+  '/admin/refunds/:id/approve',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const claim = await req.db(async (c) => (await c.query('SELECT public.admin_begin_refund($1) AS r', [id])).rows[0].r as {
+      amount_cents: number; provider_payment_id: string;
+    });
+    const outcome = await refundPayment({ refundId: id, providerPaymentId: claim.provider_payment_id, amountPaise: claim.amount_cents });
+    if (!outcome.ok) {
+      await req.db((c) => c.query('SELECT public.admin_fail_refund($1, $2)', [id, outcome.reason ?? null]));
+      throw new HttpError(502, 'refund_failed', `Razorpay did not accept the refund: ${outcome.reason ?? 'unknown reason'}. Nothing was refunded; you can try again.`);
+    }
+    await req.db((c) => c.query('SELECT public.admin_finish_refund($1, $2)', [id, outcome.refundId]));
+    res.json({ success: true, provider_refund_id: outcome.refundId });
   })
 );
 

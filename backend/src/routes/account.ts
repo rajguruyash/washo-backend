@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
-import { forgetProfile, loadProfile } from '../profile';
+import { forgetProfile, loadProfile, needsProfile } from '../profile';
 
 export const accountRouter = Router();
 accountRouter.use(['/me', '/addresses', '/vehicles', '/notifications'], requireSession);
@@ -37,7 +37,7 @@ accountRouter.put(
       return loadProfile(c, req.session!.claims);
     });
     forgetProfile(req.session!.claims.sub);
-    res.json({ success: true, user: { ...user, needs_profile: false } });
+    res.json({ success: true, user: { ...user, needs_profile: user ? needsProfile(user) : false } });
   })
 );
 

@@ -21,7 +21,7 @@ import {
 } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
-import type { AdminBooking, AdminMembership, AdminRequest, RequestStatus, SlotId } from '../../lib/types';
+import type { AdminBooking, AdminMembership, AdminRequest, Attention as AttentionData, RequestStatus, SlotId } from '../../lib/types';
 import { StaffLayout } from '../../layouts/StaffLayout';
 
 type Tab = 'overview' | 'requests' | 'bookings' | 'memberships' | 'people' | 'attention';
@@ -361,9 +361,22 @@ function People() {
 function Attention() {
   const { data, isLoading, isError, refetch } = useAdminAttention();
   const act = useAdminAction();
+  const refresh = useRefreshAll();
   const toast = useToast();
+  const [approving, setApproving] = useState<AttentionData['refunds'][number] | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [rid, setRid] = useState('');
+  const approve = async () => {
+    if (!approving) return;
+    try {
+      await act.mutateAsync({ path: `refunds/${approving.id}/approve` });
+      toast.success(`${rupees(approving.amount_cents)} refunded through Razorpay`);
+    } catch (e) {
+      toast.error(errText(e));
+      void refresh(); // the refund may now show as failed, with Razorpay's reason
+    }
+    setApproving(null);
+  };
   const resolve = async (status: 'approved' | 'processed' | 'failed') => {
     try { await act.mutateAsync({ path: `refunds/${resolving}/resolve`, body: { status, provider_refund_id: rid || undefined } }); toast.success('Refund updated'); setResolving(null); setRid(''); } catch (e) { toast.error(errText(e)); }
   };
@@ -377,12 +390,25 @@ function Attention() {
       </section>
       <section>
         <h2 className="mb-1 text-lg font-bold">Refund requests</h2>
-        <p className="mb-3 text-sm text-fog">Pay each refund from the Razorpay dashboard, then record the Razorpay refund id here.</p>
+        <p className="mb-3 text-sm text-fog">Nothing is refunded until you approve it. Approving sends the full amount back to the customer through Razorpay.</p>
         {data.refunds.length ? <ul className="space-y-2">{data.refunds.map((r) => (
-          <li key={r.id} className="panel flex flex-wrap items-center justify-between gap-3 p-4"><div className="text-sm"><p className="font-semibold">{rupees(r.amount_cents)} · {r.customer_name} {prettyPhone(r.customer_phone)}</p><p className="text-xs text-fog">{r.reason} · {r.status}</p></div><Button size="sm" onClick={() => setResolving(r.id)}>Resolve</Button></li>
+          <li key={r.id} className="panel flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="text-sm">
+              <p className="font-semibold">{rupees(r.amount_cents)} · {r.customer_name} {prettyPhone(r.customer_phone)}</p>
+              <p className="text-xs text-fog">{r.reason} · {r.status}</p>
+              {r.status === 'failed' && r.failure_reason && <p className="mt-1 text-xs text-warn">Razorpay said: {r.failure_reason}</p>}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setResolving(r.id)}>Paid it by hand</Button>
+              <Button size="sm" onClick={() => setApproving(r)}>{r.status === 'failed' ? 'Try again' : 'Approve and refund'}</Button>
+            </div>
+          </li>
         ))}</ul> : <p className="panel p-5 text-sm text-fog">No open refunds.</p>}
       </section>
-      <Sheet open={Boolean(resolving)} onClose={() => setResolving(null)} size="sm" title="Resolve refund" footer={<div className="grid gap-3"><Button loading={act.isPending} disabled={rid.trim().length < 4} icon={<Check className="h-4 w-4" />} onClick={() => void resolve('processed')}>Mark refunded</Button><div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => void resolve('approved')}>Approved</Button><Button variant="danger" onClick={() => void resolve('failed')}>Failed</Button></div></div>}>
+      <Sheet open={Boolean(approving)} onClose={() => setApproving(null)} size="sm" title="Approve this refund?" description={approving ? `${rupees(approving.amount_cents)} goes back to ${approving.customer_name ?? 'the customer'} on the payment method they used. This cannot be undone.` : undefined} footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setApproving(null)}>Not now</Button><Button loading={act.isPending} icon={<Check className="h-4 w-4" />} onClick={() => void approve()}>Approve and refund</Button></div>}>
+        <p className="text-sm text-fog">{approving?.reason}</p>
+      </Sheet>
+      <Sheet open={Boolean(resolving)} onClose={() => setResolving(null)} size="sm" title="Record a refund you paid by hand" description="Use this only if you already refunded it from the Razorpay dashboard." footer={<div className="grid gap-3"><Button loading={act.isPending} disabled={rid.trim().length < 4} icon={<Check className="h-4 w-4" />} onClick={() => void resolve('processed')}>Mark refunded</Button><Button variant="danger" onClick={() => void resolve('failed')}>Mark failed</Button></div>}>
         <Input label="Razorpay refund id" value={rid} onChange={(e) => setRid(e.target.value)} placeholder="rfnd_…" hint="Needed to mark it refunded." />
       </Sheet>
     </div>

@@ -52,6 +52,29 @@ The website server does the Razorpay work; the database decides the amount and s
 Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in Render's environment. Not configured: payment routes answer 503 `payments_unavailable`.
 The Supabase edge functions in `supabase/functions` are not used by the website.
 
+### Cancelling and refunds
+
+A customer can cancel a single wash that has not started. If it was paid, the database records a **refund request for the full amount** (no cutoff, no deduction).
+Nothing is refunded until an **admin approves it** (Admin → Needs attention → *Approve and refund*):
+
+1. `POST /api/admin/refunds/:id/approve` (admin only). `admin_begin_refund()` claims the refund, so two admins cannot pay it twice.
+2. The server asks Razorpay to refund the original payment for exactly that amount (`POST /v1/payments/:id/refund`). It first looks for a refund Razorpay already made for the same WASHO refund id, so a retry never pays twice.
+3. On success `admin_finish_refund()` records Razorpay's refund id, marks the payment refunded and adds *Refunded* to the customer's timeline. If Razorpay refuses, the reason is kept (`refunds.failure_reason`, shown to the admin only), the refund shows *failed*, and the admin can try again.
+
+*Paid it by hand* is still there for a refund done in the Razorpay dashboard (it needs the Razorpay refund id). Membership washes cannot be cancelled by customers; they reschedule.
+There is no Razorpay webhook: refund status is whatever Razorpay answered when it was created.
+
+## Sign-in
+
+- **Mobile number + code** (Supabase Auth phone OTP, Twilio Verify). The main way in for customers.
+- **Continue with Google**: OAuth through Supabase Auth with PKCE. `GET /api/auth/google` keeps a one-time secret in an httpOnly cookie and sends the browser to Supabase; `GET /api/auth/callback` exchanges the returned code with that secret and sets the usual session cookies.
+  Needs the Google provider switched on in Supabase (Authentication → Providers → Google) and `https://washo.online/api/auth/callback` in Authentication → URL Configuration → Redirect URLs.
+  Optional `PUBLIC_URL=https://washo.online` pins the address sent to Supabase (otherwise the request's own address is used).
+- **Continue with Email**: email + password, for any account that has one (specialists and admins today). Where they land depends on their role.
+
+A customer who signed in with Google has no mobile number, and a specialist has to ring the customer. They are asked to add one (a code is texted to it; Supabase refuses a number that already belongs to another account),
+and `409 phone_required` stops them paying until they have. Customers who sign in by phone always have one.
+
 ## Production database checklist
 
 Sign-in itself needs only the original schema, and works on a database that has none of the new migrations (it reads
@@ -62,7 +85,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0011` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0012` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

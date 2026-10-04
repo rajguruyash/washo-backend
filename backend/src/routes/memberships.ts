@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
-import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
 import { notifyAdminOfRequest } from '../notify';
 import { openOrder } from '../razorpay';
 
@@ -71,6 +71,7 @@ membershipsRouter.post(
 // amount as the customer, then the server opens the Razorpay order for that amount. No membership exists until payment is verified.
 membershipsRouter.post(
   '/membership-requests/:id/accept',
+  requirePhone,
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
     const intent = await req.db(async (c) => (await c.query('SELECT public.accept_membership_quote($1) AS r', [id])).rows[0].r);

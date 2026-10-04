@@ -33,6 +33,9 @@ export async function loadProfile(c: PoolClient, claims: Claims): Promise<Profil
   };
 }
 
+/** A customer is not set up until we know their name and have a mobile number a specialist can ring. */
+export const needsProfile = (p: Profile) => p.role === 'customer' && (!p.full_name || !p.phone);
+
 // The role and name rarely change. Re-reading them on EVERY request doubled the database round trips, so they are remembered
 // briefly. Anything that changes them (profile save, sign-in) calls forgetProfile().
 const TTL_MS = 30_000;

@@ -19,6 +19,9 @@ export const config = {
   env,
   isProd,
   port: Number(process.env.PORT) || 5000,
+  // The public address of the site (https://washo.online). Only needed so "Continue with Google" can tell Supabase where to
+  // send people back to; when it is not set the address of the incoming request is used.
+  publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, ''),
 
   supabase: {
     // The project URL. Local `supabase start` listens on 54321.

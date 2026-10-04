@@ -106,6 +106,14 @@ export const requireRole = (...roles: Role[]): RequestHandler => (req, _res, nex
   next();
 };
 
+/** Paying starts a booking a specialist has to ring the customer about, so it needs a verified mobile number on file. */
+export const requirePhone: RequestHandler = (req, _res, next) => {
+  if (!req.session?.profile.phone) {
+    return next(new HttpError(409, 'phone_required', 'Add and verify your mobile number first, so your specialist can reach you.'));
+  }
+  next();
+};
+
 /**
  * Cookie auth needs CSRF protection. Browsers always send Origin on cross-site writes, so any
  * state-changing request from a foreign origin is refused.

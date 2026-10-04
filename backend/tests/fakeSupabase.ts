@@ -39,6 +39,10 @@ export interface FakeSupabase {
   checkout(orderId: string, o?: { status?: string; amount?: number }): { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string };
   orders: Map<string, { amount: number; currency: string; receipt: string }>;
   payments: Map<string, { order_id: string; amount: number; currency: string; status: string }>;
+  /** Refunds Razorpay has been asked to make (id -> payment, amount in paise, notes). */
+  refunds: Map<string, { payment_id: string; amount: number; notes: Record<string, string>; receipt: string; status: string }>;
+  /** Make the next refund request be refused with this message (HTTP 400, like Razorpay's BAD_REQUEST_ERROR). */
+  rejectNextRefund(description: string): void;
   objects: Map<string, { bytes: Buffer; contentType: string }>;
   otpSent: string[];
   makeSession(authUserId: string, extra?: Record<string, unknown>): { access_token: string; refresh_token: string; expires_in: number };
@@ -46,6 +50,11 @@ export interface FakeSupabase {
   razorpayBase: string;
   /** Make the next Razorpay API call fail with this HTTP status. */
   failNextRazorpayCall(status?: number): void;
+  /**
+   * Simulates the person finishing "Continue with Google": returns the one-time code Supabase would put in the callback URL.
+   * It only works for the browser that holds the verifier matching `challenge` (PKCE).
+   */
+  googleSignIn(o: { email: string; name?: string; challenge: string }): Promise<string>;
   /** Make the next /auth/v1/otp call fail the way Supabase does when it throttles. */
   throttleNextOtp(): void;
   /** Create an email+password staff account (what admin_create_worker does) with the given role. */
@@ -68,10 +77,14 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     refresh: new Map<string, string>(), // refresh token -> auth user id
     orders: new Map<string, { amount: number; currency: string; receipt: string }>(),
     payments: new Map<string, { order_id: string; amount: number; currency: string; status: string }>(),
+    refunds: new Map<string, { payment_id: string; amount: number; notes: Record<string, string>; receipt: string; status: string }>(),
     objects: new Map<string, { bytes: Buffer; contentType: string }>(),
     otpSent: [] as string[],
     throttle: false,
     rzpFail: 0,
+    rzpRejectRefund: '' as string,
+    phoneChange: new Map<string, string>(), // auth user id -> the number a code was sent to
+    codes: new Map<string, { userId: string; challenge: string }>(), // Google one-time codes
   };
 
   const session = (authUserId: string, extra: Record<string, unknown> = {}) => {
@@ -122,6 +135,23 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     res.end(JSON.stringify(body));
   };
 
+  async function googleCode({ email, name, challenge }: { email: string; name?: string; challenge: string }) {
+    let { rows } = await admin.query('SELECT id FROM auth.users WHERE email = $1', [email]);
+    if (!rows.length) {
+      // Google users arrive with a verified email, a name in their metadata, and NO phone. The database trigger makes them a customer.
+      rows = (
+        await admin.query(
+          `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+           VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, now(), '{"provider":"google","providers":["google"]}'::jsonb, $2::jsonb, now(), now()) RETURNING id`,
+          [email, JSON.stringify({ full_name: name ?? null, name: name ?? null, email, email_verified: true, iss: 'https://accounts.google.com' })]
+        )
+      ).rows;
+    }
+    const code = crypto.randomBytes(16).toString('hex');
+    state.codes.set(code, { userId: rows[0].id, challenge });
+    return code;
+  }
+
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url!, 'http://x');
@@ -130,6 +160,34 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       const json = () => (raw.length ? JSON.parse(raw.toString()) : {});
 
       // ───────── Auth ─────────
+      // Stands in for Supabase + Google when clicking through locally: "approves" immediately as a fixed Google account and
+      // sends the browser back with a one-time code, like the real flow does after Google's consent screen.
+      if (path === '/auth/v1/authorize' && req.method === 'GET') {
+        const back = url.searchParams.get('redirect_to');
+        const challenge = url.searchParams.get('code_challenge');
+        if (url.searchParams.get('provider') !== 'google' || !back || !challenge) return send(res, 400, { msg: 'unsupported authorize request' });
+        const code = await googleCode({ email: 'dev.google@example.com', name: 'Dev Google', challenge });
+        res.writeHead(302, { Location: `${back}${back.includes('?') ? '&' : '?'}code=${code}` });
+        return res.end();
+      }
+      if (path === '/auth/v1/user' && req.method === 'PUT') {
+        const uid = verifyBearer(req);
+        if (!uid) return send(res, 401, { code: 401, error_code: 'bad_jwt', msg: 'invalid JWT' });
+        const { phone } = json();
+        if (phone) {
+          const digits = String(phone).replace(/\D/g, '');
+          const { rows } = await admin.query(`SELECT id FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1 AND id <> $2`, [digits, uid]);
+          if (rows.length) return send(res, 422, { code: 422, error_code: 'phone_exists', msg: 'Phone number already registered by another user' });
+          if (state.throttle) {
+            state.throttle = false;
+            return send(res, 429, { code: 429, error_code: 'over_sms_send_rate_limit', msg: 'For security purposes, you can only request this after 60 seconds.' });
+          }
+          state.phoneChange.set(uid, phone);
+          state.otps.set(phone, FAKE.otpCode);
+          state.otpSent.push(phone);
+        }
+        return send(res, 200, { id: uid, new_phone: phone });
+      }
       if (path === '/auth/v1/otp' && req.method === 'POST') {
         if (state.throttle) {
           state.throttle = false;
@@ -142,6 +200,17 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       }
       if (path === '/auth/v1/verify' && req.method === 'POST') {
         const { phone, token, type } = json();
+        if (type === 'phone_change') {
+          const uid = verifyBearer(req);
+          if (!uid || state.phoneChange.get(uid) !== phone || state.otps.get(phone) !== token) {
+            return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Token has expired or is invalid' });
+          }
+          state.otps.delete(phone);
+          state.phoneChange.delete(uid);
+          // what GoTrue does: set and confirm the number (the database's own trigger then links the profile)
+          await admin.query('UPDATE auth.users SET phone = $1, phone_confirmed_at = now(), updated_at = now() WHERE id = $2', [phone, uid]);
+          return send(res, 200, await full(uid));
+        }
         if (type !== 'sms' || state.otps.get(phone) !== token) return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Token has expired or is invalid' });
         state.otps.delete(phone);
         let { rows } = await admin.query('SELECT id FROM auth.users WHERE phone = $1', [phone]);
@@ -162,6 +231,14 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           const id = state.refresh.get(json().refresh_token);
           if (!id) return send(res, 400, { code: 400, error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' });
           return send(res, 200, await full(id));
+        }
+        if (grant === 'pkce') {
+          const { auth_code, code_verifier } = json();
+          const hit = state.codes.get(auth_code);
+          state.codes.delete(auth_code); // single use
+          const ok = hit && code_verifier && crypto.createHash('sha256').update(code_verifier).digest('base64url') === hit.challenge;
+          if (!ok) return send(res, 400, { code: 400, error_code: 'flow_state_not_found', msg: 'invalid flow state, no valid flow state found' });
+          return send(res, 200, await full(hit!.userId));
         }
         if (grant === 'password') {
           const { email, password } = json();
@@ -187,6 +264,33 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           const id = `order_${crypto.randomBytes(7).toString('hex')}`;
           state.orders.set(id, { amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt ?? '' });
           return send(res, 200, { id, entity: 'order', amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt, status: 'created' });
+        }
+        const rm = path.match(/^\/rzp\/v1\/payments\/([^/]+)\/(refund|refunds)$/);
+        if (rm) {
+          const paymentId = decodeURIComponent(rm[1]);
+          const p = state.payments.get(paymentId);
+          if (!p) return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'The id provided does not exist' } });
+          if (rm[2] === 'refunds' && req.method === 'GET') {
+            const items = [...state.refunds.entries()].filter(([, r]) => r.payment_id === paymentId).map(([id, r]) => ({ id, entity: 'refund', ...r }));
+            return send(res, 200, { entity: 'collection', count: items.length, items });
+          }
+          if (rm[2] === 'refund' && req.method === 'POST') {
+            const b = json();
+            if (state.rzpRejectRefund) {
+              const description = state.rzpRejectRefund;
+              state.rzpRejectRefund = '';
+              return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description } });
+            }
+            if (p.status !== 'captured') return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'The payment has not been captured' } });
+            const already = [...state.refunds.values()].filter((r) => r.payment_id === paymentId).reduce((s, r) => s + r.amount, 0);
+            if (!Number.isInteger(b.amount) || b.amount < 100 || already + b.amount > p.amount) {
+              return send(res, 400, { error: { code: 'BAD_REQUEST_ERROR', description: 'The refund amount provided is greater than amount captured' } });
+            }
+            const id = `rfnd_${crypto.randomBytes(7).toString('hex')}`;
+            const r = { payment_id: paymentId, amount: b.amount, notes: b.notes ?? {}, receipt: b.receipt ?? '', status: 'processed' };
+            state.refunds.set(id, r);
+            return send(res, 200, { id, entity: 'refund', payment_id: paymentId, amount: b.amount, currency: p.currency, notes: r.notes, receipt: r.receipt, status: r.status });
+          }
         }
         const pm = path.match(/^\/rzp\/v1\/payments\/([^/]+)(\/capture)?$/);
         if (pm) {
@@ -238,6 +342,10 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     admin,
     orders: state.orders,
     payments: state.payments,
+    refunds: state.refunds,
+    rejectNextRefund: (description) => {
+      state.rzpRejectRefund = description;
+    },
     objects: state.objects,
     otpSent: state.otpSent,
     razorpayBase: `${url}/rzp`,
@@ -245,6 +353,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       state.rzpFail = status;
     },
     makeSession: session,
+    googleSignIn: (o) => googleCode(o),
     throttleNextOtp: () => {
       state.throttle = true;
     },

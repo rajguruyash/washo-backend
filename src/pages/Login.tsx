@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, Loader2, MessageSquareText, ShieldCheck, UserCog } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Loader2, Mail, MessageSquareText } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Atmosphere } from '../components/brand/Atmosphere';
@@ -17,6 +17,24 @@ type Step = 'phone' | 'otp' | 'done';
 type OtpProblem = null | { kind: 'invalid' | 'throttled' | 'network'; message: string };
 
 const prettyPhone = (p: string) => `+91 ${p.slice(0, 5)} ${p.slice(5)}`;
+const signInErrors: Record<string, string> = {
+  google_failed: "Google sign-in didn't finish. Please try again.",
+  google_cancelled: 'Google sign-in was cancelled.',
+  google_profile: "You're signed in with Google, but we couldn't load your WASHO profile. Please try again in a moment.",
+};
+
+/** The Google "G" (brand colours), as Google's sign-in guidelines ask. */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 48 48" className="h-5 w-5" aria-hidden>
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+  );
+}
+
 const homeFor = (role: Role) => (role === 'admin' ? '/admin' : role === 'worker' ? '/worker' : '/app');
 
 function useTicker() {
@@ -35,7 +53,8 @@ export default function Login() {
   const { user, refresh } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const staff = params.get('staff') === '1';
+  const emailMode = params.get('mode') === 'email' || params.get('staff') === '1'; // ?staff=1 is the older link, kept working
+  const problemCode = params.get('error');
   const next = useMemo(() => {
     const n = params.get('next');
     return n && /^\/(app|worker|admin)(\/|$)/.test(n) ? n : null;
@@ -52,14 +71,23 @@ export default function Login() {
   const [shakeKey, setShakeKey] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Staff sign-in
+  // Email sign-in
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [staffError, setStaffError] = useState('');
-  const [staffBusy, setStaffBusy] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+
+  // "Continue with Google" is a full-page trip through the server (and Supabase), so it is a plain link.
+  const googleHref = useMemo(() => {
+    const q = new URLSearchParams();
+    if (next) q.set('next', next);
+    const s = getSource();
+    if (s) q.set('source', s);
+    return `/api/auth/google${q.size ? `?${q}` : ''}`;
+  }, [next]);
 
   // Already signed in (and not mid-login): go straight through.
-  if (user && step !== 'done' && !staffBusy) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
+  if (user && step !== 'done' && !emailBusy) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
 
   const digits = phone.replace(/\D/g, '');
 
@@ -124,25 +152,27 @@ export default function Login() {
     if (v.length === 6) void verify(v);
   };
 
-  const staffSubmit = async (e: React.FormEvent) => {
+  const emailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStaffError('');
-    setStaffBusy(true);
+    setEmailError('');
+    setEmailBusy(true);
     try {
-      const res = await post<{ role: Role }>('/auth/staff/login', { email, password });
+      const res = await post<{ role: Role }>('/auth/email/login', { email, password });
       const me = await refresh();
       const home = homeFor(me.role ?? res.role);
       navigate(next && next.startsWith(home) ? next : home, { replace: true });
     } catch (err) {
-      setStaffError(err instanceof ApiError ? err.fields.email ?? err.fields.password ?? err.message : 'Something went wrong. Please try again.');
-      setStaffBusy(false);
+      setEmailError(err instanceof ApiError ? err.fields.email ?? err.fields.password ?? err.message : 'Something went wrong. Please try again.');
+      setEmailBusy(false);
     }
   };
 
-  const switchMode = (toStaff: boolean) => {
+  const switchMode = (toEmail: boolean) => {
     const p = new URLSearchParams(params);
-    if (toStaff) p.set('staff', '1');
-    else p.delete('staff');
+    p.delete('staff');
+    p.delete('error');
+    if (toEmail) p.set('mode', 'email');
+    else p.delete('mode');
     setParams(p, { replace: true });
   };
 
@@ -165,18 +195,21 @@ export default function Login() {
           <div className="flex flex-1 items-center justify-center py-8">
             <motion.div layout className="glass w-full max-w-md overflow-hidden p-6 sm:p-9" transition={{ layout: { duration: 0.3 } }}>
               <AnimatePresence mode="wait" initial={false}>
-                {staff ? (
-                  <motion.form key="staff" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} onSubmit={staffSubmit} noValidate className="space-y-5">
-                    <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><UserCog className="h-6 w-6" /></span>
+                {emailMode ? (
+                  <motion.form key="email" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} onSubmit={emailSubmit} noValidate className="space-y-5">
+                    <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
                     <div>
-                      <h1 className="text-3xl font-extrabold">Staff sign in</h1>
-                      <p className="mt-2 text-fog">For WASHO specialists and admins. Use the email and password WASHO gave you.</p>
+                      <h1 className="text-3xl font-extrabold">Sign in with email</h1>
+                      <p className="mt-2 text-fog">Use the email and password for your account. Specialists and admins use the details WASHO gave them.</p>
                     </div>
                     <Input label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
                     <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                    {staffError && <p role="alert" className="text-sm text-bad">{staffError}</p>}
-                    <Button type="submit" size="lg" full loading={staffBusy} iconRight={<ArrowRight className="h-5 w-5" />}>Sign in</Button>
-                    <button type="button" onClick={() => switchMode(false)} className="block w-full text-center text-sm text-fog hover:text-white">I'm a customer</button>
+                    {emailError && <p role="alert" className="text-sm text-bad">{emailError}</p>}
+                    <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>Sign in</Button>
+                    <div className="grid gap-1 pt-1 text-center text-sm">
+                      <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
+                      <a href={googleHref} className="text-fog hover:text-white">Continue with Google</a>
+                    </div>
                   </motion.form>
                 ) : (
                   <>
@@ -222,8 +255,14 @@ export default function Login() {
                         <Button type="submit" size="lg" full loading={sending} iconRight={<ArrowRight className="h-5 w-5" />} className="mt-3">
                           Send code
                         </Button>
-                        <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-fog"><ShieldCheck className="h-3.5 w-3.5" /> We only use your number to sign you in and reach you about washes.</p>
-                        <button type="button" onClick={() => switchMode(true)} className="mt-6 block w-full text-center text-xs text-fog/70 hover:text-white">WASHO staff sign in</button>
+
+                        {problemCode && signInErrors[problemCode] && <p role="alert" className="mt-4 rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
+
+                        <div className="my-6 flex items-center gap-3 text-xs text-fog/70" aria-hidden><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
+                        <div className="grid gap-3">
+                          <a href={googleHref} className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white backdrop-blur-md transition-colors hover:bg-white/[0.1]"><GoogleMark /> Continue with Google</a>
+                          <button type="button" onClick={() => switchMode(true)} className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white backdrop-blur-md transition-colors hover:bg-white/[0.1]"><Mail className="h-5 w-5 text-washo-300" /> Continue with Email</button>
+                        </div>
                       </motion.form>
                     )}
 

@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
 import type {
-  Address, AdminBooking, AdminEvent, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, Catalog, Membership,
+  Address, AdminBooking, AdminEvent, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -83,7 +83,7 @@ export const useBookings = (scope: 'upcoming' | 'past' | 'all' = 'all') =>
 export const useBooking = (id: string | undefined) =>
   useQuery({
     queryKey: keys.booking(id ?? ''),
-    queryFn: () => get<{ booking: Booking; events: BookingEvent[] }>(`/bookings/${id}`),
+    queryFn: () => get<{ booking: Booking; events: BookingEvent[]; refund: BookingRefund | null }>(`/bookings/${id}`),
     enabled: Boolean(id),
   });
 

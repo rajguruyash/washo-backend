@@ -3,7 +3,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { HttpError, parse } from '../errors';
-import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
 import { openOrder, verifyAndSettle } from '../razorpay';
 import { photoStorage } from '../supabase';
 
@@ -58,11 +58,20 @@ bookingsRouter.get(
       const events = (
         await c.query(
           `SELECT event_type, created_at, event_metadata - 'notes' - 'note' AS meta FROM public.booking_events
-            WHERE booking_id = $1 AND event_type = ANY($2) ORDER BY created_at, id`,
+            WHERE booking_id = $1 AND event_type = ANY($2) ORDER BY created_at, array_position($2::text[], event_type), id`,
           [id, TIMELINE]
         )
       ).rows;
-      return { booking, events };
+      // Refund status for a cancelled paid wash (customers can read their own refunds). Never the internal failure reason.
+      const refund =
+        (
+          await c.query(
+            `SELECT amount_cents, status::text AS status, created_at, updated_at FROM public.refunds
+              WHERE booking_id = $1 AND status <> 'reversed' ORDER BY created_at DESC LIMIT 1`,
+            [id]
+          )
+        ).rows[0] ?? null;
+      return { booking, events, refund };
     });
     if (!out) throw new HttpError(404, 'not_found', 'Booking not found');
     res.json({ success: true, ...out });
@@ -159,6 +168,7 @@ const onDemandSchema = z.object({
 bookingsRouter.post(
   '/payments/on-demand',
   requireRole('customer'),
+  requirePhone,
   asyncHandler(async (req, res) => {
     const b = parse(onDemandSchema, req.body);
     const intent = await req.db(async (c) =>
@@ -189,6 +199,7 @@ const membershipCheckoutSchema = z.object({
 bookingsRouter.post(
   '/payments/membership-checkout',
   requireRole('customer'),
+  requirePhone,
   asyncHandler(async (req, res) => {
     const m = parse(membershipCheckoutSchema, req.body);
     const intent = await req.db(async (c) =>

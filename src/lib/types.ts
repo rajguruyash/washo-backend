@@ -205,6 +205,13 @@ export interface Booking {
   registration_number: string;
 }
 
+export interface BookingRefund {
+  amount_cents: number;
+  status: 'requested' | 'approved' | 'processed' | 'failed';
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BookingEvent {
   event_type: string;
   created_at: string;
@@ -390,5 +397,5 @@ export interface Specialist {
 
 export interface Attention {
   unfulfilled: { id: string; amount_cents: number; payment_kind: string; provider_payment_id: string | null; updated_at: string; customer_name: string | null; customer_phone: string | null }[];
-  refunds: { id: string; amount_cents: number; reason: string; status: string; created_at: string; customer_name: string | null; customer_phone: string | null }[];
+  refunds: { id: string; amount_cents: number; reason: string; status: string; failure_reason: string | null; created_at: string; customer_name: string | null; customer_phone: string | null }[];
 }

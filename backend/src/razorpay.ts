@@ -41,7 +41,14 @@ function assertConfigured() {
 
 const basicAuth = () => 'Basic ' + Buffer.from(`${config.razorpay.keyId}:${config.razorpay.keySecret}`).toString('base64');
 
-async function razorpay<T = any>(path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
+/** Razorpay said no (or could not be reached). `description` is Razorpay's own wording, safe to show to an admin. */
+class GatewayError extends Error {
+  constructor(public status: number, public description: string) {
+    super(description);
+  }
+}
+
+async function call<T = any>(path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${config.razorpay.apiBase}${path}`, {
@@ -52,13 +59,27 @@ async function razorpay<T = any>(path: string, init: { method?: 'GET' | 'POST'; 
     });
   } catch (err) {
     console.error('Razorpay unreachable:', (err as Error).message);
-    throw new HttpError(500, 'payment_gateway_error', 'We could not reach the payment provider. Please try again.');
+    throw new GatewayError(0, 'Razorpay could not be reached');
   }
   if (res.ok) return (await res.json()) as T;
   const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; description?: string } };
   if (res.status === 401) console.error('Razorpay rejected the API keys (check RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET).');
   else console.error(`Razorpay ${path} failed: ${res.status} ${body.error?.code ?? ''} ${body.error?.description ?? ''}`);
-  throw new HttpError(500, 'payment_gateway_error', 'We could not start the payment. Please try again.');
+  throw new GatewayError(res.status, body.error?.description ?? `Razorpay answered ${res.status}`);
+}
+
+/** Customer-facing calls: any failure is one friendly error. */
+async function razorpay<T = any>(path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
+  try {
+    return await call<T>(path, init);
+  } catch (err) {
+    if (!(err instanceof GatewayError)) throw err;
+    throw new HttpError(
+      500,
+      'payment_gateway_error',
+      err.status === 0 ? 'We could not reach the payment provider. Please try again.' : 'We could not start the payment. Please try again.'
+    );
+  }
 }
 
 /** Opens (or reuses) the Razorpay order for a pending payment the database created for this customer. */
@@ -138,5 +159,39 @@ export async function verifyAndSettle(profile: Profile, f: { razorpay_order_id: 
     default:
       console.error('Payment rejected by the database:', JSON.stringify(result));
       throw new HttpError(400, 'payment_rejected', 'We could not confirm this payment. If money was deducted it will be reconciled automatically.');
+  }
+}
+
+// ───────────────────────── refunds ─────────────────────────
+
+export interface RefundOutcome {
+  ok: boolean;
+  /** Razorpay's refund id when ok. */
+  refundId?: string;
+  /** Why Razorpay refused, when not ok. */
+  reason?: string;
+}
+
+/**
+ * Refunds `amountPaise` of a captured Razorpay payment back to the customer's original payment method.
+ * Safe to call again for the same WASHO refund: it first looks for a refund Razorpay already made for it
+ * (matched by the WASHO refund id we put in the notes) and returns that instead of paying twice.
+ */
+export async function refundPayment(f: { refundId: string; providerPaymentId: string; amountPaise: number }): Promise<RefundOutcome> {
+  assertConfigured();
+  const pid = encodeURIComponent(f.providerPaymentId);
+  try {
+    const existing = await call<{ items?: { id: string; amount: number; notes?: Record<string, string> | unknown[]; status?: string }[] }>(`/v1/payments/${pid}/refunds?count=100`);
+    const prior = (existing.items ?? []).find((r) => !Array.isArray(r.notes) && r.notes?.washo_refund_id === f.refundId && r.status !== 'failed');
+    if (prior) return { ok: true, refundId: prior.id };
+
+    const made = await call<{ id: string }>(`/v1/payments/${pid}/refund`, {
+      method: 'POST',
+      body: { amount: f.amountPaise, speed: 'normal', receipt: f.refundId.slice(0, 40), notes: { washo_refund_id: f.refundId } },
+    });
+    return { ok: true, refundId: made.id };
+  } catch (err) {
+    if (err instanceof GatewayError) return { ok: false, reason: err.description };
+    throw err;
   }
 }

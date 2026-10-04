@@ -3,7 +3,7 @@ import { HttpError } from './errors';
 
 /**
  * The only places this server talks to Supabase over HTTP:
- *   - Auth (phone OTP via Twilio Verify, which is configured inside Supabase)
+ *   - Auth (phone OTP via Twilio Verify, Google sign-in, email + password: all configured inside Supabase)
  *   - Storage, for wash photos
  */
 
@@ -74,6 +74,47 @@ export const gotrue = {
     if (status === 429) throw new HttpError(429, 'login_limit', 'Too many attempts. Please wait a few minutes.');
     if (status >= 500) throw new HttpError(503, 'auth_unavailable', 'Sign-in is unavailable right now. Please try again shortly.');
     throw new HttpError(401, 'bad_credentials', 'Email or password is incorrect.');
+  },
+
+  /**
+   * Where to send the browser for "Continue with Google". PKCE: Supabase hands back a one-time code, which only the holder of
+   * the matching verifier (kept in an httpOnly cookie on this server) can exchange. No token ever appears in a URL.
+   */
+  googleAuthorizeUrl(redirectTo: string, challenge: string): string {
+    const q = new URLSearchParams({ provider: 'google', redirect_to: redirectTo, code_challenge: challenge, code_challenge_method: 's256' });
+    return `${config.supabase.url}/auth/v1/authorize?${q}`;
+  },
+
+  async exchangeCode(code: string, verifier: string): Promise<AuthSession> {
+    const { status, body } = await auth('/token?grant_type=pkce', { method: 'POST', body: JSON.stringify({ auth_code: code, code_verifier: verifier }) });
+    if (status < 300 && body.access_token) return body as AuthSession;
+    if (status >= 500) throw new HttpError(503, 'auth_unavailable', 'Sign-in is unavailable right now. Please try again shortly.');
+    throw new HttpError(400, 'bad_code', 'That sign-in link has expired. Please try again.');
+  },
+
+  /** A signed-in person adds a mobile number: Supabase texts a code to the NEW number (it is not theirs until they confirm it). */
+  async requestPhoneChange(accessToken: string, phone: string): Promise<void> {
+    const { status, body } = await auth('/user', { method: 'PUT', bearer: accessToken, body: JSON.stringify({ phone }) });
+    if (status < 300) return;
+    const code = String(body.error_code || body.code || '');
+    if (code === 'phone_exists') {
+      throw new HttpError(409, 'phone_taken', 'That number is already registered with WASHO. Sign in with that number instead.');
+    }
+    if (status === 429 || code.includes('rate_limit')) throw new HttpError(429, 'otp_cooldown', 'Please wait a minute before asking for another code.');
+    if (status === 401) throw new HttpError(401, 'unauthenticated', 'Please sign in to continue.');
+    if (code === 'phone_provider_disabled' || code === 'sms_send_failed' || status >= 500) {
+      console.error('Phone change failed:', status, code, body.msg || body.message);
+      throw new HttpError(503, 'otp_unavailable', 'We cannot send codes right now. Please try again shortly.');
+    }
+    throw new HttpError(400, 'otp_invalid_phone', 'We could not send a code to that number.');
+  },
+
+  async verifyPhoneChange(accessToken: string, phone: string, token: string): Promise<AuthSession> {
+    const { status, body } = await auth('/verify', { method: 'POST', bearer: accessToken, body: JSON.stringify({ type: 'phone_change', phone, token }) });
+    if (status < 300 && body.access_token) return body as AuthSession;
+    if (status === 429) throw new HttpError(429, 'otp_limit', 'Too many attempts. Please wait a few minutes.');
+    if (status >= 500) throw new HttpError(503, 'otp_unavailable', 'Sign-in is unavailable right now. Please try again shortly.');
+    throw new HttpError(400, 'otp_invalid', "That code isn't right, or it has expired. Check it or ask for a new one.");
   },
 
   async refresh(refreshToken: string): Promise<AuthSession | null> {

@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarClock, CalendarPlus, MapPin, XCircle } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CalendarPlus, MapPin, Undo2, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
@@ -31,6 +31,17 @@ const eventText: Record<string, string> = {
   refunded: 'Refunded',
 };
 
+const refundText = (status: string, amount: string) => {
+  switch (status) {
+    case 'processed':
+      return { title: `${amount} refunded`, body: 'Sent back to the payment method you used. Your bank usually shows it within 5 to 7 working days.' };
+    case 'approved':
+      return { title: `Refund of ${amount} approved`, body: 'It is on its way to the payment method you used.' };
+    default: // requested, or failed and waiting for WASHO to retry
+      return { title: `Refund of ${amount} requested`, body: 'The full amount goes back to the payment method you used once WASHO approves it. You do not need to do anything.' };
+  }
+};
+
 export default function BookingDetail() {
   const { id } = useParams();
   const toast = useToast();
@@ -41,14 +52,14 @@ export default function BookingDetail() {
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
-  const { booking: b, events } = data;
+  const { booking: b, events, refund } = data;
   const live = isLive(b.status);
   const isMembership = b.booking_type === 'membership';
 
   const doCancel = async () => {
     try {
       await cancel.mutateAsync({ id: b.id });
-      toast.success('Booking cancelled. Any refund is reviewed by WASHO.');
+      toast.success(b.price_cents ? `Booking cancelled. Your full ${rupees(b.price_cents)} will be refunded once WASHO approves it.` : 'Booking cancelled.');
       setCancelling(false);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not cancel this booking.');
@@ -75,6 +86,13 @@ export default function BookingDetail() {
         {b.cancel_reason && <div className="p-5"><p className="eyebrow">Cancellation reason</p><p className="mt-1 text-sm">{b.cancel_reason}</p></div>}
       </div>
 
+      {refund && (
+        <div className="glass mt-5 flex items-start gap-3 p-5">
+          <Undo2 className="mt-0.5 h-5 w-5 shrink-0 text-washo-300" />
+          <div><p className="font-semibold">{refundText(refund.status, rupees(refund.amount_cents)).title}</p><p className="mt-1 text-sm text-fog">{refundText(refund.status, rupees(refund.amount_cents)).body}</p></div>
+        </div>
+      )}
+
       {live && (
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <Button variant="ghost" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => downloadBookingIcs(b)}>Add to calendar</Button>
@@ -100,7 +118,7 @@ export default function BookingDetail() {
       </section>
 
       <RescheduleSheet wash={moving ? { id: b.id, scheduled_date: b.scheduled_date, time_slot: b.time_slot } : null} onClose={() => setMoving(false)} />
-      <Sheet open={cancelling} onClose={() => setCancelling(false)} title="Cancel this booking?" description="A paid wash raises a refund request that WASHO reviews." size="sm" footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setCancelling(false)}>Keep it</Button><Button variant="danger" loading={cancel.isPending} onClick={() => void doCancel()}>Cancel booking</Button></div>}>
+      <Sheet open={cancelling} onClose={() => setCancelling(false)} title="Cancel this booking?" description={b.price_cents ? `You will get the full ${rupees(b.price_cents)} back on the payment method you used, once WASHO approves the refund.` : undefined} size="sm" footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setCancelling(false)}>Keep it</Button><Button variant="danger" loading={cancel.isPending} onClick={() => void doCancel()}>Cancel booking</Button></div>}>
         <p className="text-sm text-fog">{prettyDate(b.scheduled_date)} · {slotLabel(b.time_slot)}</p>
       </Sheet>
     </div>
