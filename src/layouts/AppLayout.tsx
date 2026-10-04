@@ -3,7 +3,6 @@ import { BadgeCheck, CalendarDays, Car, ClipboardList, Home, LogOut, Plus, UserR
 import type { ReactNode } from 'react';
 import { Link, NavLink, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { AvatarHead } from '../components/brand/Avatar';
-import { Atmosphere } from '../components/brand/Atmosphere';
 import { Logo } from '../components/brand/Logo';
 import { Skeleton } from '../components/ui/Skeleton';
 import { cn } from '../lib/cn';
@@ -19,7 +18,6 @@ export function RequireRole({ role, children }: { role: Role; children: ReactNod
   if (loading) {
     return (
       <div className="grid min-h-dvh place-items-center">
-        <Atmosphere />
         <Logo className="animate-pulse" />
       </div>
     );
@@ -28,7 +26,6 @@ export function RequireRole({ role, children }: { role: Role; children: ReactNod
   if (!user && error) {
     return (
       <div className="grid min-h-dvh place-items-center px-4">
-        <Atmosphere />
         <div className="glass-strong relative max-w-md p-8 text-center" role="alert">
           <h1 className="text-xl font-bold">We couldn't open your account</h1>
           <p className="mt-2 text-sm text-fog">{error.message}</p>
@@ -136,7 +133,6 @@ export function AppLayout() {
   const immersive = /^\/app\/(book|membership\/new)\/?$/.test(pathname);
   return (
     <RequireRole role="customer">
-      <Atmosphere />
       {!focused && <Sidebar />}
       <div className={cn(!focused && 'lg:pl-[17rem]')}>
         {!focused && (

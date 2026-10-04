@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 import './index.css';
+import { Atmosphere } from './components/brand/Atmosphere';
 import { ToastProvider } from './components/ui/Toast';
 import { ApiError } from './lib/http';
 import { captureSource } from './lib/source';
@@ -29,6 +30,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       <MotionConfig reducedMotion="user">
         <AuthProvider>
           <ToastProvider>
+            <Atmosphere />
             <RouterProvider router={router} />
           </ToastProvider>
         </AuthProvider>

@@ -3,6 +3,7 @@ import { AvatarFull } from '../components/brand/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
+import SplitFlapText from '../components/reactbits/SplitFlapText';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
 import { ServiceCarousel } from '../components/ServiceCarousel';
@@ -51,6 +52,19 @@ export default function Landing() {
                 <span className="flex items-center gap-2 text-base font-semibold">Build my membership <ArrowRight className="h-5 w-5" /></span>
               </StarBorder>
               <ButtonLink to="/services" size="lg" variant="glass">See services</ButtonLink>
+            </div>
+            {/* React Bits Split Flap Text: the WASHO tagline, clacking round like a departure board */}
+            <div aria-hidden className="mt-10">
+              <SplitFlapText
+                words={['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
+                padTo={14}
+                fontSize="clamp(17px, 4.6vw, 38px)"
+                gap={4}
+                tileRadius={5}
+                tileColor="#111a2f"
+                textColor="#cfe0ff"
+                cycleDelay={3200}
+              />
             </div>
           </div>
           <div className="mx-auto w-full max-w-sm"><AvatarFull priority /></div>

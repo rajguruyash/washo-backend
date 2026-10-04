@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarClock, CalendarPlus, MapPin, Undo2, XCircle } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CalendarPlus, MapPin, Scissors, Undo2, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
@@ -7,10 +7,11 @@ import { PhotoGrid } from '../../components/PhotoGrid';
 import { RescheduleSheet } from '../../components/RescheduleSheet';
 import { CustomerStatus } from '../../components/WashBits';
 import { Button } from '../../components/ui/Button';
+import TearTicket from '../../components/reactbits/TearTicket';
 import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
-import { prettyDate, rupees } from '../../lib/format';
+import { formatPlate, prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { downloadBookingIcs } from '../../lib/ics';
 import { useBooking, useCancelBooking } from '../../lib/queries';
@@ -49,6 +50,7 @@ export default function BookingDetail() {
   const cancel = useCancelBooking();
   const [moving, setMoving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [ticketKey, setTicketKey] = useState(0); // a fresh, untorn ticket if the cancellation did not go through
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
@@ -56,14 +58,15 @@ export default function BookingDetail() {
   const live = isLive(b.status);
   const isMembership = b.booking_type === 'membership';
 
+  // The ticket is torn by hand; only then is the booking cancelled. If the cancellation is refused, the ticket is replaced so it can be torn again.
   const doCancel = async () => {
     try {
       await cancel.mutateAsync({ id: b.id });
       toast.success(b.price_cents ? `Booking cancelled. Your full ${rupees(b.price_cents)} will be refunded once WASHO approves it.` : 'Booking cancelled.');
-      setCancelling(false);
+      setTimeout(() => setCancelling(false), 700);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not cancel this booking.');
-      setCancelling(false);
+      setTicketKey((k) => k + 1);
     }
   };
 
@@ -118,8 +121,33 @@ export default function BookingDetail() {
       </section>
 
       <RescheduleSheet wash={moving ? { id: b.id, scheduled_date: b.scheduled_date, time_slot: b.time_slot } : null} onClose={() => setMoving(false)} />
-      <Sheet open={cancelling} onClose={() => setCancelling(false)} title="Cancel this booking?" description={b.price_cents ? `You will get the full ${rupees(b.price_cents)} back on the payment method you used, once WASHO approves the refund.` : undefined} size="sm" footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setCancelling(false)}>Keep it</Button><Button variant="danger" loading={cancel.isPending} onClick={() => void doCancel()}>Cancel booking</Button></div>}>
-        <p className="text-sm text-fog">{prettyDate(b.scheduled_date)} · {slotLabel(b.time_slot)}</p>
+      <Sheet open={cancelling} onClose={() => setCancelling(false)} locked={cancel.isPending} title="Cancel this booking?" description={b.price_cents ? `Tear off the stub to cancel. You will get the full ${rupees(b.price_cents)} back on the payment method you used, once WASHO approves the refund.` : 'Tear off the stub to cancel.'} size="sm" footer={<Button variant="glass" full disabled={cancel.isPending} onClick={() => setCancelling(false)}>Keep my booking</Button>}>
+        <div className="grid select-none place-items-center py-2" onMouseDown={(e) => e.preventDefault() /* pulling the stub must not start selecting the text around it */}>
+          <TearTicket
+            key={ticketKey}
+            orientation="vertical"
+            width={300}
+            height={400}
+            stubSize={100}
+            background="#111a2f"
+            color="#f5f8ff"
+            ariaLabel="Tear off the stub to cancel this booking"
+            onTear={() => void doCancel()}
+            stub={<div className="flex h-full w-full flex-col items-center justify-center gap-1.5 text-center text-[11px] font-bold uppercase tracking-[0.2em] text-white/80"><Scissors className="h-5 w-5 text-washo-300" aria-hidden />Tear to cancel<span className="text-[10px] font-medium normal-case tracking-normal text-white/50">pull the stub down, or press Enter</span></div>}
+          >
+            <div className="flex h-full flex-col justify-between p-6">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-washo-300">{b.reference_code}</p>
+                <p className="mt-2 text-2xl font-extrabold leading-tight">{b.service_name}</p>
+              </div>
+              <dl className="space-y-3 text-sm">
+                <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">When</dt><dd className="mt-0.5 font-semibold">{prettyDate(b.scheduled_date)} · {slotLabel(b.time_slot)}</dd></div>
+                <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">Vehicle</dt><dd className="mt-0.5 font-semibold">{b.vehicle_model} · {formatPlate(b.registration_number)}</dd></div>
+                {b.price_cents != null && <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">Refunded in full</dt><dd className="mt-0.5 font-semibold">{rupees(b.price_cents)}</dd></div>}
+              </dl>
+            </div>
+          </TearTicket>
+        </div>
       </Sheet>
     </div>
   );

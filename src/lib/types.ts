@@ -71,7 +71,7 @@ export type RequestStatus = 'submitted' | 'quoted' | 'accepted' | 'active' | 're
 
 export interface QuoteBreakdown {
   washes_total: number;
-  lines: { name: string; kind: WashKind; per_week: number; quantity: number; unit_cents: number; line_cents: number }[];
+  lines: { code?: string; name: string; kind: WashKind; per_week: number; quantity: number; unit_cents: number; line_cents: number }[];
   subtotal_cents: number;
   frequency_discount: { bp: number; cents: number; label: string | null };
   duration_discount: { bp: number; cents: number; label: string | null };

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, CreditCard, Info, Plus, Sparkles } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, Info, Plus, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { Plate } from '../../components/brand/Plate';
@@ -15,6 +15,8 @@ import { addDays, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../
 import { ApiError } from '../../lib/http';
 import { defaultPattern, useAddresses, useCatalog, useEstimate, useStartMembershipPayment, useVehicles } from '../../lib/queries';
 import { usePay } from '../../lib/usePay';
+import { CountPrice } from '../../components/CountPrice';
+import { SlideToPay } from '../../components/SlideToPay';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
@@ -102,8 +104,9 @@ export default function MembershipWizard() {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
     return catalog?.services.find((s) => s.code === code)?.name ?? KIND_LABEL[kind];
   };
+  const baseCode = (kind: WashKind) => catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
   const basePrice = (kind: WashKind): number => {
-    const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
+    const code = baseCode(kind);
     return catalog?.services.find((x) => x.code === code)?.unit_prices?.find((p) => p.vehicle_type === vehicle?.vehicle_type)?.price_cents ?? 0;
   };
   const discount = (kind: 'frequency' | 'duration', key: number) => catalog?.discounts.find((d) => d.kind === kind && d.key === key)?.discount_bp ?? 0;
@@ -151,11 +154,14 @@ export default function MembershipWizard() {
 
   // Pay now: the server prices the plan from the rate card and opens the Razorpay order; the membership and its washes are
   // created only once the payment is verified.
+  // Slide to pay: resolves only when the payment is verified (the handle then shows "Paid"); throws if it was not, so the handle springs back.
+  const paidMembership = useRef<string | null>(null);
   const submit = async () => {
-    if (!vehicle || !perWeek || !months || !slot || !start) return;
+    if (!vehicle || !perWeek || !months || !slot || !start) throw new Error('incomplete');
     setError('');
+    let result;
     try {
-      const result = await pay(
+      result = await pay(
         () => checkout.mutateAsync({
           vehicle_id: vehicle.id,
           weekly_pattern: sortedDays.map((d) => ({ weekday: d, kind: bike ? 'body' : kindByDay[d] ?? 'body' })),
@@ -168,11 +174,16 @@ export default function MembershipWizard() {
         }),
         `WASHO membership · ${perWeek} a week · ${months} month${months > 1 ? 's' : ''}`
       );
-      if (result?.membership_id) navigate(`/app/membership/${result.membership_id}?new=1`, { replace: true });
     } catch (err) {
       // usePay reports payment problems itself; this covers plan problems the database refused (shown under the button)
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      throw err;
     }
+    if (!result?.membership_id) throw new Error('not paid');
+    paidMembership.current = result.membership_id;
+  };
+  const afterPaid = () => {
+    setTimeout(() => navigate(`/app/membership/${paidMembership.current}?new=1`, { replace: true }), 1000);
   };
 
   const slide = { initial: { opacity: 0, x: 24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -24 }, transition: { duration: 0.2 } };
@@ -228,7 +239,7 @@ export default function MembershipWizard() {
                   </div>
                 </div>
                 <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
-                  Base price per wash: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body ${rupees(basePrice('body'))} · Deep cleaning ${rupees(basePrice('deep'))}`}.
+                  Base price per wash: {bike ? <>Bike wash <CountPrice cents={basePrice('body')} code={baseCode('body')} /></> : <>Body <CountPrice cents={basePrice('body')} code={baseCode('body')} /> · Deep cleaning <CountPrice cents={basePrice('deep')} code={baseCode('deep')} /></>}.
                 </p>
               </div>
             ) : (
@@ -368,7 +379,7 @@ export default function MembershipWizard() {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!canNext} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <Button size="lg" full disabled={!canNext || !chosenEstimate.data} loading={checkout.isPending || paying} onClick={() => void submit()} icon={<CreditCard className="h-5 w-5" />}>Pay {chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}</Button>
+            <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={!canNext || !chosenEstimate.data || checkout.isPending || paying} onConfirm={submit} onDone={afterPaid} />
           )}
         </div>
       </div>

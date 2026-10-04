@@ -1,13 +1,13 @@
 import { Bike, Car, CarFront } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { cn } from '../lib/cn';
-import { vehicleLabel, formatPlate } from '../lib/format';
+import { formatPlate } from '../lib/format';
 import { ApiError } from '../lib/http';
 import { useSaveVehicle } from '../lib/queries';
 import type { Vehicle, VehicleType } from '../lib/types';
 import { Button } from './ui/Button';
 import { Input } from './ui/Field';
 import { Sheet } from './ui/Sheet';
+import { VehicleToggle } from './VehicleToggle';
 import { useToast } from './ui/Toast';
 
 export const vehicleIcon: Record<VehicleType, ReactNode> = {
@@ -79,24 +79,7 @@ export function VehicleSheet({
       <form id="vehicle-form" onSubmit={submit} className="space-y-5">
         <fieldset>
           <legend className="mb-1.5 text-[13px] font-medium text-mist">Vehicle type</legend>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup">
-            {(['bike', 'car', 'suv'] as VehicleType[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="radio"
-                aria-checked={type === t}
-                onClick={() => setType(t)}
-                className={cn(
-                  'flex flex-col items-center gap-1.5 rounded-2xl border py-3.5 text-sm font-semibold transition-colors',
-                  type === t ? 'border-washo-400/60 bg-washo-500/15 text-white shadow-[0_0_20px_-6px_rgb(63_124_255/0.7)]' : 'border-white/10 bg-white/[0.03] text-mist hover:border-white/20'
-                )}
-              >
-                {vehicleIcon[t]}
-                {vehicleLabel[t]}
-              </button>
-            ))}
-          </div>
+          <VehicleToggle value={type} onChange={setType} className="w-full" label="Vehicle type" />
         </fieldset>
         <Input label="Model" placeholder={type === 'bike' ? 'e.g. Activa, Splendor' : 'e.g. Swift, Nexon'} value={model} onChange={(e) => setModel(e.target.value)} error={errors.model} autoComplete="off" required />
         <Input

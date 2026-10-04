@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Sparkles } from 'lucide-react';
 import { useState } from 'react';
+import { CountPrice, anchorTotalCents } from './CountPrice';
+import { VehicleToggle } from './VehicleToggle';
 import SpotlightCard from './reactbits/SpotlightCard';
 import { Badge } from './ui/Badge';
 import { ButtonLink } from './ui/Button';
 import { Reveal } from './ui/Reveal';
-import { Segmented } from './ui/Segmented';
 import { Skeleton } from './ui/Skeleton';
 import { cn } from '../lib/cn';
 import { percent, rupees, vehicleLabel } from '../lib/format';
@@ -36,7 +37,7 @@ export function ComboPacks() {
         <p className="mt-3 max-w-2xl text-fog">Choose your vehicle and how many washes a week. Start from the pack and change the days, the mix and the length when you build your plan. Prices come straight from our per-wash rates.</p>
       </Reveal>
       <div className="mt-6 max-w-sm">
-        <Segmented label="Vehicle" value={vehicle} onChange={setVehicle} options={[{ value: 'bike', label: 'Bike' }, { value: 'car', label: 'Car' }, { value: 'suv', label: 'SUV' }]} />
+        <VehicleToggle value={vehicle} onChange={setVehicle} className="w-full" />
       </div>
 
       <Reveal className="mt-6">
@@ -102,7 +103,7 @@ export function ComboPacks() {
                     <p className="text-sm text-fog">Price shown when you build your plan.</p>
                   ) : data ? (
                     <p className="flex items-baseline gap-2">
-                      <span className="font-display text-4xl font-extrabold tabular-nums">{rupees(data.final_cents)}</span>
+                      <CountPrice className="font-display text-4xl font-extrabold tabular-nums" cents={data.final_cents} fromCents={anchorTotalCents(data.lines)} />
                       <span className="text-sm text-fog">/ month</span>
                       {saving && <span className="text-sm tabular-nums text-fog line-through">{rupees(data.subtotal_cents)}</span>}
                     </p>

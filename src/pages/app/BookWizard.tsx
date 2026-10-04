@@ -1,9 +1,11 @@
-import { ArrowLeft, ArrowRight, CreditCard } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CountPrice } from '../../components/CountPrice';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { ServicePhoto } from '../../components/ServicePhoto';
+import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
@@ -46,13 +48,19 @@ export default function BookWizard() {
   const address = addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
   const ok = [Boolean(vehicle), Boolean(service), Boolean(date && slot), true][step];
 
+  // Slide to pay: resolves only when the payment is verified; throws if it was not, so the handle springs back.
+  const paidBooking = useRef<string | null>(null);
   const submit = async () => {
-    if (!vehicle || !service || !date || !slot) return;
+    if (!vehicle || !service || !date || !slot) throw new Error('incomplete');
     const result = await pay(
       () => start.mutateAsync({ vehicle_id: vehicle.id, service_id: service.id, scheduled_date: date, time_slot: slot, address_id: address?.id, parking_location: address?.parking_location }),
       `${service.name} · ${prettyDate(date)}`
     );
-    if (result?.booking_id) navigate(`/app/bookings/${result.booking_id}`, { replace: true });
+    if (!result?.booking_id) throw new Error('not paid');
+    paidBooking.current = result.booking_id;
+  };
+  const afterPaid = () => {
+    setTimeout(() => navigate(`/app/bookings/${paidBooking.current}`, { replace: true }), 1000);
   };
 
   return (
@@ -72,7 +80,7 @@ export default function BookWizard() {
               <button key={s.id} type="button" role="radio" aria-checked={s.id === serviceId} onClick={() => setServiceId(s.id)} className={cn('flex items-center gap-4 rounded-3xl border p-4 text-left transition-all', s.id === serviceId ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
                 <ServicePhoto code={s.code} name={s.name} className="h-20 w-20 shrink-0 rounded-2xl" />
                 <span className="min-w-0 flex-1"><span className="block font-bold">{s.name}</span><span className="mt-1 block text-sm text-fog">{s.tagline ?? s.description}</span></span>
-                <span className="font-display text-2xl font-extrabold">{rupees(s.price!)}</span>
+                <CountPrice className="font-display text-2xl font-extrabold" cents={s.price!} code={s.code} />
               </button>
             ))}
           </div>
@@ -97,7 +105,7 @@ export default function BookWizard() {
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t lg:left-[17rem] border-white/[0.08] bg-ink-900/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <Button variant="glass" size="lg" disabled={step === 0} onClick={() => setStep(step - 1)} aria-label="Back" icon={<ArrowLeft className="h-5 w-5" />} />
-          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <Button size="lg" full loading={paying || start.isPending} onClick={() => void submit()} icon={<CreditCard className="h-5 w-5" />}>Pay {service ? rupees(service.price!) : ''}</Button>}
+          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(service.price!) : ''}`.trim()} disabled={!service || paying || start.isPending} onConfirm={submit} onDone={afterPaid} />}
         </div>
       </div>
     </div>

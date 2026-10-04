@@ -2,7 +2,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Mail, MapPin, Menu, Phone, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
-import { Atmosphere } from '../components/brand/Atmosphere';
 import { Logo } from '../components/brand/Logo';
 import { ButtonLink } from '../components/ui/Button';
 import { useAuth } from '../state/auth';
@@ -35,7 +34,6 @@ export function PublicLayout() {
 
   return (
     <>
-      <Atmosphere />
       <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${scrolled || open ? 'border-b border-white/[0.08] bg-ink-950/75 backdrop-blur-xl' : 'border-b border-transparent'}`}>
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link to="/" aria-label="WASHO home"><Logo /></Link>

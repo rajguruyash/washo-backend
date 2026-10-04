@@ -2,7 +2,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check, Loader2, Mail, MessageSquareText } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Atmosphere } from '../components/brand/Atmosphere';
 import { AvatarFull } from '../components/brand/Avatar';
 import { Logo } from '../components/brand/Logo';
 import { Button } from '../components/ui/Button';
@@ -178,7 +177,6 @@ export default function Login() {
 
   return (
     <div className="min-h-dvh">
-      <Atmosphere />
       <div className="mx-auto grid min-h-dvh max-w-6xl lg:grid-cols-2">
         <div className="relative hidden flex-col justify-between p-12 lg:flex">
           <Link to="/"><Logo showTagline /></Link>

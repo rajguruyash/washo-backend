@@ -1,11 +1,12 @@
 import { ArrowLeft, CheckCircle2, Clock, Hourglass, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
 import { QuoteBreakdownView } from '../../components/Quote';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
+import { SlideToPay } from '../../components/SlideToPay';
 import { Button, ButtonLink } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
@@ -37,9 +38,14 @@ export default function RequestDetail() {
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !r) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
 
+  const paidMembership = useRef<string | null>(null);
   const startPayment = async () => {
     const result = await pay(() => accept.mutateAsync(r.id), `WASHO membership ${r.reference_code}`);
-    if (result?.membership_id) navigate(`/app/membership/${result.membership_id}?new=1`, { replace: true });
+    if (!result?.membership_id) throw new Error('not paid'); // lets the slider spring back; usePay has already said why
+    paidMembership.current = result.membership_id;
+  };
+  const afterPaid = () => {
+    setTimeout(() => navigate(`/app/membership/${paidMembership.current}?new=1`, { replace: true }), 1000);
   };
 
   const doDecline = async () => {
@@ -104,7 +110,7 @@ export default function RequestDetail() {
             </div>
             <QuoteBreakdownView q={r.quoted_breakdown} />
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <Button size="lg" full loading={paying || accept.isPending} onClick={() => void startPayment()}>{r.status === 'accepted' ? 'Complete payment' : `Accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`}</Button>
+              <SlideToPay label={r.status === 'accepted' ? 'Slide to complete payment' : `Slide to accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`} disabled={paying || accept.isPending} onConfirm={startPayment} onDone={afterPaid} />
               {r.status === 'quoted' && <Button size="lg" variant="glass" onClick={() => setConfirmDecline(true)}>Decline</Button>}
             </div>
             <p className="mt-3 text-center text-xs text-fog">Your membership and washes are created only after your payment is verified.</p>

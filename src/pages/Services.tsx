@@ -5,7 +5,8 @@ import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import { ErrorState } from '../components/EmptyState';
 import { Skeleton } from '../components/ui/Skeleton';
-import { duration, rupees, vehicleLabel } from '../lib/format';
+import { CountPrice } from '../components/CountPrice';
+import { duration, vehicleLabel } from '../lib/format';
 import { useCatalog } from '../lib/queries';
 
 export default function Services() {
@@ -28,7 +29,7 @@ export default function Services() {
               <h2 className="mt-3 text-xl font-bold">{s.name}</h2>
               <p className="mt-1 text-sm text-fog">{s.description ?? s.tagline}</p>
               {s.includes && <ul className="mt-3 space-y-1 text-sm text-mist">{s.includes.map((i) => <li key={i}>• {i}</li>)}</ul>}
-              {own != null && <p className="mt-4 font-display text-2xl font-extrabold">{rupees(own)}</p>}
+              {own != null && <p className="mt-4 font-display text-2xl font-extrabold"><CountPrice cents={own} code={s.code} /></p>}
             </div>
           </SpotlightCard>
           );

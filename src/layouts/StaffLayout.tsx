@@ -2,7 +2,6 @@ import { motion } from 'framer-motion';
 import { LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link, Outlet, ScrollRestoration } from 'react-router-dom';
-import { Atmosphere } from '../components/brand/Atmosphere';
 import { Logo } from '../components/brand/Logo';
 import { Badge } from '../components/ui/Badge';
 import type { Role } from '../lib/types';
@@ -14,7 +13,6 @@ export function StaffLayout({ role, title, children }: { role: Exclude<Role, 'cu
   const { user, logout } = useAuth();
   return (
     <RequireRole role={role}>
-      <Atmosphere />
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/80 backdrop-blur-xl">
         <div className={`mx-auto flex h-14 items-center justify-between px-4 sm:px-6 ${role === 'admin' ? 'max-w-7xl' : 'max-w-3xl'}`}>
           <div className="flex items-center gap-3">
