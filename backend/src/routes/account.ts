@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
-import { loadProfile } from '../profile';
+import { forgetProfile, loadProfile } from '../profile';
 
 export const accountRouter = Router();
 accountRouter.use(['/me', '/addresses', '/vehicles', '/notifications'], requireSession);
@@ -36,6 +36,7 @@ accountRouter.put(
       }
       return loadProfile(c, req.session!.claims);
     });
+    forgetProfile(req.session!.claims.sub);
     res.json({ success: true, user: { ...user, needs_profile: false } });
   })
 );
@@ -119,6 +120,7 @@ const vehicleSchema = z.object({
   parking_location: z.string().trim().max(160).optional(),
 });
 
+// make is stored as '' (not NULL) when unknown: vehicles.make is NOT NULL in databases that predate migration 20261004000003.
 const VEHICLE_COLUMNS = `id, vehicle_type::text AS vehicle_type, make, model, registration_number, color, address_id, parking_location, created_at`;
 
 accountRouter.get(
@@ -139,7 +141,7 @@ accountRouter.post(
       const vehicle = await req.db(async (c) => {
         const { rows } = await c.query(
           `INSERT INTO public.vehicles (customer_profile_id, vehicle_type, make, model, registration_number, color, address_id, parking_location)
-           VALUES (public.current_profile_id(), $1, NULLIF($2, ''), $3, $4, NULLIF($5, ''), $6, NULLIF($7, '')) RETURNING ${VEHICLE_COLUMNS}`,
+           VALUES (public.current_profile_id(), $1, $2, $3, $4, NULLIF($5, ''), $6, NULLIF($7, '')) RETURNING ${VEHICLE_COLUMNS}`,
           [v.vehicle_type, v.make ?? '', v.model, v.registration_number, v.color ?? '', v.address_id ?? null, v.parking_location ?? '']
         );
         return rows[0];
@@ -161,7 +163,7 @@ accountRouter.put(
     try {
       const vehicle = await req.db(async (c) => {
         const { rows } = await c.query(
-          `UPDATE public.vehicles SET vehicle_type=$2, make=NULLIF($3,''), model=$4, registration_number=$5, color=NULLIF($6,''),
+          `UPDATE public.vehicles SET vehicle_type=$2, make=$3, model=$4, registration_number=$5, color=NULLIF($6,''),
                   address_id=$7, parking_location=NULLIF($8,''), updated_at=now()
             WHERE id = $1 AND is_active RETURNING ${VEHICLE_COLUMNS}`,
           [id, v.vehicle_type, v.make ?? '', v.model, v.registration_number, v.color ?? '', v.address_id ?? null, v.parking_location ?? '']

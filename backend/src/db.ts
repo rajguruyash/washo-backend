@@ -20,10 +20,15 @@ function buildPool(): Pool {
     connectionString: url,
     ssl: mode === 'off' ? false : { rejectUnauthorized: mode === 'verify' },
     max: 10,
+    // Opening a connection to Supabase costs several network round trips (TCP, TLS, auth). Keep them warm between requests.
+    idleTimeoutMillis: 5 * 60_000,
+    keepAlive: true,
   });
 }
 
 export const pool = buildPool();
+// An idle pooled connection can be closed by the server; that must never crash the process.
+pool.on('error', (err) => console.warn('Idle database connection dropped:', err.message));
 
 /** What Postgres needs to know about the caller for auth.uid() and row-level security. */
 export interface Claims {
@@ -32,12 +37,15 @@ export interface Claims {
   email?: string;
 }
 
-async function inTransaction<T>(setup: (c: PoolClient) => Promise<void>, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+/**
+ * Every network round trip to Supabase costs real time from Render. BEGIN and the per-request settings go out as ONE
+ * message (simple protocol, values escaped by the driver), so a request costs: 1 (setup) + its queries + 1 (COMMIT).
+ */
+async function inTransaction<T>(settings: ((c: PoolClient) => string) | null, fn: (c: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    await client.query("SET LOCAL statement_timeout = '15s'");
-    await setup(client);
+    const setup = settings ? settings(client) : '';
+    await client.query(`BEGIN; SELECT set_config('statement_timeout', '15000', true)${setup ? `, ${setup}` : ''}`);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -55,21 +63,18 @@ async function inTransaction<T>(setup: (c: PoolClient) => Promise<void>, fn: (c:
  * auth.uid() and every function's own checks therefore apply to them. This server cannot do more than they can.
  */
 export function withUser<T>(claims: Claims, fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  return inTransaction(async (c) => {
-    await c.query("SELECT set_config('request.jwt.claims', $1, true)", [JSON.stringify({ ...claims, role: 'authenticated' })]);
-    await c.query('SET LOCAL ROLE authenticated');
-  }, fn);
+  return inTransaction(
+    (c) => `set_config('request.jwt.claims', ${c.escapeLiteral(JSON.stringify({ ...claims, role: 'authenticated' }))}, true), set_config('role', 'authenticated', true)`,
+    fn
+  );
 }
 
 /** Runs `fn` as an anonymous visitor (public catalogue only). */
 export function withAnon<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  return inTransaction(async (c) => {
-    await c.query("SELECT set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: 'anon' })]);
-    await c.query('SET LOCAL ROLE anon');
-  }, fn);
+  return inTransaction((c) => `set_config('request.jwt.claims', ${c.escapeLiteral(JSON.stringify({ role: 'anon' }))}, true), set_config('role', 'anon', true)`, fn);
 }
 
 /** Runs `fn` as `washo_api` itself (service wrappers only: housekeeping). */
 export function withApiRole<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  return inTransaction(async () => undefined, fn);
+  return inTransaction(null, fn);
 }

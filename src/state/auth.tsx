@@ -34,13 +34,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return qc.fetchQuery({ queryKey: keys.me, queryFn: fetchMe, staleTime: 0 });
   }, [qc]);
 
+  // Signing out ends with a full page load of /login. Patching the query cache in place left the old user on screen
+  // (the "me" query is rebuilt while it is being observed), so the button looked like it did nothing.
   const logout = useCallback(async () => {
-    try {
-      await post('/auth/logout');
-    } finally {
-      qc.clear();
-      qc.setQueryData(keys.me, null);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await post('/auth/logout');
+        break;
+      } catch {
+        /* try once more, then leave anyway */
+      }
     }
+    qc.clear();
+    window.location.assign('/login');
   }, [qc]);
 
   const value = useMemo<AuthValue>(

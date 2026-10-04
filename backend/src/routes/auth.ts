@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
-import { ACCESS_COOKIE, REFRESH_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireSession, setSessionCookies } from '../middleware/http';
+import { ACCESS_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireSession, setSessionCookies } from '../middleware/http';
 import { withUser } from '../db';
 import { phoneSchema } from '../phone';
 import { Profile, profileFor } from '../profile';
@@ -54,7 +54,7 @@ authRouter.post(
 
     let profile: Profile;
     try {
-      profile = await profileFor(claims);
+      profile = await profileFor(claims, { fresh: true });
     } catch (err) {
       // Signed in at Supabase but unusable here: do not leave half a session behind, and say why.
       clearSessionCookies(res);
@@ -75,7 +75,7 @@ authRouter.post(
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
     let profile: Profile;
     try {
-      profile = await profileFor(claims);
+      profile = await profileFor(claims, { fresh: true });
     } catch (err) {
       await gotrue.logout(session.access_token);
       throw err;
@@ -95,7 +95,6 @@ authRouter.post(
     const at = readCookie(req, ACCESS_COOKIE);
     if (at && (await verifyAccessToken(at))) await gotrue.logout(at);
     clearSessionCookies(res);
-    void REFRESH_COOKIE;
     res.json({ success: true });
   })
 );

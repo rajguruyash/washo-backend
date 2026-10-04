@@ -33,8 +33,16 @@ export async function loadProfile(c: PoolClient, claims: Claims): Promise<Profil
   };
 }
 
+// The role and name rarely change. Re-reading them on EVERY request doubled the database round trips, so they are remembered
+// briefly. Anything that changes them (profile save, sign-in) calls forgetProfile().
+const TTL_MS = 30_000;
+const remembered = new Map<string, { at: number; profile: Profile }>();
+export const forgetProfile = (sub: string) => void remembered.delete(sub);
+
 /** loadProfile as the user, turning any database failure into an error the person (and the logs) can act on. */
-export async function profileFor(claims: Claims): Promise<Profile> {
+export async function profileFor(claims: Claims, o: { fresh?: boolean } = {}): Promise<Profile> {
+  const hit = remembered.get(claims.sub);
+  if (!o.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.profile;
   let profile: Profile | null;
   try {
     profile = await withUser(claims, (c) => loadProfile(c, claims));
@@ -43,5 +51,7 @@ export async function profileFor(claims: Claims): Promise<Profile> {
     throw new HttpError(503, 'profile_unavailable', 'You are signed in, but we could not load your profile. Please try again in a moment. If it keeps happening, contact WASHO.');
   }
   if (!profile) throw new HttpError(403, 'no_profile', 'Your account is not set up yet. Please contact WASHO.');
+  if (remembered.size > 500) remembered.clear();
+  remembered.set(claims.sub, { at: Date.now(), profile });
   return profile;
 }

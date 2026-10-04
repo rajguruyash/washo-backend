@@ -2,7 +2,9 @@ import { ArrowLeft, ArrowRight, CreditCard } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
+import { ErrorState } from '../../components/EmptyState';
 import { VehiclePicker } from '../../components/VehiclePicker';
+import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { cn } from '../../lib/cn';
 import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
@@ -15,7 +17,7 @@ import { usePay } from '../../lib/usePay';
 export default function BookWizard() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { data: catalog } = useCatalog();
+  const { data: catalog, isLoading: catalogLoading, isError: catalogError, error: catalogErr, refetch: refetchCatalog } = useCatalog();
   const { data: vehicles } = useVehicles();
   const { data: addresses } = useAddresses();
   const start = useStartOnDemandPayment();
@@ -61,6 +63,9 @@ export default function BookWizard() {
       {step === 1 && (
         <section>
           <h1 className="text-3xl font-extrabold">Choose a service</h1>
+          {catalogError && <div className="mt-6"><ErrorState message={(catalogErr as Error)?.message ?? 'We could not load the services and prices.'} onRetry={() => void refetchCatalog()} /></div>}
+          {catalogLoading && <div className="mt-6 space-y-3">{[0, 1].map((i) => <Skeleton key={i} className="h-24 rounded-3xl" />)}</div>}
+          {!catalogLoading && !catalogError && !options.length && <p className="mt-6 text-sm text-fog">No services are available for this vehicle right now.</p>}
           <div className="mt-6 grid gap-3" role="radiogroup" aria-label="Service">
             {options.map((s) => (
               <button key={s.id} type="button" role="radio" aria-checked={s.id === serviceId} onClick={() => setServiceId(s.id)} className={cn('flex items-center justify-between gap-4 rounded-3xl border p-5 text-left transition-all', s.id === serviceId ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>

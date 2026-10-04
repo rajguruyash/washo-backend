@@ -247,3 +247,51 @@ describe('public catalogue', () => {
     expect(JSON.stringify(r)).not.toMatch(/credit|entitlement|plans/i);
   });
 });
+
+describe('sign out and speed', () => {
+  it('logout clears both cookies with the SAME attributes they were set with (Safari ignores a mismatched clear)', async () => {
+    const c = new Client();
+    await c.loginCustomer();
+    const out = await c.post('/api/auth/logout');
+    expect(out.status).toBe(200);
+    expect(out.setCookies).toHaveLength(2);
+    for (const sc of out.setCookies) {
+      expect(sc).toMatch(/Path=\/api/);
+      expect(sc).toMatch(/HttpOnly/i);
+      expect(sc).toMatch(/SameSite=Lax/i);
+      expect(sc).toMatch(/Expires=Thu, 01 Jan 1970/);
+    }
+    expect((await c.get('/api/me')).status).toBe(401);
+  });
+
+  it('logout works even when the session already expired', async () => {
+    const c = new Client();
+    expect((await c.post('/api/auth/logout')).status).toBe(200);
+  });
+
+  it('a signed-in request costs one setup round trip, its own queries and one COMMIT (the profile is remembered, not re-read)', async () => {
+    const { pool } = await import('../src/db');
+    const seen: string[] = [];
+    const original = pool.connect.bind(pool) as (...a: any[]) => any;
+    (pool as any).connect = async (...a: any[]) => {
+      const client = await original(...a);
+      if (client.__counted) return client; // pooled clients are reused: wrap each only once
+      client.__counted = true;
+      const q = client.query.bind(client);
+      client.query = (...args: any[]) => { seen.push(String(typeof args[0] === 'string' ? args[0] : args[0]?.text).slice(0, 60)); return q(...args); };
+      return client;
+    };
+    try {
+      const { c } = await customerWithVehicle();
+      await c.get('/api/me'); // warms the profile
+      seen.length = 0;
+      expectOk(await c.get('/api/vehicles'));
+      expect(seen.length, seen.join(' | ')).toBe(3); // BEGIN+settings, the vehicles query, COMMIT
+      seen.length = 0;
+      expectOk(await c.get('/api/addresses'));
+      expect(seen.length).toBe(3);
+    } finally {
+      (pool as any).connect = original;
+    }
+  });
+});

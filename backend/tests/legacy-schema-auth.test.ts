@@ -133,3 +133,21 @@ describe('production-shaped schema (no profiles.email)', () => {
     }
   });
 });
+
+describe('features whose database functions are not installed yet', () => {
+  it('say so plainly (503 backend_not_ready) instead of a generic failure, and the catalogue does too', async () => {
+    const c = new Client();
+    await c.loginCustomer();
+    const cat = await new Client().get('/api/catalog');
+    expect(cat.status).toBe(503);
+    expect(cat.body.code).toBe('backend_not_ready');
+    expect(cat.body.message).toMatch(/isn't switched on yet/);
+
+    expectOk(await c.put('/api/me', { full_name: 'Asha Kulkarni' }));
+    const addr = expectOk(await c.post('/api/addresses', { society_name: 'Yashwin', building_block: 'B', flat_number: '1', parking_location: 'P1' })).body.address;
+    const veh = expectOk(await c.post('/api/vehicles', { vehicle_type: 'car', model: 'Creta', registration_number: 'MH12AB5555', address_id: addr.id })).body.vehicle;
+    const mr = await c.post('/api/membership-requests', { vehicle_id: veh.id, weekly_pattern: [{ weekday: 1, kind: 'body' }], duration_months: 1, time_slot: 'morning', start_date: '2099-01-05', address_id: addr.id });
+    expect(mr.status).toBe(503);
+    expect(mr.body.code).toBe('backend_not_ready');
+  });
+});

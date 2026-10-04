@@ -52,8 +52,9 @@ export function setSessionCookies(res: Response, s: AuthSession) {
 }
 
 export function clearSessionCookies(res: Response) {
-  res.clearCookie(ACCESS_COOKIE, { path: '/api' });
-  res.clearCookie(REFRESH_COOKIE, { path: '/api' });
+  // Same attributes the cookies were set with, so Safari and Chrome both treat this as the SAME cookie and delete it.
+  res.clearCookie(ACCESS_COOKIE, cookieBase);
+  res.clearCookie(REFRESH_COOKIE, cookieBase);
 }
 
 // One refresh per refresh-token at a time (several page requests can hit an expired access token together).

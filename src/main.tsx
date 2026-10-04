@@ -18,7 +18,7 @@ const queryClient = new QueryClient({
       staleTime: 20_000,
       refetchOnWindowFocus: true,
       // Don't retry things the server has definitively refused.
-      retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+      retry: (count, err) => !(err instanceof ApiError && ((err.status >= 400 && err.status < 500) || err.code === 'backend_not_ready')) && count < 2,
     },
   },
 });
