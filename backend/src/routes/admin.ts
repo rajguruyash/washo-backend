@@ -225,6 +225,7 @@ adminRouter.get(
 
 // Money that arrived but could not be turned into a booking/membership, and the refund requests that follow.
 // An admin approves a refund and the server asks Razorpay to pay it back (below); nothing is refunded without that approval.
+// failure_reason arrives with migration 12; reading it as JSON keeps this list working on a database that does not have it yet.
 adminRouter.get(
   '/admin/attention',
   asyncHandler(async (req, res) => {
@@ -235,7 +236,7 @@ adminRouter.get(
                         WHERE pay.fulfilment_status = 'unfulfilled' ORDER BY pay.updated_at DESC LIMIT 50`)
       ).rows,
       refunds: (
-        await c.query(`SELECT r.id, r.amount_cents, r.reason, r.status::text AS status, r.failure_reason, r.created_at, p.full_name AS customer_name, p.phone AS customer_phone
+        await c.query(`SELECT r.id, r.amount_cents, r.reason, r.status::text AS status, to_jsonb(r) ->> 'failure_reason' AS failure_reason, r.created_at, p.full_name AS customer_name, p.phone AS customer_phone
                          FROM public.refunds r JOIN public.profiles p ON p.id = r.customer_profile_id
                         WHERE r.status IN ('requested', 'approved', 'failed') ORDER BY r.created_at DESC LIMIT 50`)
       ).rows,

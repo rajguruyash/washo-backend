@@ -55,6 +55,7 @@ export function fromPg(err: unknown): HttpError | null {
       return new HttpError(400, 'invalid', 'Some of that information is not valid.');
     case '42883': // undefined_function
     case '42P01': // undefined_table
+    case '42703': // undefined_column
       // The website is newer than this database. Say so plainly to the person, and loudly to whoever runs the server.
       console.error(`DATABASE IS MISSING SOMETHING THE WEBSITE NEEDS (${e.message}). Apply supabase/migrations/* in order.`);
       return new HttpError(503, 'backend_not_ready', "This part of WASHO isn't switched on yet. Please try again later, or contact WASHO.");
