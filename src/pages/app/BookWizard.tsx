@@ -1,7 +1,6 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { CountPrice } from '../../components/CountPrice';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { ServicePhoto } from '../../components/ServicePhoto';
@@ -80,7 +79,7 @@ export default function BookWizard() {
               <button key={s.id} type="button" role="radio" aria-checked={s.id === serviceId} onClick={() => setServiceId(s.id)} className={cn('flex items-center gap-4 rounded-3xl border p-4 text-left transition-all', s.id === serviceId ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
                 <ServicePhoto code={s.code} name={s.name} className="h-20 w-20 shrink-0 rounded-2xl" />
                 <span className="min-w-0 flex-1"><span className="block font-bold">{s.name}</span><span className="mt-1 block text-sm text-fog">{s.tagline ?? s.description}</span></span>
-                <CountPrice className="font-display text-2xl font-extrabold" cents={s.price!} code={s.code} />
+                <span className="font-display text-2xl font-extrabold">{rupees(s.price!)}</span>
               </button>
             ))}
           </div>

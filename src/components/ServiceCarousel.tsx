@@ -1,27 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { rupees } from '../lib/format';
 import { servicePhoto } from '../lib/serviceImages';
 import type { CatalogService } from '../lib/types';
-import { CountPrice } from './CountPrice';
 import CircularCarousel from './reactbits/CircularCarousel';
 
 // A ring needs enough cards around it to look like a ring: with only WASHO's four services the neighbours would sit out of view,
 // so the set goes round REPEAT times. The caption below is ours (not the carousel's) so it counts services, not cards.
 const REPEAT = 3;
 
-/** The price under the ring. It counts down the first time each service comes round, then just shows the price. */
-function CaptionPrice({ code, cents, tagline, seen }: { code: string; cents: number | null; tagline: string; seen: Set<string> }) {
-  const [animate] = useState(() => !seen.has(code));
-  useEffect(() => {
-    seen.add(code);
-  }, [code, seen]);
-  if (cents == null) return <p className="text-fog">{tagline}</p>;
-  return <p className="text-fog"><CountPrice cents={cents} code={code} animate={animate} /> a wash</p>;
-}
-
 /** WASHO's services as a turning ring of photos: each card shows the service and what one wash of it costs. */
 export function ServiceCarousel({ services }: { services: CatalogService[] }) {
   const [active, setActive] = useState(0);
-  const seen = useRef(new Set<string>());
   const base = useMemo(
     () =>
       services.flatMap((s) => {
@@ -63,7 +52,7 @@ export function ServiceCarousel({ services }: { services: CatalogService[] }) {
     </div>
     <div className="mt-2 text-center" aria-hidden>
       <p className="font-display text-lg font-bold">{now.title}</p>
-      <CaptionPrice key={now.code} code={now.code} cents={now.cents} tagline={now.tagline} seen={seen.current} />
+      <p className="text-fog">{now.cents != null ? `${rupees(now.cents)} a wash` : now.tagline}</p>
       <p className="mt-1 text-xs tabular-nums text-fog/70">{String(ring.length - slot).padStart(2, '0')} / {String(base.length).padStart(2, '0')}</p>
     </div>
     </div>

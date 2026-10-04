@@ -19,6 +19,7 @@ const prettyPhone = (p: string) => `+91 ${p.slice(0, 5)} ${p.slice(5)}`;
 const signInErrors: Record<string, string> = {
   google_failed: "Google sign-in didn't finish. Please try again.",
   google_cancelled: 'Google sign-in was cancelled.',
+  archived: 'This account has been deactivated. Please contact WASHO.',
   google_profile: "You're signed in with Google, but we couldn't load your WASHO profile. Please try again in a moment.",
 };
 

@@ -10,6 +10,8 @@ export interface Profile {
   full_name: string | null;
   phone: string | null;
   email: string | null;
+  /** Archived by an admin: the account may not be used (migration 20261004000013). */
+  archived: boolean;
 }
 
 /**
@@ -30,6 +32,7 @@ export async function loadProfile(c: PoolClient, claims: Claims): Promise<Profil
     full_name: (p.full_name as string | null) ?? null,
     phone: (p.phone as string | null) ?? claims.phone ?? null,
     email: (p.email as string | null) ?? claims.email ?? null,
+    archived: Boolean(p.archived_at),
   };
 }
 
@@ -54,6 +57,10 @@ export async function profileFor(claims: Claims, o: { fresh?: boolean } = {}): P
     throw new HttpError(503, 'profile_unavailable', 'You are signed in, but we could not load your profile. Please try again in a moment. If it keeps happening, contact WASHO.');
   }
   if (!profile) throw new HttpError(403, 'no_profile', 'Your account is not set up yet. Please contact WASHO.');
+  if (profile.archived) {
+    remembered.delete(claims.sub);
+    throw new HttpError(403, 'account_archived', 'This account has been deactivated. Please contact WASHO.');
+  }
   if (remembered.size > 500) remembered.clear();
   remembered.set(claims.sub, { at: Date.now(), profile });
   return profile;

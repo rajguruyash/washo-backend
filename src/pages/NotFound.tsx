@@ -10,7 +10,7 @@ export default function NotFound() {
         <AvatarHead className="mx-auto h-24 w-24" />
         <p className="sr-only">404</p>
         <div aria-hidden className="mt-6 flex justify-center">
-          <SplitFlapText words={['404', 'NOT FOUND', '404']} padTo={9} fontSize="clamp(26px, 8vw, 44px)" gap={5} tileRadius={6} tileColor="#111a2f" textColor="#9bbfff" cycleDelay={2600} />
+          <SplitFlapText words={['404', 'NOT FOUND', '404']} padTo={9} fontSize="clamp(30px, 9vw, 56px)" gap={5} tileRadius={6} tileColor="#111a2f" textColor="#9bbfff" cycleDelay={2600} />
         </div>
         <h1 className="mt-2 text-2xl font-bold">We couldn't find that page</h1>
         <p className="mt-2 text-fog">It may have moved, or the link might be mistyped.</p>

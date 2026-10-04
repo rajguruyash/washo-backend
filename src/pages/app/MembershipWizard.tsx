@@ -15,7 +15,6 @@ import { addDays, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../
 import { ApiError } from '../../lib/http';
 import { defaultPattern, useAddresses, useCatalog, useEstimate, useStartMembershipPayment, useVehicles } from '../../lib/queries';
 import { usePay } from '../../lib/usePay';
-import { CountPrice } from '../../components/CountPrice';
 import { SlideToPay } from '../../components/SlideToPay';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
@@ -104,9 +103,8 @@ export default function MembershipWizard() {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
     return catalog?.services.find((s) => s.code === code)?.name ?? KIND_LABEL[kind];
   };
-  const baseCode = (kind: WashKind) => catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
   const basePrice = (kind: WashKind): number => {
-    const code = baseCode(kind);
+    const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
     return catalog?.services.find((x) => x.code === code)?.unit_prices?.find((p) => p.vehicle_type === vehicle?.vehicle_type)?.price_cents ?? 0;
   };
   const discount = (kind: 'frequency' | 'duration', key: number) => catalog?.discounts.find((d) => d.kind === kind && d.key === key)?.discount_bp ?? 0;
@@ -239,7 +237,7 @@ export default function MembershipWizard() {
                   </div>
                 </div>
                 <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
-                  Base price per wash: {bike ? <>Bike wash <CountPrice cents={basePrice('body')} code={baseCode('body')} /></> : <>Body <CountPrice cents={basePrice('body')} code={baseCode('body')} /> · Deep cleaning <CountPrice cents={basePrice('deep')} code={baseCode('deep')} /></>}.
+                  Base price per wash: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body ${rupees(basePrice('body'))} · Deep cleaning ${rupees(basePrice('deep'))}`}.
                 </p>
               </div>
             ) : (

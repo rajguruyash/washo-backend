@@ -48,6 +48,8 @@ export const config = {
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
     keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    // Razorpay → Settings → Webhooks: the secret you typed there. Lets Razorpay tell us about a payment even if the customer's browser never did.
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
     get configured() {
       return Boolean(this.keyId && this.keySecret);
     },

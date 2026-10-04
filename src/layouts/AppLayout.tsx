@@ -1,12 +1,16 @@
 import { motion } from 'framer-motion';
 import { BadgeCheck, CalendarDays, Car, ClipboardList, Home, LogOut, Plus, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useEffect } from 'react';
 import { Link, NavLink, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { AvatarHead } from '../components/brand/Avatar';
 import { Logo } from '../components/brand/Logo';
 import { Skeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { cn } from '../lib/cn';
-import type { Role } from '../lib/types';
+import { post } from '../lib/http';
+import { useRefreshAll } from '../lib/queries';
+import type { Role, VerifyResult } from '../lib/types';
 import { useAuth } from '../state/auth';
 
 const homeFor = (role: Role) => (role === 'admin' ? '/admin' : role === 'worker' ? '/worker' : '/app');
@@ -126,6 +130,39 @@ function BottomBar() {
   );
 }
 
+/**
+ * If a payment went through but the browser never reported back (paid in a UPI app, tab cleared, signal dropped), ask Razorpay when the
+ * customer next opens the app, and record it. At most every 10 minutes, and only does anything when a checkout is waiting.
+ */
+function PaymentRecovery() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const refresh = useRefreshAll();
+  useEffect(() => {
+    if (!user || user.role !== 'customer' || user.needs_profile) return;
+    const KEY = 'washo_payment_check';
+    try {
+      if (Date.now() - Number(localStorage.getItem(KEY) || 0) < 10 * 60_000) return;
+      localStorage.setItem(KEY, String(Date.now()));
+    } catch {
+      /* storage can be unavailable; check anyway */
+    }
+    post<{ results: VerifyResult[] }>('/payments/reconcile', {})
+      .then(async ({ results }) => {
+        if (results.some((r) => r.status === 'fulfilled')) {
+          await refresh();
+          toast.success('We found your payment and booked it. Thank you!');
+        } else if (results.some((r) => r.status === 'unfulfilled')) {
+          await refresh();
+          toast.error('We received a payment we could not turn into a booking. WASHO has been alerted and will refund or fix it.');
+        }
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+  return null;
+}
+
 export function AppLayout() {
   const { pathname } = useLocation();
   const focused = pathname === '/app/welcome';
@@ -133,6 +170,7 @@ export function AppLayout() {
   const immersive = /^\/app\/(book|membership\/new)\/?$/.test(pathname);
   return (
     <RequireRole role="customer">
+      <PaymentRecovery />
       {!focused && <Sidebar />}
       <div className={cn(!focused && 'lg:pl-[17rem]')}>
         {!focused && (

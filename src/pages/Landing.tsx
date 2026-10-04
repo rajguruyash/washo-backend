@@ -58,7 +58,7 @@ export default function Landing() {
               <SplitFlapText
                 words={['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
                 padTo={14}
-                fontSize="clamp(17px, 4.6vw, 38px)"
+                fontSize="clamp(19px, 5.4vw, 48px)"
                 gap={4}
                 tileRadius={5}
                 tileColor="#111a2f"

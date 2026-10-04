@@ -125,27 +125,43 @@ export interface SettleResult {
   reason?: string;
 }
 
+interface GatewayPayment {
+  id: string;
+  order_id: string;
+  amount: number;
+  currency: string;
+  status: string;
+}
+
+/** What Razorpay itself says about a payment. */
+export async function fetchGatewayPayment(paymentId: string): Promise<GatewayPayment> {
+  assertConfigured();
+  return razorpay<GatewayPayment>(`/v1/payments/${encodeURIComponent(paymentId)}`);
+}
+
+/**
+ * The one place a Razorpay payment becomes a booking or membership, whoever noticed it (the browser, a webhook, a re-check):
+ * ask Razorpay what happened (never trust the caller), capture an authorised payment, then let the database settle it.
+ * The database is idempotent: the same payment settled twice is simply "already settled".
+ */
+async function settleFromGateway(orderId: string, paymentId: string, profileId: string | null, source: string): Promise<SettleResult> {
+  let p = await fetchGatewayPayment(paymentId);
+  if (p.order_id !== orderId) throw new HttpError(400, 'order_mismatch', 'This payment does not match the order.');
+  if (p.status === 'authorized') {
+    // Accounts that do not auto-capture: capture exactly the authorised amount.
+    p = await razorpay(`/v1/payments/${encodeURIComponent(p.id)}/capture`, { method: 'POST', body: { amount: p.amount, currency: p.currency } });
+  }
+  return withApiRole(async (c) =>
+    (await c.query('SELECT public.svc_settle_payment($1, $2, $3, $4, $5, $6, $7) AS r', [orderId, paymentId, p.amount, p.currency, p.status, profileId, source])).rows[0].r as SettleResult
+  );
+}
+
 export async function verifyAndSettle(profile: Profile, f: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }): Promise<SettleResult> {
   assertConfigured();
   if (!signatureIsValid(f.razorpay_order_id, f.razorpay_payment_id, f.razorpay_signature)) {
     throw new HttpError(400, 'bad_signature', 'We could not verify this payment. If money was deducted it will be reconciled automatically.');
   }
-
-  // Ask Razorpay what actually happened rather than trusting the browser.
-  let p = await razorpay<{ id: string; order_id: string; amount: number; currency: string; status: string }>(`/v1/payments/${encodeURIComponent(f.razorpay_payment_id)}`);
-  if (p.order_id !== f.razorpay_order_id) throw new HttpError(400, 'order_mismatch', 'This payment does not match the order.');
-  if (p.status === 'authorized') {
-    // Accounts that do not auto-capture: capture exactly the authorised amount.
-    p = await razorpay(`/v1/payments/${encodeURIComponent(p.id)}/capture`, { method: 'POST', body: { amount: p.amount, currency: p.currency } });
-  }
-
-  const result = await withApiRole(async (c) =>
-    (
-      await c.query('SELECT public.svc_settle_payment($1, $2, $3, $4, $5, $6, $7) AS r', [
-        f.razorpay_order_id, f.razorpay_payment_id, p.amount, p.currency, p.status, profile.id, 'verify',
-      ])
-    ).rows[0].r as SettleResult
-  );
+  const result = await settleFromGateway(f.razorpay_order_id, f.razorpay_payment_id, profile.id, 'verify');
 
   switch (result.status) {
     case 'fulfilled':
@@ -160,6 +176,50 @@ export async function verifyAndSettle(profile: Profile, f: { razorpay_order_id: 
       console.error('Payment rejected by the database:', JSON.stringify(result));
       throw new HttpError(400, 'payment_rejected', 'We could not confirm this payment. If money was deducted it will be reconciled automatically.');
   }
+}
+
+/**
+ * "Did this checkout actually get paid?" Asks Razorpay for the payments made against an order and settles one that went through.
+ * This is what rescues a payment whose browser never reported back (the customer switched to Google Pay, the tab was cleared, the
+ * phone lost signal). Returns null when Razorpay shows nothing paid for the order.
+ */
+export async function reconcileOrder(orderId: string, profileId: string | null, source: string): Promise<SettleResult | null> {
+  assertConfigured();
+  const list = await razorpay<{ items?: GatewayPayment[] }>(`/v1/orders/${encodeURIComponent(orderId)}/payments`);
+  const items = list.items ?? [];
+  const hit = items.find((p) => p.status === 'captured') ?? items.find((p) => p.status === 'authorized');
+  if (!hit) return null;
+  return settleFromGateway(orderId, hit.id, profileId, source);
+}
+
+/**
+ * Razorpay tells us about a payment itself (Settings → Webhooks → payment.captured / order.paid), so a payment is recorded even if
+ * the customer's browser never came back. The body must be the exact bytes Razorpay signed.
+ */
+export async function processWebhook(rawBody: Buffer | undefined, signature: string | undefined): Promise<{ handled: boolean; status?: string }> {
+  const secret = config.razorpay.webhookSecret;
+  if (!secret) {
+    console.error('A Razorpay webhook arrived but RAZORPAY_WEBHOOK_SECRET is not set on the server.');
+    throw new HttpError(503, 'webhook_not_configured', 'Webhook is not configured.');
+  }
+  if (!rawBody || !signature) throw new HttpError(400, 'bad_signature', 'Missing signature.');
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(signature, 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new HttpError(400, 'bad_signature', 'Bad signature.');
+
+  let event: { event?: string; payload?: { payment?: { entity?: { id?: string; order_id?: string } } } };
+  try {
+    event = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    throw new HttpError(400, 'bad_json', 'Malformed body.');
+  }
+  if (event.event !== 'payment.captured' && event.event !== 'order.paid') return { handled: false };
+  const payment = event.payload?.payment?.entity;
+  if (!payment?.id || !payment.order_id) return { handled: false };
+  const result = await settleFromGateway(payment.order_id, payment.id, null, 'webhook');
+  if (result.status === 'unfulfilled') console.warn(`Webhook: payment ${payment.id} was paid but could not be fulfilled (${result.reason ?? 'see refunds'}).`);
+  return { handled: true, status: result.status };
 }
 
 // ───────────────────────── refunds ─────────────────────────

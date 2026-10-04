@@ -21,6 +21,7 @@ export const FAKE = {
   serviceKey: 'test-service-role-key',
   razorpayKeyId: 'rzp_test_KEYID',
   razorpayKeySecret: 'rzp_test_SECRET',
+  razorpayWebhookSecret: 'whsec_test_SECRET',
   otpCode: '123456',
 };
 
@@ -46,8 +47,17 @@ export interface FakeSupabase {
   objects: Map<string, { bytes: Buffer; contentType: string }>;
   otpSent: string[];
   makeSession(authUserId: string, extra?: Record<string, unknown>): { access_token: string; refresh_token: string; expires_in: number };
+  /**
+   * A payment that exists at Razorpay (money moved) without the website ever hearing about it: the customer paid in a UPI app and the
+   * browser never reported back. Returns its id.
+   */
+  paidAtRazorpay(orderId: string, o?: { status?: string; amount?: number }): string;
+  /** A Razorpay webhook as it would arrive: the exact body and the signature header over it. */
+  webhook(event: string, payment: { id: string; order_id: string }, o?: { secret?: string }): { body: string; signature: string };
   /** The Razorpay API base URL the website server should use. */
   razorpayBase: string;
+  /** True if an admin locked this login through the Auth admin API. */
+  isBanned(authUserId: string): boolean;
   /** Make the next Razorpay API call fail with this HTTP status. */
   failNextRazorpayCall(status?: number): void;
   /**
@@ -84,6 +94,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     rzpFail: 0,
     rzpRejectRefund: '' as string,
     phoneChange: new Map<string, string>(), // auth user id -> the number a code was sent to
+    banned: new Set<string>(), // auth user ids locked through the admin API
     codes: new Map<string, { userId: string; challenge: string }>(), // Google one-time codes
   };
 
@@ -100,6 +111,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     return rows[0] as { id: string; phone: string | null; email: string | null } | undefined;
   }
   const full = async (authUserId: string) => {
+    if (state.banned.has(authUserId)) throw Object.assign(new Error('banned'), { banned: true });
     const u = await userRow(authUserId);
     return { ...session(authUserId, { phone: u?.phone ?? undefined, email: u?.email ?? undefined }), token_type: 'bearer', user: { id: authUserId, phone: u?.phone ?? undefined, email: u?.email ?? undefined } };
   };
@@ -169,6 +181,39 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
         const code = await googleCode({ email: 'dev.google@example.com', name: 'Dev Google', challenge });
         res.writeHead(302, { Location: `${back}${back.includes('?') ? '&' : '?'}code=${code}` });
         return res.end();
+      }
+      // ───────── Auth admin API (service role) ─────────
+      if (path.startsWith('/auth/v1/admin/')) {
+        if (req.headers.authorization !== `Bearer ${FAKE.serviceKey}`) return send(res, 401, { code: 401, error_code: 'not_admin', msg: 'User not allowed' });
+        if (path === '/auth/v1/admin/users' && req.method === 'POST') {
+          const b = json();
+          const digits = String(b.phone ?? '').replace(/\D/g, '');
+          if (digits) {
+            const dup = await admin.query(`SELECT 1 FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1`, [digits]);
+            if (dup.rows.length) return send(res, 422, { code: 422, error_code: 'phone_exists', msg: 'Phone number already registered by another user' });
+          }
+          const { rows } = await admin.query(
+            `INSERT INTO auth.users (id, instance_id, aud, role, phone, phone_confirmed_at, raw_user_meta_data, created_at, updated_at)
+             VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, $2, $3::jsonb, now(), now()) RETURNING id`,
+            [b.phone ?? null, b.phone_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {})]
+          );
+          return send(res, 200, { id: rows[0].id, phone: b.phone });
+        }
+        const um = path.match(/^\/auth\/v1\/admin\/users\/([^/]+)$/);
+        if (um && req.method === 'PUT') {
+          const id = decodeURIComponent(um[1]);
+          const b = json();
+          if (b.ban_duration !== undefined) {
+            if (b.ban_duration === 'none') state.banned.delete(id);
+            else state.banned.add(id);
+          }
+          if (b.password !== undefined) {
+            if (String(b.password).length < 8) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 8 characters.' });
+            await admin.query(`UPDATE auth.users SET encrypted_password = crypt($1, gen_salt('bf')), updated_at = now() WHERE id = $2`, [b.password, id]);
+          }
+          return send(res, 200, { id });
+        }
+        return send(res, 404, { msg: 'fake supabase: no admin route' });
       }
       if (path === '/auth/v1/user' && req.method === 'PUT') {
         const uid = verifyBearer(req);
@@ -265,6 +310,12 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           state.orders.set(id, { amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt ?? '' });
           return send(res, 200, { id, entity: 'order', amount: b.amount, currency: b.currency ?? 'INR', receipt: b.receipt, status: 'created' });
         }
+        const om = path.match(/^\/rzp\/v1\/orders\/([^/]+)\/payments$/);
+        if (om && req.method === 'GET') {
+          const orderId = decodeURIComponent(om[1]);
+          const items = [...state.payments.entries()].filter(([, p]) => p.order_id === orderId).map(([id, p]) => ({ id, entity: 'payment', ...p }));
+          return send(res, 200, { entity: 'collection', count: items.length, items });
+        }
         const rm = path.match(/^\/rzp\/v1\/payments\/([^/]+)\/(refund|refunds)$/);
         if (rm) {
           const paymentId = decodeURIComponent(rm[1]);
@@ -330,6 +381,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       }
       send(res, 404, { message: `fake supabase: no route ${req.method} ${path}` });
     } catch (e) {
+      if ((e as { banned?: boolean }).banned) return send(res, 400, { code: 400, error_code: 'user_banned', msg: 'User is banned' });
       console.error('fakeSupabase error:', e);
       send(res, 500, { message: (e as Error).message });
     }
@@ -349,6 +401,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     objects: state.objects,
     otpSent: state.otpSent,
     razorpayBase: `${url}/rzp`,
+    isBanned: (id) => state.banned.has(id),
     failNextRazorpayCall: (status = 500) => {
       state.rzpFail = status;
     },
@@ -367,6 +420,17 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
         razorpay_payment_id: paymentId,
         razorpay_signature: crypto.createHmac('sha256', FAKE.razorpayKeySecret).update(`${orderId}|${paymentId}`).digest('hex'),
       };
+    },
+    paidAtRazorpay(orderId, o = {}) {
+      const order = state.orders.get(orderId);
+      if (!order) throw new Error(`unknown order ${orderId}`);
+      const paymentId = `pay_${crypto.randomBytes(6).toString('hex')}`;
+      state.payments.set(paymentId, { order_id: orderId, amount: o.amount ?? order.amount, currency: order.currency, status: o.status ?? 'captured' });
+      return paymentId;
+    },
+    webhook(event, payment, o = {}) {
+      const body = JSON.stringify({ entity: 'event', event, payload: { payment: { entity: { id: payment.id, order_id: payment.order_id, status: 'captured' } } } });
+      return { body, signature: crypto.createHmac('sha256', o.secret ?? FAKE.razorpayWebhookSecret).update(body).digest('hex') };
     },
     async createStaff(role, o = {}) {
       const email = o.email ?? `${role}-${crypto.randomBytes(4).toString('hex')}@washo.test`;

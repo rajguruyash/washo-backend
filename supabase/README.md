@@ -102,3 +102,12 @@ Idempotent. Payment screenshots are not copied; their old path is kept.
 - `admin_finish_refund(id, razorpay_refund_id)` records `processed`, marks the payment `refunded`, adds the `refunded` booking event. Idempotent for the same Razorpay refund id.
 - `admin_fail_refund(id, reason)` records `failed` with `failure_reason` (retryable). `admin_resolve_refund` still records a refund paid by hand and now does the same bookkeeping for `processed`.
 - Adds `refunds.approved_at` and `refunds.failure_reason`. Tests: `supabase/tests/after-12-refund-workflow.test.ts`, `backend/tests/api-refunds.test.ts`.
+
+## Admin management (migration 13)
+
+Adds `profiles.archived_at` and `customer_addresses.archived_at` and the admin functions behind the Admin page: `admin_update_customer_profile`, `admin_set_profile_archived`
+(customers and specialists; guards for live work, releases a specialist's washes to the pool), `admin_begin_password_reset`, `admin_save_vehicle` / `admin_set_vehicle_active`,
+`admin_save_address` / `admin_set_address_archived`, `admin_create_booking` (cash or complimentary, source `admin`), `admin_update_booking_details`, `admin_save_service` /
+`admin_set_service_active` / `admin_set_service_price` (versioned), `admin_set_discount` / `admin_remove_discount`, `admin_set_pricing_setting` (whitelisted keys and ranges).
+Triggers stop an archived specialist from being assigned work. Nothing is deleted. Tests: `supabase/tests/after-13-admin-management.test.ts`, `backend/tests/api-admin-management.test.ts`.
+

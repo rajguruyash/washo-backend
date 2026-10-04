@@ -1,7 +1,6 @@
-import { AlertTriangle, CalendarClock, Check, Phone, Search, UserPlus, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CalendarPlus, Check, Hourglass, Pencil, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { PhotoGrid } from '../../components/PhotoGrid';
@@ -12,30 +11,32 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select, TextArea } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
-import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { addDays, fullDate, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
-import { ApiError, get, post } from '../../lib/http';
+import { useAdminCustomer } from '../../lib/queries';
 import {
-  keys, useAdminAction, useAdminAttention, useAdminBooking, useAdminBookings, useAdminMemberships, useAdminOverview, useAdminRequests, useAdminWorkers, useReviewRequest, useRefreshAll,
+  useAdminAction, useAdminAttention, useAdminBooking, useAdminBookings, useAdminMemberships, useAdminOverview, useAdminRequests, useAdminWorkers, useReviewRequest, useRefreshAll,
 } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminBooking, AdminMembership, AdminRequest, Attention as AttentionData, RequestStatus, SlotId } from '../../lib/types';
 import { StaffLayout } from '../../layouts/StaffLayout';
+import { AddWashSheet } from './AddWash';
+import People from './People';
+import ServicesAdmin from './ServicesAdmin';
+import { Loading, errText } from './shared';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'memberships' | 'people' | 'attention';
+type Tab = 'overview' | 'requests' | 'bookings' | 'memberships' | 'people' | 'services' | 'attention';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'requests', label: 'Requests' },
   { value: 'bookings', label: 'Washes' },
   { value: 'memberships', label: 'Memberships' },
   { value: 'people', label: 'People' },
+  { value: 'services', label: 'Services & prices' },
   { value: 'attention', label: 'Needs attention' },
 ];
 
-const errText = (e: unknown) => (e instanceof ApiError ? e.message : 'Something went wrong. Please try again.');
-const Loading = () => <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-24" />)}</div>;
 
 // ───────────────────────── overview ─────────────────────────
 function Overview({ go }: { go: (t: Tab) => void }) {
@@ -147,15 +148,20 @@ function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void 
   const workers = useAdminWorkers();
   const act = useAdminAction();
   const toast = useToast();
-  const [view, setView] = useState<'details' | 'move' | 'cancel'>('details');
+  const [view, setView] = useState<'details' | 'move' | 'cancel' | 'edit'>('details');
+  const [addrId, setAddrId] = useState('');
+  const [parking, setParking] = useState('');
+  const [note, setNote] = useState('');
+  const customer = useAdminCustomer(data?.booking.customer_id);
   const [worker, setWorker] = useState('');
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
   const [reason, setReason] = useState('');
   useEffect(() => { setView('details'); setWorker(''); setDate(null); setSlot(null); setReason(''); }, [id]);
   const b = data?.booking;
-  const run = async (path: string, body: Record<string, unknown>, ok: string) => {
-    try { await act.mutateAsync({ path, body }); toast.success(ok); setView('details'); } catch (e) { toast.error(errText(e)); }
+  useEffect(() => { if (b) { setAddrId(b.address_id ?? ''); setParking(b.parking_location ?? ''); setNote(b.notes ?? ''); } }, [b?.id, b?.address_id, b?.parking_location, b?.notes]);
+  const run = async (path: string, body: Record<string, unknown>, ok: string, method: 'POST' | 'PUT' = 'POST') => {
+    try { await act.mutateAsync({ path, body, method }); toast.success(ok); setView('details'); } catch (e) { toast.error(errText(e)); }
   };
   const live = b && ['confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up'].includes(b.status);
 
@@ -163,12 +169,14 @@ function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void 
     <Sheet open={Boolean(id)} onClose={onClose} size="lg" title={b ? `${b.reference_code} · ${b.service_name}` : 'Wash'} description={b ? `${prettyDate(b.scheduled_date)}, ${slotLabel(b.time_slot)}` : undefined}>
       {!b ? <Loading /> : view === 'details' ? (
         <div className="space-y-5">
-          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.booking_type === 'membership' && <Badge tone="blue">Membership</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
+          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.booking_type === 'membership' && <Badge tone="blue">Membership</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
           <div className="grid gap-4 text-sm sm:grid-cols-2">
             <div><p className="eyebrow">Customer</p><p className="font-semibold">{b.customer_name}</p><a href={`tel:${b.customer_phone}`} className="text-washo-300">{prettyPhone(b.customer_phone)}</a></div>
             <div><p className="eyebrow">Vehicle</p><p>{b.vehicle_type.toUpperCase()} · {b.vehicle_model} {b.vehicle_color ?? ''}</p><p className="text-fog">{b.registration_number}</p></div>
             <div><p className="eyebrow">Address</p><p>{[b.society_name, b.building_block, b.flat_number].filter(Boolean).join(', ')}</p><p className="text-fog">{b.parking_location}</p></div>
             <div><p className="eyebrow">Specialist</p><p className="font-semibold">{b.worker_name ?? 'Unassigned'}</p></div>
+            {b.booking_type !== 'membership' && b.price_cents != null && <div><p className="eyebrow">Payment</p><p className="font-semibold">{b.price_cents === 0 ? 'Complimentary' : rupees(b.price_cents)}</p></div>}
+            {b.notes && <div><p className="eyebrow">Note</p><p>{b.notes}</p></div>}
           </div>
           {live && (
             <div className="space-y-3 rounded-2xl border border-white/10 p-4">
@@ -179,6 +187,7 @@ function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void 
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" disabled={!worker} loading={act.isPending} onClick={() => void run(`bookings/${b.id}/assign`, { worker_profile_id: worker }, 'Assigned')}>Assign</Button>
                 {b.booking_type === 'membership' && <Button size="sm" variant="glass" icon={<CalendarClock className="h-4 w-4" />} onClick={() => setView('move')}>Reschedule</Button>}
+                <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => setView('edit')}>Edit details</Button>
                 <Button size="sm" variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => setView('cancel')}>Cancel wash</Button>
               </div>
             </div>
@@ -197,6 +206,16 @@ function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void 
             </ol>
           </section>
         </div>
+      ) : view === 'edit' ? (
+        <div className="space-y-5">
+          <Select label="Address" value={addrId} onChange={(e) => { setAddrId(e.target.value); const a = customer.data?.addresses.find((x) => x.id === e.target.value); if (a) setParking(a.parking_location); }}>
+            <option value="">Keep as it is</option>
+            {customer.data?.addresses.filter((a) => !a.archived).map((a) => <option key={a.id} value={a.id}>{a.label} · {a.society_name}, {a.building_block} {a.flat_number}</option>)}
+          </Select>
+          <Input label="Parking spot" value={parking} onChange={(e) => setParking(e.target.value)} maxLength={160} />
+          <TextArea label="Note for the specialist" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
+          <div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setView('details')}>Back</Button><Button loading={act.isPending} onClick={() => void run(`bookings/${b.id}`, { address_id: addrId || null, parking_location: parking, note }, 'Saved', 'PUT')}>Save details</Button></div>
+        </div>
       ) : view === 'move' ? (
         <div className="space-y-5">
           <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={45} />
@@ -214,7 +233,7 @@ function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void 
   );
 }
 
-function Bookings({ membership }: { membership?: string }) {
+function Bookings({ membership, onAdd }: { membership?: string; onAdd: () => void }) {
   const [from, setFrom] = useState(todayIST());
   const [to, setTo] = useState(addDays(todayIST(), 7));
   const [status, setStatus] = useState('');
@@ -224,6 +243,7 @@ function Bookings({ membership }: { membership?: string }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="space-y-4">
+      {!membership && <div className="flex justify-end"><Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={onAdd}>Book a wash</Button></div>}
       {!membership && (
         <div className="glass grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
           <Input label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -295,68 +315,6 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
   );
 }
 
-// ───────────────────────── customers & specialists ─────────────────────────
-function People() {
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
-  useEffect(() => { const t = setTimeout(() => setDebounced(q), 300); return () => clearTimeout(t); }, [q]);
-  const customers = useQuery({ queryKey: keys.admin('customers', debounced), queryFn: async () => (await get<{ customers: { id: string; full_name: string | null; phone: string | null; email: string | null; signup_source: string | null; vehicles: number; active_memberships: number; washes: number }[] }>(`/admin/customers?q=${encodeURIComponent(debounced)}`)).customers });
-  const workers = useAdminWorkers();
-  const refresh = useRefreshAll();
-  const toast = useToast();
-  const [adding, setAdding] = useState(false);
-  const [f, setF] = useState({ full_name: '', email: '', phone: '', password: '' });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setErrors({});
-    try {
-      await post('/admin/workers', f);
-      await refresh();
-      toast.success('Specialist created. Share their email and password with them.');
-      setAdding(false);
-      setF({ full_name: '', email: '', phone: '', password: '' });
-    } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields); else toast.error(errText(err));
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="grid gap-8 lg:grid-cols-2">
-      <section>
-        <div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-lg font-bold"><Users className="h-5 w-5 text-washo-300" /> Specialists</h2><Button size="sm" icon={<UserPlus className="h-4 w-4" />} onClick={() => setAdding(true)}>Add</Button></div>
-        <ul className="space-y-2">
-          {workers.data?.map((w) => (
-            <li key={w.id} className="panel flex items-center justify-between gap-3 p-4"><div><p className="font-semibold">{w.full_name}</p><a href={`tel:${w.phone}`} className="text-sm text-washo-300">{w.phone}</a></div><Badge tone="blue">{w.washes_next_7_days} this week</Badge></li>
-          ))}
-          {workers.data && !workers.data.length && <li className="panel p-6 text-center text-sm text-fog">No specialists yet.</li>}
-        </ul>
-      </section>
-      <section>
-        <h2 className="mb-3 text-lg font-bold">Customers</h2>
-        <div className="relative mb-3"><Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-fog" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or phone" aria-label="Search customers" className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.04] pl-11 pr-4 outline-none focus:border-washo-400" /></div>
-        <ul className="space-y-2">
-          {customers.data?.map((c) => (
-            <li key={c.id} className="panel p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{c.full_name ?? 'No name yet'}</p><p className="text-sm text-fog"><Phone className="mr-1 inline h-3 w-3" />{prettyPhone(c.phone)}{c.email ? ` · ${c.email}` : ''}</p></div>{c.active_memberships > 0 && <Badge tone="green">Member</Badge>}</div><p className="mt-1 text-xs text-fog">{c.vehicles} vehicle{c.vehicles === 1 ? '' : 's'} · {c.washes} washes{c.signup_source ? ` · via ${c.signup_source}` : ''}</p></li>
-          ))}
-          {customers.data && !customers.data.length && <li className="panel p-6 text-center text-sm text-fog">No customers found.</li>}
-        </ul>
-      </section>
-      <Sheet open={adding} onClose={() => setAdding(false)} size="sm" title="Add a specialist" description="They sign in at /login with this email and password." footer={<Button type="submit" form="worker-form" full size="lg" loading={busy}>Create specialist</Button>}>
-        <form id="worker-form" onSubmit={create} className="space-y-4" noValidate>
-          <Input label="Full name" value={f.full_name} error={errors.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} required />
-          <Input label="Email" type="email" value={f.email} error={errors.email} onChange={(e) => setF({ ...f, email: e.target.value })} required />
-          <Input label="Phone" value={f.phone} error={errors.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required />
-          <Input label="Temporary password" type="text" value={f.password} error={errors.password} onChange={(e) => setF({ ...f, password: e.target.value })} hint="At least 8 characters." required />
-        </form>
-      </Sheet>
-    </div>
-  );
-}
-
 // ───────────────────────── needs attention ─────────────────────────
 function Attention() {
   const { data, isLoading, isError, refetch } = useAdminAttention();
@@ -366,6 +324,18 @@ function Attention() {
   const [approving, setApproving] = useState<AttentionData['refunds'][number] | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [rid, setRid] = useState('');
+  const [checking, setChecking] = useState<string | null>(null);
+  const check = async (id: string) => {
+    setChecking(id);
+    try {
+      const r = await act.mutateAsync({ path: `payments/${id}/reconcile`, body: {} });
+      if (r.status === 'fulfilled') toast.success('Found the payment at Razorpay. It is recorded and booked.');
+      else if (r.status === 'already_settled' || r.status === 'already_recorded') toast.success('That payment is already recorded.');
+      else if (r.status === 'unfulfilled') toast.error('Razorpay has the payment but it could not be turned into a booking (the slot may have passed). A refund request was created below.');
+      else if (r.status === 'not_paid') toast.error('Razorpay shows no completed payment for this checkout. If the customer insists they paid, look for it in the Razorpay dashboard.');
+      else toast.error(`Razorpay answered "${r.status}". Nothing was recorded.`);
+    } catch (e) { toast.error(errText(e)); } finally { setChecking(null); }
+  };
   const approve = async () => {
     if (!approving) return;
     try {
@@ -387,6 +357,16 @@ function Attention() {
       <section>
         <h2 className="mb-3 flex items-center gap-2 text-lg font-bold"><AlertTriangle className="h-5 w-5 text-warn" /> Paid but not fulfilled</h2>
         {data.unfulfilled.length ? <ul className="space-y-2">{data.unfulfilled.map((p) => <li key={p.id} className="panel p-4 text-sm"><p className="font-semibold">{rupees(p.amount_cents)} · {p.payment_kind} · {p.customer_name} {prettyPhone(p.customer_phone)}</p><p className="text-xs text-fog">Razorpay payment {p.provider_payment_id}. A refund request was created automatically.</p></li>)}</ul> : <p className="panel p-5 text-sm text-fog">Nothing. Every verified payment became a booking or membership.</p>}
+      </section>
+      <section>
+        <h2 className="mb-1 flex items-center gap-2 text-lg font-bold"><Hourglass className="h-5 w-5 text-washo-300" /> Started but not confirmed</h2>
+        <p className="mb-3 text-sm text-fog">Checkouts that were opened and never reported back. If a customer says they paid, press <strong className="text-white">Check with Razorpay</strong>: if Razorpay has the payment, the wash or membership is recorded.</p>
+        {data.pending.length ? <ul className="space-y-2">{data.pending.map((p) => (
+          <li key={p.id} className="panel flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="text-sm"><p className="font-semibold">{rupees(p.amount_cents)} · {p.payment_kind === 'membership' ? 'Membership' : 'Single wash'} · {p.customer_name} {prettyPhone(p.customer_phone)}</p><p className="text-xs text-fog">Started {new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(p.created_at))}{p.scheduled_date ? ` · for ${prettyDate(p.scheduled_date)}${p.time_slot ? `, ${slotLabel(p.time_slot as SlotId)}` : ''}` : ''}</p></div>
+            <Button size="sm" variant="glass" loading={act.isPending && checking === p.id} onClick={() => void check(p.id)}>Check with Razorpay</Button>
+          </li>
+        ))}</ul> : <p className="panel p-5 text-sm text-fog">Nothing waiting. Every checkout that was started has either finished or is still in progress.</p>}
       </section>
       <section>
         <h2 className="mb-1 text-lg font-bold">Refund requests</h2>
@@ -420,16 +400,20 @@ export default function Admin() {
   const tab = (params.get('tab') as Tab) || 'overview';
   const membership = params.get('membership') ?? undefined;
   const go = (t: Tab, extra?: Record<string, string>) => setParams({ tab: t, ...extra });
+  // "Book a wash" is available from the Washes tab (pick any customer) and from a customer's page (that customer).
+  const [adding, setAdding] = useState<{ customerId: string | null } | null>(null);
   return (
     <StaffLayout role="admin" title="Admin">
       <div className="mb-6"><h1 className="text-3xl font-extrabold">WASHO admin</h1></div>
       <div className="mb-6"><Segmented label="Admin sections" value={tab} onChange={(t) => go(t)} options={TABS} /></div>
       {tab === 'overview' && <Overview go={go} />}
       {tab === 'requests' && <Requests />}
-      {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} /></>)}
+      {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} onAdd={() => setAdding({ customerId: null })} /></>)}
       {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} />}
-      {tab === 'people' && <People />}
+      {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
+      {tab === 'services' && <ServicesAdmin />}
       {tab === 'attention' && <Attention />}
+      <AddWashSheet open={Boolean(adding)} customerId={adding?.customerId} onClose={() => setAdding(null)} onCreated={() => go('bookings')} />
     </StaffLayout>
   );
 }

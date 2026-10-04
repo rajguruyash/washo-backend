@@ -7,10 +7,12 @@ import { HttpError } from './errors';
 import { apiLimiter, errorHandler, sameOriginWrites } from './middleware/http';
 import { accountRouter } from './routes/account';
 import { adminRouter } from './routes/admin';
+import { adminManageRouter } from './routes/adminManage';
 import { authRouter } from './routes/auth';
 import { bookingsRouter } from './routes/bookings';
 import { catalogRouter } from './routes/catalog';
 import { membershipsRouter } from './routes/memberships';
+import { webhookRouter } from './routes/webhook';
 import { workerRouter } from './routes/worker';
 
 export function createApp() {
@@ -39,11 +41,18 @@ export function createApp() {
     })
   );
 
-  // There is deliberately NO Razorpay webhook here: the one webhook lives in the Supabase edge function.
-  app.use(express.json({ limit: '100kb' }));
+  // The Razorpay webhook is signed over the exact bytes it sent, so keep them for that one route.
+  app.use(
+    express.json({
+      limit: '100kb',
+      verify: (req, _res, buf) => {
+        if ((req as express.Request).originalUrl.startsWith('/api/razorpay/webhook')) (req as unknown as { rawBody: Buffer }).rawBody = Buffer.from(buf);
+      },
+    })
+  );
   app.use('/api', apiLimiter, sameOriginWrites);
   app.get('/api/health', (_req, res) => res.json({ success: true }));
-  app.use('/api', catalogRouter, authRouter, accountRouter, membershipsRouter, bookingsRouter, workerRouter, adminRouter);
+  app.use('/api', catalogRouter, authRouter, accountRouter, membershipsRouter, bookingsRouter, workerRouter, adminRouter, adminManageRouter, webhookRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'Not found')));
 
   // Serve the built React app (same origin as the API, which keeps cookie auth simple).

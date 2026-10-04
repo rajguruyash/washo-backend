@@ -58,7 +58,7 @@ accountRouter.get(
   '/addresses',
   requireRole('customer'),
   asyncHandler(async (req, res) => {
-    const addresses = await req.db(async (c) => (await c.query(`SELECT * FROM public.customer_addresses ORDER BY is_default DESC, created_at`)).rows);
+    const addresses = await req.db(async (c) => (await c.query(`SELECT * FROM public.customer_addresses a WHERE (to_jsonb(a) ->> 'archived_at') IS NULL ORDER BY is_default DESC, created_at`)).rows);
     res.json({ success: true, addresses });
   })
 );
@@ -69,7 +69,7 @@ accountRouter.post(
   asyncHandler(async (req, res) => {
     const a = parse(addressSchema, req.body);
     const address = await req.db(async (c) => {
-      const first = (await c.query('SELECT 1 FROM public.customer_addresses LIMIT 1')).rowCount === 0;
+      const first = (await c.query("SELECT 1 FROM public.customer_addresses a WHERE (to_jsonb(a) ->> 'archived_at') IS NULL LIMIT 1")).rowCount === 0;
       const makeDefault = a.is_default || first;
       if (makeDefault) await c.query('UPDATE public.customer_addresses SET is_default = false WHERE is_default');
       const { rows } = await c.query(

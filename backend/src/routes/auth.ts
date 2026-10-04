@@ -180,6 +180,7 @@ authRouter.get(
       profile = await profileFor(claims, { fresh: true });
     } catch (err) {
       await gotrue.logout(session.access_token);
+      if (err instanceof HttpError && err.code === 'account_archived') return back('archived');
       console.error('Google sign-in: signed in at Supabase but the profile could not be loaded:', (err as Error).message);
       return back('google_profile');
     }

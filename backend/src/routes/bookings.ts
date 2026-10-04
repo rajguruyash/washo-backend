@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { config } from '../config';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
-import { openOrder, verifyAndSettle } from '../razorpay';
+import { openOrder, reconcileOrder, verifyAndSettle } from '../razorpay';
 import { photoStorage } from '../supabase';
 
 export const bookingsRouter = Router();
@@ -223,6 +223,38 @@ bookingsRouter.post(
       .safeParse(req.body);
     if (!body.success) throw new HttpError(400, 'missing_fields', 'Missing payment details.');
     res.json({ success: true, result: await verifyAndSettle(req.session!.profile, body.data) });
+  })
+);
+
+// "Did my payment go through?" Razorpay is asked about this customer's checkouts that never reported back (they paid in a UPI app and
+// the browser lost the thread, the tab was cleared, the signal dropped) and any that were paid are recorded now. Safe to call often:
+// a payment that is already recorded is simply "already settled", and nothing is asked of Razorpay when nothing is waiting.
+bookingsRouter.post(
+  '/payments/reconcile',
+  requireRole('customer'),
+  asyncHandler(async (req, res) => {
+    const { payment_id } = parse(z.object({ payment_id: z.string().uuid().optional() }), req.body);
+    if (!config.razorpay.configured) return res.json({ success: true, results: [] });
+    const waiting = await req.db(async (c) =>
+      (
+        await c.query(
+          `SELECT id, provider_order_id FROM public.payments
+            WHERE status = 'pending' AND provider_order_id IS NOT NULL AND created_at > now() - interval '3 days' AND ($1::uuid IS NULL OR id = $1)
+            ORDER BY created_at DESC LIMIT 5`,
+          [payment_id ?? null]
+        )
+      ).rows as { id: string; provider_order_id: string }[]
+    );
+    const results = [];
+    for (const w of waiting) {
+      try {
+        const r = await reconcileOrder(w.provider_order_id, req.session!.profile.id, 'reconcile');
+        if (r) results.push(r);
+      } catch (err) {
+        console.warn('Re-checking a payment with Razorpay failed:', (err as Error).message);
+      }
+    }
+    res.json({ success: true, results });
   })
 );
 

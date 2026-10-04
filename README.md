@@ -16,9 +16,9 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
 - **Specialist** (`/worker`, email + password): Today / In progress / Upcoming / Completed / Cancelled-moved queues, only the
   washes assigned to them; call customer → customer confirmed or call not picked up (wash stays scheduled) → start → before photos
   → after photos → complete; issues and notes.
-- **Admin** (`/admin`, email + password, role from `profiles.role`): requests (quote with a labelled adjustment, or reject),
-  washes (assign, reschedule, cancel, history, photos), memberships (regular specialist), customers and specialists, and payments
-  or refunds that need a human.
+- **Admin** (`/admin`, email + password, role from `profiles.role`): washes (book one for a customer, edit, assign, reschedule, cancel, history, photos),
+  memberships (regular specialist), customers and specialists (add, edit, archive), services, prices and discounts, and payments or refunds that need a human.
+  See "Admin: create, edit, archive" below.
 - No credit system anywhere.
 
 ## Run it locally (no Supabase project needed)
@@ -52,6 +52,15 @@ The website server does the Razorpay work; the database decides the amount and s
 Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in Render's environment. Not configured: payment routes answer 503 `payments_unavailable`.
 The Supabase edge functions in `supabase/functions` are not used by the website.
 
+### When the browser never reports back (Google Pay, tab cleared, signal lost)
+
+A customer can pay in a UPI app and come back to a window that never heard about it. Razorpay then has the money and WASHO has no booking. Four things close that gap, and all of them settle through the same idempotent database function, so a payment is never recorded twice:
+
+1. **The app asks Razorpay.** When a payment window closes ("cancelled"), the server checks the order with Razorpay before the customer is told it failed. And when a customer opens the app, `POST /api/payments/reconcile` re-checks their checkouts from the last 3 days that never confirmed (at most every 10 minutes, and only if one is waiting). A found payment is recorded with a "We found your payment" message.
+2. **Razorpay's webhook.** `POST /api/razorpay/webhook` records `payment.captured` / `order.paid` by itself, with no browser involved. Set it up once: Razorpay dashboard → Settings → Webhooks → Add → URL `https://washo.online/api/razorpay/webhook`, events **payment.captured** and **order.paid**, a secret of your choosing; then put the same secret in Render as `RAZORPAY_WEBHOOK_SECRET`. The body is checked against its signature; a bad signature is refused. If Razorpay or the database is unreachable the webhook answers 5xx, so Razorpay delivers it again.
+3. **Admin: Needs attention → Started but not confirmed.** Lists checkouts that were opened and never confirmed; **Check with Razorpay** records one that was paid.
+4. **Admin: Washes → Book a wash → Paid online.** For anything that still cannot be matched: book the wash for the customer and paste the Razorpay payment id (`pay_…`) from the dashboard. The server asks Razorpay: the payment must be captured, for exactly the rate-card price, and not used before. A cancellation can then be refunded through Razorpay like any other online payment.
+
 ### Cancelling and refunds
 
 A customer can cancel a single wash that has not started. If it was paid, the database records a **refund request for the full amount** (no cutoff, no deduction).
@@ -63,6 +72,22 @@ Nothing is refunded until an **admin approves it** (Admin → Needs attention �
 
 *Paid it by hand* is still there for a refund done in the Razorpay dashboard (it needs the Razorpay refund id). Membership washes cannot be cancelled by customers; they reschedule.
 There is no Razorpay webhook: refund status is whatever Razorpay answered when it was created.
+
+## Admin: create, edit, archive
+
+The Admin page manages the working data. **Nothing is ever deleted: "delete" means archive** (hidden from the working lists, restorable, history always kept).
+
+| Area | Create | Edit | Archive / restore |
+|---|---|---|---|
+| **Specialists** | email + password login | name, phone, set a new password | archived: signed out, locked at Supabase, upcoming washes and memberships return to the pool (not while a wash is in progress) |
+| **Customers** | registered by phone (they confirm the number with a code when they first sign in) | name, email (never the phone: it is their sign-in) | refused while they have scheduled washes or an active membership; signed out and locked at Supabase |
+| **Vehicles / addresses** | for any customer | all fields (a vehicle with wash history keeps its type) | archived; refused while a scheduled wash uses it |
+| **Washes** | booked for a customer: *paid to WASHO in cash* (recorded as a paid offline payment at the rate-card price) or *complimentary* | address, parking spot, note; assign, reschedule | cancel (a paid one raises a refund request) |
+| **Services and prices** | single-wash services | details; **prices are versioned** (the old price is closed, never overwritten) | retire / restore (not the services memberships are built from) |
+| **Discounts and rules** | add a discount (replaces the old one, which is kept) | percentages, the discount cap, lead times | remove a discount |
+
+Every rule is enforced in the database (migration `20261004000013`), every change writes an audit event, and an archived person is also refused by the website itself, so an open session ends at once.
+The Auth admin API (create a customer, lock a login, set a password) needs `SUPABASE_SERVICE_ROLE_KEY` on the server, as photos already do.
 
 ## Sign-in
 
@@ -85,7 +110,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0012` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0013` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

@@ -67,3 +67,22 @@ export async function payWithRazorpay(o: {
     rzp.open();
   });
 }
+
+/**
+ * "Did that payment actually go through?" The customer may have paid in their UPI app and come back to a window that never heard
+ * about it. This asks the server to check with Razorpay (twice, a couple of seconds apart, since UPI can take a moment to settle)
+ * and returns the settled result, or null when nothing was paid.
+ */
+export async function recoverPayment(paymentId: string, tries = 2): Promise<VerifyResult | null> {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await post<{ results: VerifyResult[] }>('/payments/reconcile', { payment_id: paymentId });
+      const hit = r.results.find((x) => ['fulfilled', 'already_settled', 'unfulfilled'].includes(x.status));
+      if (hit) return hit;
+    } catch {
+      /* try once more */
+    }
+    if (i < tries - 1) await new Promise((resolve) => setTimeout(resolve, 2500));
+  }
+  return null;
+}

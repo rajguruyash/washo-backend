@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
-import { refundPayment } from '../razorpay';
+import { reconcileOrder, refundPayment } from '../razorpay';
 import { photoStorage } from '../supabase';
 
 export const adminRouter = Router();
@@ -70,7 +70,7 @@ adminRouter.post(
 // ───────────────────────── bookings ─────────────────────────
 const ADMIN_BOOKING_SQL = `
   SELECT b.id, b.reference_code, b.status::text AS status, b.booking_type::text AS booking_type, b.scheduled_date, b.time_slot::text AS time_slot,
-         b.membership_id, b.price_cents, b.customer_confirmed_at, b.parking_location, b.cancel_reason,
+         b.membership_id, b.price_cents, b.customer_confirmed_at, b.parking_location, b.cancel_reason, b.notes, COALESCE(b.address_id, v.address_id) AS address_id, b.source,
          s.name AS service_name, s.wash_kind,
          v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number, v.color AS vehicle_color,
          p.id AS customer_id, p.full_name AS customer_name, p.phone AS customer_phone,
@@ -206,23 +206,6 @@ adminRouter.post(
 );
 
 // ───────────────────────── specialists, and things that need a human ─────────────────────────
-adminRouter.get(
-  '/admin/workers',
-  asyncHandler(async (req, res) => {
-    const workers = await req.db(async (c) =>
-      (
-        await c.query(`
-          SELECT p.id, p.full_name, p.phone,
-                 (SELECT count(*)::int FROM public.worker_assignments wa JOIN public.bookings b ON b.id = wa.booking_id
-                   WHERE wa.worker_profile_id = p.id AND wa.is_active AND b.status NOT IN ('completed','cancelled')
-                     AND b.scheduled_date BETWEEN (now() AT TIME ZONE 'Asia/Kolkata')::date AND (now() AT TIME ZONE 'Asia/Kolkata')::date + 7) AS washes_next_7_days
-            FROM public.profiles p WHERE p.role = 'worker' ORDER BY p.full_name NULLS LAST`)
-      ).rows
-    );
-    res.json({ success: true, workers });
-  })
-);
-
 // Money that arrived but could not be turned into a booking/membership, and the refund requests that follow.
 // An admin approves a refund and the server asks Razorpay to pay it back (below); nothing is refunded without that approval.
 // failure_reason arrives with migration 12; reading it as JSON keeps this list working on a database that does not have it yet.
@@ -235,6 +218,16 @@ adminRouter.get(
                          FROM public.payments pay JOIN public.profiles p ON p.id = pay.customer_profile_id
                         WHERE pay.fulfilment_status = 'unfulfilled' ORDER BY pay.updated_at DESC LIMIT 50`)
       ).rows,
+      // Checkouts that were started and never confirmed: either abandoned, or paid while the customer's browser lost the thread.
+      pending: (
+        await c.query(`SELECT pay.id, pay.amount_cents, pay.payment_kind, pay.created_at, pay.provider_order_id,
+                              pay.intent ->> 'scheduled_date' AS scheduled_date, pay.intent ->> 'time_slot' AS time_slot,
+                              p.full_name AS customer_name, p.phone AS customer_phone
+                         FROM public.payments pay JOIN public.profiles p ON p.id = pay.customer_profile_id
+                        WHERE pay.status = 'pending' AND pay.provider_order_id IS NOT NULL
+                          AND pay.created_at < now() - interval '3 minutes' AND pay.created_at > now() - interval '7 days'
+                        ORDER BY pay.created_at DESC LIMIT 50`)
+      ).rows,
       refunds: (
         await c.query(`SELECT r.id, r.amount_cents, r.reason, r.status::text AS status, to_jsonb(r) ->> 'failure_reason' AS failure_reason, r.created_at, p.full_name AS customer_name, p.phone AS customer_phone
                          FROM public.refunds r JOIN public.profiles p ON p.id = r.customer_profile_id
@@ -242,6 +235,20 @@ adminRouter.get(
       ).rows,
     }));
     res.json({ success: true, ...out });
+  })
+);
+
+// Ask Razorpay whether a started checkout was paid, and record it if so (the same settlement the customer's browser would have triggered).
+adminRouter.post(
+  '/admin/payments/:id/reconcile',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const pay = await req.db(async (c) => (await c.query('SELECT id, provider_order_id, customer_profile_id, status::text AS status FROM public.payments WHERE id = $1', [id])).rows[0]);
+    if (!pay) throw new HttpError(404, 'not_found', 'Payment not found');
+    if (pay.status !== 'pending') return res.json({ success: true, status: 'already_recorded' });
+    if (!pay.provider_order_id) throw new HttpError(422, 'no_order', 'This checkout never reached Razorpay, so there is nothing to check.');
+    const result = await reconcileOrder(pay.provider_order_id, pay.customer_profile_id, 'admin');
+    res.json({ success: true, status: result?.status ?? 'not_paid', booking_id: result?.booking_id ?? null, membership_id: result?.membership_id ?? null });
   })
 );
 
@@ -274,29 +281,8 @@ adminRouter.post(
   })
 );
 
-// ───────────────────────── customers and specialists ─────────────────────────
-adminRouter.get(
-  '/admin/customers',
-  asyncHandler(async (req, res) => {
-    const q = parse(z.string().trim().max(60).optional().catch(undefined), req.query.q);
-    const customers = await req.db(async (c) =>
-      (
-        await c.query(
-          `SELECT p.id, p.full_name, p.phone, p.email, p.signup_source, p.created_at,
-                  (SELECT count(*)::int FROM public.vehicles v WHERE v.customer_profile_id = p.id AND v.is_active) AS vehicles,
-                  (SELECT count(*)::int FROM public.memberships m WHERE m.customer_profile_id = p.id AND m.status = 'active') AS active_memberships,
-                  (SELECT count(*)::int FROM public.bookings b WHERE b.customer_profile_id = p.id) AS washes
-             FROM public.profiles p
-            WHERE p.role = 'customer' AND ($1::text IS NULL OR p.full_name ILIKE '%' || $1 || '%' OR p.phone ILIKE '%' || $1 || '%')
-            ORDER BY p.created_at DESC LIMIT 100`,
-          [q || null]
-        )
-      ).rows
-    );
-    res.json({ success: true, customers });
-  })
-);
-
+// ───────────────────────── specialists ─────────────────────────
+// The lists of customers and specialists, and everything that edits or archives them, are in adminManage.ts.
 // Creates the email + password login for a new specialist (the database function creates the Auth user and the profile).
 adminRouter.post(
   '/admin/workers',

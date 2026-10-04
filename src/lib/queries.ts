@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
 import type {
-  Address, AdminBooking, AdminEvent, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  Address, AdminAddress, AdminBooking, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -104,7 +104,7 @@ export function useRefreshAll() {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin'].map((k) =>
+      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles'].map((k) =>
         qc.invalidateQueries({ queryKey: [k] })
       )
     );
@@ -297,13 +297,23 @@ export const useAdminBooking = (id: string | undefined) =>
   });
 
 export const useAdminMemberships = () => useQuery({ queryKey: keys.admin('memberships'), queryFn: async () => (await get<{ memberships: AdminMembership[] }>('/admin/memberships')).memberships });
-export const useAdminWorkers = () => useQuery({ queryKey: keys.admin('workers'), queryFn: async () => (await get<{ workers: Specialist[] }>('/admin/workers')).workers });
+export const useAdminWorkers = (status: 'active' | 'archived' | 'all' = 'active') =>
+  useQuery({ queryKey: keys.admin('workers', status), queryFn: async () => (await get<{ workers: Specialist[] }>(`/admin/workers?status=${status}`)).workers });
+export const useAdminCustomers = (q: string, status: 'active' | 'archived' | 'all') =>
+  useQuery({ queryKey: keys.admin('customers', q, status), queryFn: async () => (await get<{ customers: AdminCustomerRow[] }>(`/admin/customers?q=${encodeURIComponent(q)}&status=${status}`)).customers });
+export const useAdminCustomer = (id: string | undefined) =>
+  useQuery({ queryKey: keys.admin('customer', id ?? ''), queryFn: () => get<AdminCustomerDetail>(`/admin/customers/${id}`), enabled: Boolean(id) });
+export const useAdminServices = () => useQuery({ queryKey: keys.admin('services'), queryFn: async () => (await get<{ services: AdminService[] }>('/admin/services')).services });
+export const useAdminPricing = () => useQuery({ queryKey: keys.admin('pricing'), queryFn: () => get<AdminPricing>('/admin/pricing') });
+export type { AdminAddress };
 export const useAdminAttention = () => useQuery({ queryKey: keys.admin('attention'), queryFn: () => get<{ success: boolean } & Attention>('/admin/attention') });
 
+/** Any admin write. POST by default; PUT for edits. Refreshes every admin view (and the public catalogue, in case a price or service changed). */
 export const useAdminAction = () => {
   const refresh = useRefreshAll();
   return useMutation({
-    mutationFn: ({ path, body }: { path: string; body?: Record<string, unknown> }) => post(`/admin/${path}`, body ?? {}),
+    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: Record<string, unknown>; method?: 'POST' | 'PUT' }) =>
+      method === 'PUT' ? put<Record<string, any>>(`/admin/${path}`, body ?? {}) : post<Record<string, any>>(`/admin/${path}`, body ?? {}),
     onSuccess: () => refresh(),
   });
 };

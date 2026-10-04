@@ -340,6 +340,9 @@ export interface AdminBooking {
   customer_confirmed_at: string | null;
   parking_location: string | null;
   cancel_reason: string | null;
+  notes?: string | null;
+  address_id?: string | null;
+  source?: string;
   service_name: string;
   wash_kind: WashKind | null;
   vehicle_type: VehicleType;
@@ -393,9 +396,92 @@ export interface Specialist {
   full_name: string | null;
   phone: string | null;
   washes_next_7_days: number;
+  archived?: boolean;
+  memberships?: number;
+}
+
+// ───────── admin: people, services, prices ─────────
+export interface AdminCustomerRow {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  signup_source: string | null;
+  created_at: string;
+  archived: boolean;
+  vehicles: number;
+  active_memberships: number;
+  washes: number;
+}
+
+export interface AdminVehicle {
+  id: string;
+  vehicle_type: VehicleType;
+  make: string | null;
+  model: string;
+  registration_number: string;
+  color: string | null;
+  address_id: string | null;
+  parking_location: string | null;
+  is_active: boolean;
+}
+
+export interface AdminAddress {
+  id: string;
+  label: string;
+  society_name: string;
+  building_block: string;
+  flat_number: string;
+  parking_location: string;
+  area_locality: string;
+  city: string;
+  pincode: string;
+  is_default: boolean;
+  archived: boolean;
+}
+
+export interface AdminCustomerDetail {
+  customer: Omit<AdminCustomerRow, 'vehicles' | 'active_memberships' | 'washes'>;
+  vehicles: AdminVehicle[];
+  addresses: AdminAddress[];
+  washes: { id: string; reference_code: string; scheduled_date: string; time_slot: SlotId; status: BookingStatus; price_cents: number | null; service_name: string }[];
+}
+
+export interface AdminService {
+  id: string;
+  code: string;
+  name: string;
+  vehicle_type: VehicleType;
+  wash_kind: WashKind | null;
+  description: string | null;
+  tagline: string | null;
+  duration_minutes: number | null;
+  includes: string[];
+  sort_order: number;
+  is_active: boolean;
+  used_by_memberships: boolean;
+  prices: { vehicle_type: VehicleType; price_cents: number }[];
+}
+
+export interface AdminPricing {
+  discounts: { kind: 'frequency' | 'duration'; key: number; discount_bp: number; label: string }[];
+  settings: { key: string; value: number; description: string }[];
+}
+
+export interface PendingPayment {
+  id: string;
+  amount_cents: number;
+  payment_kind: string;
+  created_at: string;
+  provider_order_id: string | null;
+  scheduled_date: string | null;
+  time_slot: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
 }
 
 export interface Attention {
+  pending: PendingPayment[];
   unfulfilled: { id: string; amount_cents: number; payment_kind: string; provider_payment_id: string | null; updated_at: string; customer_name: string | null; customer_phone: string | null }[];
   refunds: { id: string; amount_cents: number; reason: string; status: string; failure_reason: string | null; created_at: string; customer_name: string | null; customer_phone: string | null }[];
 }

@@ -1,5 +1,5 @@
 import { ArrowLeft, CheckCircle2, Clock, Hourglass, XCircle } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
@@ -38,14 +38,12 @@ export default function RequestDetail() {
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !r) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
 
-  const paidMembership = useRef<string | null>(null);
+  // Once the payment is verified this request becomes an active membership, which removes the price card (and the slider with it),
+  // so go to the membership straight away instead of waiting for the slider to finish its "Paid" animation.
   const startPayment = async () => {
     const result = await pay(() => accept.mutateAsync(r.id), `WASHO membership ${r.reference_code}`);
     if (!result?.membership_id) throw new Error('not paid'); // lets the slider spring back; usePay has already said why
-    paidMembership.current = result.membership_id;
-  };
-  const afterPaid = () => {
-    setTimeout(() => navigate(`/app/membership/${paidMembership.current}?new=1`, { replace: true }), 1000);
+    navigate(`/app/membership/${result.membership_id}?new=1`, { replace: true });
   };
 
   const doDecline = async () => {
@@ -110,7 +108,7 @@ export default function RequestDetail() {
             </div>
             <QuoteBreakdownView q={r.quoted_breakdown} />
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <SlideToPay label={r.status === 'accepted' ? 'Slide to complete payment' : `Slide to accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`} disabled={paying || accept.isPending} onConfirm={startPayment} onDone={afterPaid} />
+              <SlideToPay label={r.status === 'accepted' ? 'Slide to complete payment' : `Slide to accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`} disabled={paying || accept.isPending} onConfirm={startPayment} />
               {r.status === 'quoted' && <Button size="lg" variant="glass" onClick={() => setConfirmDecline(true)}>Decline</Button>}
             </div>
             <p className="mt-3 text-center text-xs text-fog">Your membership and washes are created only after your payment is verified.</p>

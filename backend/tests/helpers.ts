@@ -25,6 +25,7 @@ export async function boot() {
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE.serviceKey;
   process.env.RAZORPAY_KEY_ID = FAKE.razorpayKeyId;
   process.env.RAZORPAY_KEY_SECRET = FAKE.razorpayKeySecret;
+  process.env.RAZORPAY_WEBHOOK_SECRET = FAKE.razorpayWebhookSecret;
   process.env.RAZORPAY_API_BASE = fake.razorpayBase;
   process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   const { createApp } = await import('../src/app');

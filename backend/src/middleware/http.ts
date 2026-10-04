@@ -91,7 +91,14 @@ export const requireSession = asyncHandler(async (req, res, next) => {
   }
 
   const claims: Claims = { sub: verified.sub, phone: verified.phone, email: verified.email };
-  const profile = await profileFor(claims);
+  let profile: Profile;
+  try {
+    profile = await profileFor(claims);
+  } catch (err) {
+    // An archived account is signed out, not left holding a session that can never work.
+    if (err instanceof HttpError && err.code === 'account_archived') clearSessionCookies(res);
+    throw err;
+  }
 
   req.session = { accessToken: token, claims, profile };
   req.db = (fn) => withUser(claims, fn);
