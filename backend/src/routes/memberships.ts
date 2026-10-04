@@ -16,7 +16,7 @@ const requestSchema = z.object({
   weekly_pattern: z
     .array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) }))
     .min(1, 'Choose your washes for the week.')
-    .max(3),
+    .max(7),
   duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
   time_slot: z.enum(['morning', 'afternoon', 'night']),
   start_date: date,

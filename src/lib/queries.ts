@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
 import type {
   Address, AdminBooking, AdminEvent, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, Catalog, Membership,
-  MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
+  MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
 export const keys = {
@@ -28,6 +28,28 @@ export const fetchMe = async () => (await get<{ user: User }>('/me')).user;
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: fetchMe, retry: false, staleTime: 60_000 });
 
 export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () => get<Catalog>('/catalog'), staleTime: 5 * 60_000 });
+
+export interface EstimateInput {
+  vehicle_type: VehicleType;
+  weekly_pattern: PatternItem[];
+  duration_months: number;
+}
+
+/** Live price estimate from the rate card (the database runs the calculator). Null input = nothing to price yet. */
+export const useEstimate = (input: EstimateInput | null) =>
+  useQuery({
+    queryKey: ['estimate', input],
+    queryFn: async () => (await post<{ estimate: PriceEstimate }>('/membership-estimate', input)).estimate,
+    enabled: Boolean(input),
+    staleTime: 10 * 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
+
+/** The mix a plan starts from before the customer chooses: bikes all one wash, otherwise Body, Deep, Body, Deep... */
+export function defaultPattern(vehicleType: VehicleType, perWeek: number): PatternItem[] {
+  return Array.from({ length: perWeek }, (_, i) => ({ weekday: i, kind: vehicleType === 'bike' || i % 2 === 0 ? 'body' : 'deep' }));
+}
 
 // ───────── customer reads ─────────
 export const useAddresses = () => useQuery({ queryKey: keys.addresses, queryFn: async () => (await get<{ addresses: Address[] }>('/addresses')).addresses });

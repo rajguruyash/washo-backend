@@ -17,6 +17,31 @@ beforeAll(async () => {
 const request = (c: Client, o: Record<string, unknown>) =>
   c.post('/api/membership-requests', { weekly_pattern: PATTERN_3, duration_months: 1, time_slot: 'morning', start_date: istDate(4), ...o });
 
+describe('estimate and up to 7 washes a week', () => {
+  const days = (kinds: string[]) => kinds.map((kind, i) => ({ weekday: i, kind }));
+  it('anyone can get an itemised estimate from the base per-wash prices', async () => {
+    const anon = new Client();
+    const bike = expectOk(await anon.post('/api/membership-estimate', { vehicle_type: 'bike', weekly_pattern: days(['body', 'body']), duration_months: 1 })).body.estimate;
+    expect(bike).toMatchObject({ washes_total: 8, subtotal_cents: 52000, final_cents: 52000 }); // 8 x 65, no discount at 2 a week
+    const car5 = expectOk(await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'deep', 'body', 'deep', 'body']), duration_months: 1 })).body.estimate;
+    expect(car5.lines.map((l: any) => `${l.name}:${l.quantity}x${l.unit_cents}`).sort()).toEqual(['Car Body Wash:12x15000', 'Car Deep Cleaning:8x22000']);
+    expect(car5.frequency_discount.bp).toBe(1000);
+    expect(car5.final_cents).toBe(Math.round((12 * 15000 + 8 * 22000) * 0.9));
+    const bad = await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'body', 'body']), duration_months: 1 });
+    expect(bad.status).toBe(422);
+    expect(bad.body.message).toMatch(/mixes body washes and deep cleanings/);
+    expect((await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'deep']), duration_months: 2 })).status).toBe(400);
+  });
+
+  it('a customer can request, and WASHO can quote, 5 washes a week', async () => {
+    const { c, vehicle, addr } = await customerWithVehicle('car');
+    const r = expectOk(await c.post('/api/membership-requests', { vehicle_id: vehicle.id, address_id: addr.id, weekly_pattern: days(['body', 'deep', 'body', 'deep', 'body']), duration_months: 1, time_slot: 'morning', start_date: istDate(4) }));
+    const mine = expectOk(await c.get(`/api/membership-requests/${r.body.id}`)).body.request;
+    expect(mine).toMatchObject({ frequency_per_week: 5, quoted_amount_cents: null }); // the confirmed price is still WASHO's to set
+    expect((await c.post('/api/membership-requests', { vehicle_id: vehicle.id, address_id: addr.id, weekly_pattern: days(['body', 'deep', 'body', 'deep', 'body', 'deep', 'body', 'deep']), duration_months: 1, time_slot: 'morning', start_date: istDate(4) })).status).toBe(400);
+  });
+});
+
 describe('membership request', () => {
   it('the customer sees NO price or estimate until WASHO has approved one', async () => {
     const { c, vehicle, addr } = await customerWithVehicle('car');
@@ -37,7 +62,7 @@ describe('membership request', () => {
     expect(early.body.message).toMatch(/not waiting for your approval/);
   });
 
-  it('enforces 1 / 2 / 3 washes a week and the Body + Deep rules in the database', async () => {
+  it('enforces 1 to 7 washes a week and the Body + Deep rules in the database', async () => {
     const car = await customerWithVehicle('car');
     const mk = async (pattern: unknown[], vehicleId = car.vehicle.id) => request(car.c, { vehicle_id: vehicleId, address_id: car.addr.id, weekly_pattern: pattern });
 
@@ -45,7 +70,7 @@ describe('membership request', () => {
     expect((await mk([{ weekday: 1, kind: 'deep' }, { weekday: 4, kind: 'deep' }])).body.message).toMatch(/1 body wash \+ 1 deep cleaning/);
     expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }, { weekday: 5, kind: 'body' }])).body.message).toMatch(/mixes body washes and deep cleanings/);
     expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }])).body.message).toMatch(/different day/);
-    expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 2, kind: 'body' }, { weekday: 3, kind: 'deep' }, { weekday: 4, kind: 'deep' }])).status).toBe(400); // 4 a week does not exist
+    expect((await mk([0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ weekday: d % 7, kind: d % 2 ? 'deep' : 'body' })))).status).toBe(400); // 8 a week does not exist
     expect((await mk([])).status).toBe(400);
     expect((await request(car.c, { vehicle_id: car.vehicle.id, address_id: car.addr.id, duration_months: 2 })).status).toBe(400);
     expect((await request(car.c, { vehicle_id: car.vehicle.id, address_id: car.addr.id, start_date: istDate(0) })).body.message).toMatch(/can start from/);

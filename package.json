@@ -20,7 +20,8 @@
     "test:api": "./supabase/tests/run.sh api",
     "test:all": "npm run typecheck && npm test && npm run db:test && npm run db:test:full && npm run test:api",
     "backend:dev": "TS_NODE_PROJECT=backend/tsconfig.json node --watch -r ts-node/register/transpile-only backend/src/server.ts",
-    "dev:stack": "./supabase/tests/run.sh dev"
+    "dev:stack": "./supabase/tests/run.sh dev",
+    "db:bundle": "./supabase/bundles/build.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",

@@ -11,7 +11,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAcceptQuote, useDeclineQuote, useRequest } from '../../lib/queries';
+import { useAcceptQuote, useDeclineQuote, useEstimate, useRequest } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { usePay } from '../../lib/usePay';
 
@@ -31,6 +31,8 @@ export default function RequestDetail() {
   const decline = useDeclineQuote();
   const { pay, paying } = usePay();
   const [confirmDecline, setConfirmDecline] = useState(false);
+  // While WASHO is still reviewing, show the rate-card estimate so the customer knows roughly what to expect.
+  const estimate = useEstimate(r?.status === 'submitted' ? { vehicle_type: r.vehicle_type, weekly_pattern: r.weekly_pattern, duration_months: r.duration_months } : null);
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !r) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
@@ -83,7 +85,14 @@ export default function RequestDetail() {
           <div className="glass p-6 text-center">
             <Hourglass className="mx-auto h-8 w-8 text-washo-300" />
             <h2 className="mt-3 text-xl font-bold">WASHO is reviewing your request</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-fog">You'll see your price here as soon as it's ready. Nothing is charged until you accept it.</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-fog">You'll see your confirmed price here as soon as it's ready. Nothing is charged until you accept it.</p>
+            {estimate.data && (
+              <div className="mx-auto mt-5 max-w-sm rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left">
+                <div className="flex items-center justify-between"><p className="eyebrow">Estimate</p><Badge tone="amber">Not final</Badge></div>
+                <p className="mt-1 font-display text-3xl font-extrabold tabular-nums">{rupees(estimate.data.final_cents)}</p>
+                <p className="text-xs text-fog">From the rate card, with every discount included. WASHO confirms the final price.</p>
+              </div>
+            )}
           </div>
         )}
 

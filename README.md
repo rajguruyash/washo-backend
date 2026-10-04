@@ -9,7 +9,7 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
 
 ## What the website does
 
-- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1/2/3 washes a week → Body/Deep
+- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1 to 7 washes a week (a toggle, with a live price estimate) → Body/Deep
   combination and days → 1/3/6/12 months → start date and time slot → request. WASHO reviews it and sets the price; the customer
   sees a fully itemised quote (every discount is its own line), accepts, pays through Razorpay, and only after the payment is
   **verified** does the membership activate and every wash get scheduled. Also: dashboard, membership detail with rescheduling
@@ -46,9 +46,13 @@ Apply `supabase/migrations/*` (and `supabase/cutover/*` on a **branch only**; se
 
 Sign-in itself needs only the original schema, and works on a database that has none of the new migrations (it reads
 `profiles` tolerantly and takes email from the Supabase token until `profiles.email` exists). Everything else in the app
-needs the migrations. Apply them **in order, on a branch or backup first**; they are additive and re-runnable:
+needs the migrations. They are additive and re-runnable.
 
-1. `supabase/migrations/20261004000001` … `…0009` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+**Easiest way:** `npm run db:bundle` writes `supabase/bundles/safe-migrations.sql`: all the safe migrations in order, in ONE transaction (if anything
+fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
+the Supabase SQL editor, then run the preflight again: every line should read `true`.
+
+1. The safe migrations `supabase/migrations/20261004000001` … `…0010` (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

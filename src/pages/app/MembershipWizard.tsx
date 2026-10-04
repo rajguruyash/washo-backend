@@ -6,20 +6,25 @@ import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
 import { Plate } from '../../components/brand/Plate';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
+import { QuoteBreakdownView } from '../../components/Quote';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { TextArea } from '../../components/ui/Field';
 import { useToast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
-import { addDays, percent, prettyDate, todayIST, WEEKDAYS } from '../../lib/format';
+import { addDays, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useCatalog, useCreateRequest, useVehicles } from '../../lib/queries';
+import { defaultPattern, useAddresses, useCatalog, useCreateRequest, useEstimate, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
-import type { SlotId, Vehicle, WashKind } from '../../lib/types';
+import type { SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
 const STEPS = ['Vehicle', 'Washes a week', 'Days & washes', 'Length', 'Start & time', 'Review'] as const;
 const MONTHS = [1, 3, 6, 12] as const;
+const PER_WEEK = [1, 2, 3, 4, 5, 6, 7] as const;
+
+const perWeekHint = (n: number, bike: boolean) =>
+  bike ? `${n} bike wash${n > 1 ? 'es' : ''} a week` : n === 1 ? 'One wash type: Body or Deep' : n === 2 ? '1 Body wash + 1 Deep cleaning' : `A mix of Body washes and Deep cleanings, ${n} a week`;
 const KIND_LABEL: Record<WashKind, string> = { body: 'Body wash', deep: 'Deep cleaning' };
 
 /** The membership composition rules, for guidance only. The database re-checks every one of them. */
@@ -28,8 +33,15 @@ function compositionError(perWeek: number, kinds: WashKind[], bike: boolean): st
   const body = kinds.filter((k) => k === 'body').length;
   const deep = kinds.length - body;
   if (perWeek === 2 && !(body === 1 && deep === 1)) return '2 washes a week is 1 body wash + 1 deep cleaning.';
-  if (perWeek === 3 && (body < 1 || deep < 1)) return '3 washes a week mixes body washes and deep cleanings.';
+  if (perWeek >= 3 && (body < 1 || deep < 1)) return `${perWeek} washes a week mixes body washes and deep cleanings.`;
   return null;
+}
+
+/** The total for one length option, e.g. "₹1,800 total · ₹600 / month". */
+function DurationPrice({ vehicleType, pattern, months }: { vehicleType: VehicleType; pattern: { weekday: number; kind: WashKind }[]; months: number }) {
+  const { data } = useEstimate({ vehicle_type: vehicleType, weekly_pattern: pattern, duration_months: months });
+  if (!data) return <p className="mt-2 h-5 text-sm text-fog">…</p>;
+  return <p className="mt-2 text-sm font-semibold tabular-nums">{rupees(data.final_cents)} <span className="font-normal text-fog">total · {rupees(Math.round(data.final_cents / months))} / month</span></p>;
 }
 
 export default function MembershipWizard() {
@@ -43,7 +55,10 @@ export default function MembershipWizard() {
 
   const [step, setStep] = useState(0);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
-  const [perWeek, setPerWeek] = useState<1 | 2 | 3 | null>(null);
+  const [perWeek, setPerWeek] = useState<number | null>(() => {
+    const n = Number(params.get('perWeek'));
+    return Number.isInteger(n) && n >= 1 && n <= 7 ? n : null;
+  });
   const [days, setDays] = useState<number[]>([]);
   const [kindByDay, setKindByDay] = useState<Record<number, WashKind>>({});
   const [months, setMonths] = useState<number | null>(null);
@@ -59,7 +74,8 @@ export default function MembershipWizard() {
   useEffect(() => {
     if (vehicle || !vehicles?.length) return;
     const wanted = params.get('vehicle');
-    const v = vehicles.find((x) => x.id === wanted) ?? (vehicles.length === 1 ? vehicles[0] : null);
+    const wantedType = params.get('type');
+    const v = vehicles.find((x) => x.id === wanted) ?? (wantedType ? vehicles.find((x) => x.vehicle_type === wantedType) : undefined) ?? (vehicles.length === 1 ? vehicles[0] : null);
     if (v) setVehicle(v);
   }, [vehicles, params, vehicle]);
 
@@ -76,13 +92,25 @@ export default function MembershipWizard() {
   const weeks = catalog?.weeks_per_month ?? 4;
   const total = perWeek && months ? perWeek * weeks * months : 0;
 
+  const vtype = vehicle?.vehicle_type;
+  const pattern = sortedDays.map((d) => ({ weekday: d, kind: (bike ? 'body' : kindByDay[d] ?? 'body') as WashKind }));
+  const planReady = Boolean(vtype && perWeek && days.length === perWeek && !comp);
+  // Before the days are chosen, price the default mix so the number toggle already shows what each choice costs per month.
+  const previewPattern = vtype && perWeek ? defaultPattern(vtype, perWeek) : null;
+  const monthly = useEstimate(vtype && planReady ? { vehicle_type: vtype, weekly_pattern: pattern, duration_months: 1 } : vtype && previewPattern ? { vehicle_type: vtype, weekly_pattern: previewPattern, duration_months: 1 } : null);
+  const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, weekly_pattern: pattern, duration_months: months } : null);
+
   const serviceName = (kind: WashKind) => {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
     return catalog?.services.find((s) => s.code === code)?.name ?? KIND_LABEL[kind];
   };
+  const basePrice = (kind: WashKind): number => {
+    const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
+    return catalog?.services.find((x) => x.code === code)?.unit_prices?.find((p) => p.vehicle_type === vehicle?.vehicle_type)?.price_cents ?? 0;
+  };
   const discount = (kind: 'frequency' | 'duration', key: number) => catalog?.discounts.find((d) => d.kind === kind && d.key === key)?.discount_bp ?? 0;
 
-  const choosePerWeek = (n: 1 | 2 | 3) => {
+  const choosePerWeek = (n: number) => {
     setPerWeek(n);
     setDays([]);
     setKindByDay({});
@@ -99,7 +127,7 @@ export default function MembershipWizard() {
     let kind: WashKind = 'body';
     if (!bike) {
       if (perWeek === 2) kind = have.includes('body') ? 'deep' : 'body';
-      else if (perWeek === 3) kind = have.length === 1 ? 'deep' : 'body';
+      else if (perWeek >= 3) kind = have.length % 2 === 1 ? 'deep' : 'body'; // Body, Deep, Body, Deep ...
     }
     setDays([...days, d]);
     setKindByDay({ ...kindByDay, [d]: kind });
@@ -185,22 +213,42 @@ export default function MembershipWizard() {
 
         {step === 1 && (
           <motion.section key="s1" {...slide}>
-            <h1 className="text-3xl font-extrabold">How often should we wash?</h1>
-            <p className="mt-1.5 mb-6 text-fog">Washes a week. You choose the days next.</p>
-            <div className="grid gap-3 sm:grid-cols-3" role="radiogroup" aria-label="Washes a week">
-              {([1, 2, 3] as const).map((n) => {
-                const off = discount('frequency', n);
+            <h1 className="text-3xl font-extrabold">How many washes a week?</h1>
+            <p className="mt-1.5 mb-6 text-fog">Slide the toggle to the number you want. You choose the days next.</p>
+
+            <div role="radiogroup" aria-label="Washes a week" className="grid grid-cols-7 gap-1.5 rounded-3xl border border-white/[0.09] bg-white/[0.03] p-1.5">
+              {PER_WEEK.map((n) => {
                 const active = perWeek === n;
                 return (
-                  <button key={n} type="button" role="radio" aria-checked={active} onClick={() => choosePerWeek(n)} className={cn('relative rounded-3xl border p-5 text-left transition-all', active ? 'border-washo-400/70 bg-washo-500/15 shadow-[0_0_30px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
-                    <span className="font-display text-5xl font-extrabold">{n}</span>
-                    <span className="ml-1.5 text-sm text-fog">/ week</span>
-                    <p className="mt-3 text-sm text-mist">{bike ? `${n} bike wash${n > 1 ? 'es' : ''} a week` : n === 1 ? 'One wash type: Body or Deep' : n === 2 ? '1 Body wash + 1 Deep cleaning' : 'A mix of Body washes and Deep cleanings'}</p>
-                    {off > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(off)} off</Badge>}
+                  <button key={n} type="button" role="radio" aria-checked={active} onClick={() => choosePerWeek(n)} className={cn('relative grid h-16 place-items-center rounded-2xl font-display text-2xl font-extrabold transition-colors sm:h-20 sm:text-3xl', active ? 'text-white' : 'text-fog hover:text-white')}>
+                    {active && <motion.span layoutId="perweek-pill" className="absolute inset-0 rounded-2xl border border-washo-400/60 bg-washo-500/30 shadow-[0_0_30px_-8px_rgb(63_124_255/0.8)]" transition={{ type: 'spring', stiffness: 500, damping: 36 }} />}
+                    <span className="relative">{n}</span>
                   </button>
                 );
               })}
             </div>
+
+            {perWeek ? (
+              <div className="glass mt-5 p-5" aria-live="polite">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-lg font-bold">{perWeek} wash{perWeek > 1 ? 'es' : ''} a week · {perWeek * weeks} a month</p>
+                    <p className="mt-1 text-sm text-fog">{perWeekHint(perWeek, Boolean(bike))}</p>
+                    {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} a week</Badge>}
+                  </div>
+                  <div className="text-right">
+                    <p className="eyebrow">Estimate</p>
+                    <p className="font-display text-3xl font-extrabold tabular-nums">{monthly.data ? rupees(monthly.data.final_cents) : '…'}<span className="ml-1 text-sm font-medium text-fog">/ month</span></p>
+                    <p className="text-xs text-fog">{planReady ? 'for your mix' : 'with a typical mix; changes with your choice'}</p>
+                  </div>
+                </div>
+                <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
+                  Base price per wash: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body ${rupees(basePrice('body'))} · Deep cleaning ${rupees(basePrice('deep'))}`}. WASHO reviews your request and confirms the final price before you pay anything.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-5 text-sm text-fog">Pick a number from 1 to 7.</p>
+            )}
           </motion.section>
         )}
 
@@ -245,6 +293,7 @@ export default function MembershipWizard() {
             </div>
             {days.length === perWeek && comp && <p role="alert" className="mt-4 flex items-start gap-2 text-sm text-warn"><Info className="mt-0.5 h-4 w-4 shrink-0" /> {comp}</p>}
             {days.length < perWeek && <p className="mt-4 text-sm text-fog">{perWeek - days.length} more day{perWeek - days.length > 1 ? 's' : ''} to choose.</p>}
+            {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Estimate for this mix: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
           </motion.section>
         )}
 
@@ -261,6 +310,7 @@ export default function MembershipWizard() {
                     <span className="font-display text-4xl font-extrabold">{m}</span>
                     <span className="ml-1.5 text-sm text-fog">month{m > 1 ? 's' : ''}</span>
                     <p className="mt-2 text-sm text-mist">{perWeek ? perWeek * weeks * m : ''} washes</p>
+                    {vtype && planReady && <DurationPrice vehicleType={vtype} pattern={pattern} months={m} />}
                     {off > 0 ? <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(off)} off</Badge> : <p className="mt-3 text-xs text-fog">Full rate</p>}
                   </button>
                 );
@@ -281,7 +331,7 @@ export default function MembershipWizard() {
         {step === 5 && vehicle && perWeek && months && slot && start && (
           <motion.section key="s5" {...slide}>
             <h1 className="text-3xl font-extrabold">Review your request</h1>
-            <p className="mt-1.5 mb-6 text-fog">WASHO will check it and send you a price.</p>
+            <p className="mt-1.5 mb-6 text-fog">WASHO will check it and confirm your price.</p>
             <div className="glass divide-y divide-white/[0.07]">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="p-5">
@@ -315,7 +365,13 @@ export default function MembershipWizard() {
               </div>
               <div className="p-5"><TextArea label="Anything the crew should know?" optional value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} placeholder="Gate code, call before arriving, water point…" /></div>
             </div>
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> This is a request, not a purchase. WASHO reviews it and sends you the price. You pay only after you accept it.</div>
+            {chosenEstimate.data && (
+              <div className="glass mt-5 p-5">
+                <div className="mb-1 flex items-center justify-between gap-3"><h2 className="font-bold">Estimated price</h2><Badge tone="amber">Estimate</Badge></div>
+                <QuoteBreakdownView q={{ ...chosenEstimate.data, adjustment: { cents: 0, reason: null } }} />
+              </div>
+            )}
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> This is a request, not a purchase. WASHO reviews it and confirms the final price. You pay only after you accept it.</div>
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
           </motion.section>
         )}

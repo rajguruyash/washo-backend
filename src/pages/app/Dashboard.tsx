@@ -62,7 +62,7 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : !open.length ? (
-              <EmptyState title="Start your WASHO membership" text="Choose 1, 2 or 3 washes a week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="Start your WASHO membership" text="Choose 1 to 7 washes a week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             ) : null}
           </section>}
 

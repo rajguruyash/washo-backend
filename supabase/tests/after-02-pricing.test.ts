@@ -52,7 +52,7 @@ describe('WASHO rate card', () => {
       await s.c.query(sql);
       expect((await s.q('select count(*)::int n from public.pricing_rules'))[0].n).toBe(before);
       expect((await s.q('select count(*)::int n from public.membership_service_options'))[0].n).toBe(opts);
-      expect((await s.q('select count(*)::int n from public.membership_discount_rules'))[0].n).toBe(7);
+      expect((await s.q('select count(*)::int n from public.membership_discount_rules'))[0].n).toBe(11); // 3 frequency + 4 duration rules from migration 02, plus 4-7 a week from migration 10
     }));
 
   it('classifies services as body / deep', async () =>
@@ -159,8 +159,8 @@ describe('membership quote: every discount is an explicit line', () => {
 
 describe('weekly pattern validation', () => {
   const cases: [string, string, any, number, RegExp][] = [
-    ['0 washes', 'car', [], 1, /1, 2 or 3 washes/],
-    ['4 washes a week', 'car', [1, 2, 3, 4].map((d) => ({ weekday: d, kind: 'body' })), 1, /1, 2 or 3 washes/],
+    ['0 washes', 'car', [], 1, /1 to 7 washes/],
+    ['4 washes a week', 'car', [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ weekday: d, kind: 'body' })), 1, /1 to 7 washes/],
     ['the same weekday twice', 'car', [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }], 1, /different day/],
     ['2/week with two body washes', 'car', [{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }], 1, /1 body wash \+ 1 deep/],
     ['2/week with two deep cleanings', 'car', [{ weekday: 1, kind: 'deep' }, { weekday: 3, kind: 'deep' }], 1, /1 body wash \+ 1 deep/],
@@ -212,7 +212,7 @@ describe('access', () => {
       const u = await createCustomer(s);
       const admin = await createAdmin(s);
       await s.as('authenticated', u.authId);
-      expect(await s.q('select * from public.membership_discount_rules')).toHaveLength(7);
+      expect(await s.q('select * from public.membership_discount_rules')).toHaveLength(11);
       await s.q(`update public.membership_discount_rules set discount_bp = 9999 where kind='frequency' and key_value=3`);
       await s.as('postgres');
       expect((await s.q(`select discount_bp from public.membership_discount_rules where kind='frequency' and key_value=3`))[0].discount_bp).toBe(1000);

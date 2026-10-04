@@ -81,6 +81,9 @@ export interface QuoteBreakdown {
   final_cents: number;
 }
 
+/** What the plan would cost from the rate card. An estimate: WASHO reviews the request and confirms the final price. */
+export type PriceEstimate = Omit<QuoteBreakdown, 'adjustment'>;
+
 export interface MembershipRequest {
   id: string;
   reference_code: string;

@@ -29,7 +29,7 @@ export default function Membership() {
 
   return (
     <>
-      <PageHeader title="Membership" subtitle="Your custom plan: you choose the washes, days and length. WASHO sets the price." action={<ButtonLink to="/app/membership/new" icon={<Plus className="h-4 w-4" />}>New request</ButtonLink>} />
+      <PageHeader title="Membership" subtitle="Your custom plan: you choose the washes, days and length. WASHO confirms the price." action={<ButtonLink to="/app/membership/new" icon={<Plus className="h-4 w-4" />}>New request</ButtonLink>} />
       {memberships.isError || requests.isError ? (
         <ErrorState onRetry={() => { void memberships.refetch(); void requests.refetch(); }} />
       ) : memberships.isLoading ? (
@@ -74,7 +74,7 @@ export default function Membership() {
                 ))}
               </div>
             ) : (
-              <EmptyState title="No membership yet" text="Choose 1, 2 or 3 washes a week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="No membership yet" text="Choose 1 to 7 washes a week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             )}
           </section>
         </div>
