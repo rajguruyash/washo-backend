@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import { Reveal } from '../components/ui/Reveal';
 import { Skeleton } from '../components/ui/Skeleton';
-import { claimView, dayOf, offerRates } from '../lib/campaign';
+import { audience, claimView, dayOf, offerRates } from '../lib/campaign';
 import { percent, rupees } from '../lib/format';
 import { useCampaign, useCatalog } from '../lib/queries';
 import type { Campaign } from '../lib/types';
@@ -84,8 +84,8 @@ export default function Offer() {
       <section className="grid items-center gap-10 md:grid-cols-[1.15fr_0.85fr]">
         <div>
           <Badge tone="yellow" icon={<Gift className="h-3.5 w-3.5" />}>{c.name}</Badge>
-          <h1 className="mt-4 text-4xl font-extrabold leading-[1.05] sm:text-5xl">Your first wash is on us.</h1>
-          <p className="mt-4 max-w-xl text-lg text-mist">{c.description ?? 'A free body wash at your parking spot for new WASHO customers in Kharadi, Pune. No payment, no catch.'}</p>
+          <h1 className="mt-4 text-4xl font-extrabold leading-[1.05] sm:text-5xl">{audience(c).headline}</h1>
+          <p className="mt-4 max-w-xl text-lg text-mist">{c.description ?? `A free body wash at your parking spot for ${audience(c).long} in Kharadi, Pune. No payment, no catch.`}</p>
           <div className="mt-5 flex flex-wrap gap-2">
             {left && <Badge tone="amber">{left}</Badge>}
             <Badge>Claim by {dayOf(c.claim_closes_on)}</Badge>
@@ -97,7 +97,7 @@ export default function Offer() {
           <div className="glass-strong relative overflow-hidden p-8 text-center">
             <p className="eyebrow">Body wash for bike, car or SUV</p>
             <div className="mt-4"><FreeCountdown from={carBody ? Math.round(carBody / 100) : 150} /></div>
-            <p className="mt-4 text-sm text-fog">{carBody ? `A car body wash is ${rupees(carBody)}. ` : ''}For new customers it costs nothing.</p>
+            <p className="mt-4 text-sm text-fog">{carBody ? `A car body wash is ${rupees(carBody)}. ` : ''}{audience(c).costs}</p>
           </div>
         </Reveal>
       </section>
@@ -121,7 +121,7 @@ export default function Offer() {
         <div className="glass p-6">
           <h2 id="rules" className="flex items-center gap-2 text-lg font-bold"><ShieldCheck className="h-5 w-5 text-washo-300" aria-hidden /> The small print</h2>
           <ul className="mt-4 space-y-2.5 text-sm text-mist">
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> For new WASHO customers only.</li>
+            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> {audience(c).rule}</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> One free wash for each phone number, vehicle and flat.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> It is a body wash: bike body wash, or car body wash for cars and SUVs.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Claim from {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}. The wash itself must be on or before {dayOf(c.use_by_date)}.</li>

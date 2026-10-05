@@ -133,7 +133,7 @@ export default function ClaimWizard() {
           <motion.section key="s1" {...slide}>
             <h1 className="text-3xl font-extrabold">Pick a day and a time</h1>
             <p className="mb-6 mt-1.5 text-fog">The free wash must be on or before {dayOf(c.use_by_date)}. A day shown as Full has no free washes left.</p>
-            <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={lastDay} days={22} disabledDates={c.full_dates} />
+            <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={lastDay} days={22} disabledDates={c.full_dates} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} />
           </motion.section>
         )}
 

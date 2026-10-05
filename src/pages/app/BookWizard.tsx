@@ -86,7 +86,7 @@ export default function BookWizard() {
         </section>
       )}
 
-      {step === 2 && <section><h1 className="mb-6 text-3xl font-extrabold">Pick a date and time</h1><DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={addDays(todayIST(), 21)} days={22} /></section>}
+      {step === 2 && <section><h1 className="mb-6 text-3xl font-extrabold">Pick a date and time</h1><DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={addDays(todayIST(), 21)} days={22} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} /></section>}
 
       {step === 3 && vehicle && service && date && slot && (
         <section>

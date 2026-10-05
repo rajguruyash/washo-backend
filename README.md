@@ -111,7 +111,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0014` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0015` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns; `…0015` lets a campaign be open to anyone) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

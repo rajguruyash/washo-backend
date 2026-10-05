@@ -32,3 +32,9 @@ export function claimView(s: CampaignStatus | undefined, signedInAs: string | nu
   if (me?.state === 'eligible') return 'eligible';
   return 'visitor';
 }
+
+/** Short wording for who the offer is for, from the campaign's setting. */
+export const audience = (c: { new_customers_only: boolean }) =>
+  c.new_customers_only
+    ? { short: 'for new customers', long: 'new WASHO customers', headline: 'Your first wash is on us.', costs: 'For new customers it costs nothing.', rule: 'For new WASHO customers only.' }
+    : { short: 'for everyone', long: 'WASHO customers', headline: 'A free wash, on us.', costs: 'It costs nothing.', rule: 'Open to everyone: new and existing customers.' };

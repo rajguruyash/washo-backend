@@ -59,6 +59,8 @@ export interface Catalog {
   discounts: { kind: 'frequency' | 'duration'; key: number; discount_bp: number; label: string }[];
   max_total_discount_bp: number;
   weeks_per_month: number;
+  /** Notice needed to book (set in Admin): single washes in hours, memberships in days. */
+  booking_rules?: { on_demand_min_lead_hours: number; membership_min_lead_days: number };
 }
 
 // ───────── membership requests and quotes ─────────

@@ -120,3 +120,8 @@ Adds `campaigns` and `campaign_claims` (read-only to people through row-level se
 A trigger on `bookings` keeps the claim in step with its wash (completed starts the offer, cancelled gives the claim back, no_show uses it up). A trigger on `memberships` records a membership priced with the offer.
 `app_private.compute_membership_quote` is replaced with the same logic plus the offer for the signed-in customer. No rows are created or changed; no campaign exists until an admin creates one.
 Tests: `supabase/tests/after-14-campaigns.test.ts`, `backend/tests/api-campaign.test.ts`.
+
+## Campaign audience (migration 15)
+
+Replaces `admin_save_campaign` with a version that takes `p_new_customers_only` (NULL = leave as it is; a new campaign with no answer stays "new customers only"), so a campaign can be open to anyone. `claim_campaign_wash` and `get_campaign_status` already honoured `campaigns.new_customers_only`; the one-per-phone / plate / flat rules, the caps and the dates apply either way.
+The old 14-argument version is dropped so a call cannot be ambiguous. Tests: `supabase/tests/after-15-campaign-audience.test.ts`, `backend/tests/api-campaign.test.ts`.

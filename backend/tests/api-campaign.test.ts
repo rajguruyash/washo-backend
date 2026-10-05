@@ -271,3 +271,58 @@ describe('after the free wash: the welcome offer on a wash pack', () => {
     expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}/claims?q=nobody-here`)).body.claims).toHaveLength(0);
   });
 });
+
+describe('how much notice a wash needs', () => {
+  it('the catalogue carries it, so the booking pages can grey out times that cannot be booked', async () => {
+    const admin = await staffClient('admin');
+    const rules = async () => expectOk(await new Client().get('/api/catalog')).body.booking_rules;
+    const before = await rules();
+    expect(before).toEqual({ on_demand_min_lead_hours: expect.any(Number), membership_min_lead_days: expect.any(Number) });
+    expectOk(await admin.c.put('/api/admin/pricing-settings', { key: 'on_demand_min_lead_hours', value: 48 }));
+    expect((await rules()).on_demand_min_lead_hours).toBe(48);
+    // and the database holds a claim to the same rule: tomorrow night is refused at 48 hours' notice
+    const { id } = await liveCampaign();
+    const n = await newcomer();
+    const refused = await n.c.post('/api/campaign/claim', claimBody(id, n, { date: istDate(1), time_slot: 'night' }));
+    expect(refused.status).toBe(422);
+    expect(refused.body.message).toMatch(/starts too soon/);
+    expectOk(await admin.c.put('/api/admin/pricing-settings', { key: 'on_demand_min_lead_hours', value: before.on_demand_min_lead_hours }));
+  });
+});
+
+describe('who can claim', () => {
+  const existingCustomer = async () => {
+    const n = await newcomer();
+    await fake.admin.query(
+      `insert into public.bookings (customer_profile_id, vehicle_id, service_id, booking_type, scheduled_date, time_slot, status)
+       select p.id, $2, (select id from public.services where code = 'car-body-wash'), 'on_demand', current_date - 6, 'morning', 'completed' from public.profiles p where p.phone = $1`,
+      [`+91${n.phone}`, n.vehicle.id]
+    );
+    return n;
+  };
+
+  it('a campaign switched on for anyone lets an existing customer claim; the website says it is open to everyone', async () => {
+    const { id, admin } = await liveCampaign({ new_customers_only: false });
+    expect(expectOk(await new Client().get('/api/campaign')).body.campaign).toMatchObject({ id, new_customers_only: false });
+    expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body.campaign.new_customers_only).toBe(false);
+    const old = await existingCustomer();
+    expect(expectOk(await old.c.get('/api/campaign')).body.me).toEqual({ state: 'eligible' });
+    expectOk(await old.c.post('/api/campaign/claim', claimBody(id, old)));
+    expect(expectOk(await old.c.get('/api/campaign')).body.me).toMatchObject({ state: 'booked' });
+  });
+
+  it('left at the default it is for new customers only, and the admin can flip it in the edit form', async () => {
+    const { id, admin } = await liveCampaign();
+    expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body.campaign.new_customers_only).toBe(true);
+    const old = await existingCustomer();
+    expect((await old.c.post('/api/campaign/claim', claimBody(id, old))).body.message).toMatch(/for new WASHO customers/);
+    expectOk(await admin.c.put(`/api/admin/campaigns/${id}`, campaignBody({ new_customers_only: false })));
+    expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body.campaign.new_customers_only).toBe(false);
+    expectOk(await old.c.post('/api/campaign/claim', claimBody(id, old)));
+    // an edit that says nothing about it leaves it as it is
+    const { new_customers_only: _omit, ...rest } = campaignBody() as Record<string, unknown>;
+    void _omit;
+    expectOk(await admin.c.put(`/api/admin/campaigns/${id}`, rest));
+    expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body.campaign.new_customers_only).toBe(false);
+  });
+});

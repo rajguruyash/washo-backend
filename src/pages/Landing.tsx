@@ -11,6 +11,7 @@ import { ServiceCarousel } from '../components/ServiceCarousel';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
+import { audience } from '../lib/campaign';
 import { useCampaign, useCatalog } from '../lib/queries';
 
 const steps = [
@@ -44,7 +45,7 @@ export default function Landing() {
               <Badge tone="blue" icon={<Sparkles className="h-3.5 w-3.5" />}>Now serving Kharadi, Pune</Badge>
               {campaign && campaign.state !== 'full' && (
                 <Link to="/navratri" className="inline-flex items-center gap-1.5 rounded-full border border-offer/30 bg-offer/12 px-2.5 py-1 text-[11px] font-semibold text-offer transition-colors hover:bg-offer/20">
-                  <Gift className="h-3.5 w-3.5" aria-hidden /> {campaign.name}: free for new customers <ArrowRight className="h-3 w-3" aria-hidden />
+                  <Gift className="h-3.5 w-3.5" aria-hidden /> {campaign.name}: free {audience(campaign).short} <ArrowRight className="h-3 w-3" aria-hidden />
                 </Link>
               )}
             </div>

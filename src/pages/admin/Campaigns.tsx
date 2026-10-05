@@ -50,14 +50,14 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
   const toast = useToast();
   const blank = () => {
     const today = todayIST();
-    return { code: 'navratri-2026', name: 'Navratri free wash', description: 'A free body wash at your parking spot for new WASHO customers.', opens: today, closes: addDays(today, 1), useBy: addDays(today, 6), total: '100', daily: '', offerDays: '14', p1: '5', p2: '10', p3: '15', on: false };
+    return { code: 'navratri-2026', name: 'Navratri free wash', description: 'A free body wash at your parking spot for WASHO customers.', opens: today, closes: addDays(today, 1), useBy: addDays(today, 6), total: '100', daily: '', offerDays: '14', p1: '5', p2: '10', p3: '15', on: false, newOnly: false };
   };
   const [f, setF] = useState(blank);
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     setErrors({});
     setF(campaign
-      ? { code: campaign.code, name: campaign.name, description: campaign.description ?? '', opens: campaign.claim_opens_on, closes: campaign.claim_closes_on, useBy: campaign.use_by_date, total: String(campaign.total_cap), daily: campaign.daily_cap ? String(campaign.daily_cap) : '', offerDays: String(campaign.pack_offer_days), p1: String(campaign.pack_bp_1 / 100), p2: String(campaign.pack_bp_2 / 100), p3: String(campaign.pack_bp_3plus / 100), on: campaign.is_active }
+      ? { code: campaign.code, name: campaign.name, description: campaign.description ?? '', opens: campaign.claim_opens_on, closes: campaign.claim_closes_on, useBy: campaign.use_by_date, total: String(campaign.total_cap), daily: campaign.daily_cap ? String(campaign.daily_cap) : '', offerDays: String(campaign.pack_offer_days), p1: String(campaign.pack_bp_1 / 100), p2: String(campaign.pack_bp_2 / 100), p3: String(campaign.pack_bp_3plus / 100), on: campaign.is_active, newOnly: campaign.new_customers_only }
       : blank());
   }, [campaign, open]);
   const set = (k: keyof ReturnType<typeof blank>) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
@@ -67,6 +67,7 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
     setErrors({});
     const body = {
       ...(campaign ? {} : { code: f.code, active: f.on }),
+      new_customers_only: f.newOnly,
       name: f.name, description: f.description || undefined,
       claim_opens_on: f.opens, claim_closes_on: f.closes, use_by_date: f.useBy,
       total_cap: Number(f.total), daily_cap: f.daily.trim() ? Number(f.daily) : null,
@@ -82,7 +83,7 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
   };
 
   return (
-    <Sheet open={open} onClose={onClose} size="lg" title={campaign ? `Edit ${campaign.name}` : 'New campaign'} description={campaign ? undefined : 'A free body wash for new customers. It stays hidden from the website until you switch it on.'}
+    <Sheet open={open} onClose={onClose} size="lg" title={campaign ? `Edit ${campaign.name}` : 'New campaign'} description={campaign ? undefined : 'A free body wash for your customers. It stays hidden from the website until you switch it on.'}
       footer={<Button type="submit" form="campaign-form" full size="lg" loading={act.isPending}>{campaign ? 'Save campaign' : 'Create campaign'}</Button>}>
       <form id="campaign-form" onSubmit={submit} className="space-y-6" noValidate>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -90,6 +91,12 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
           {campaign ? <Input label="Short name" value={f.code} disabled hint="Fixed once created." /> : <Input label="Short name" value={f.code} error={errors.code} onChange={set('code')} hint="Lowercase and dashes, like navratri-2026." required />}
         </div>
         <TextArea label="What the page says" optional value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} maxLength={400} rows={2} />
+
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-bold">Who can claim</legend>
+          <Segmented label="Who can claim" value={f.newOnly ? 'new' : 'anyone'} onChange={(v) => setF({ ...f, newOnly: v === 'new' })} options={[{ value: 'anyone', label: 'Anyone' }, { value: 'new', label: 'New customers only' }]} />
+          <p className="text-xs text-fog">{f.newOnly ? 'Only people with no earlier wash or membership, and a vehicle WASHO has never washed.' : 'Any customer who signs in can claim, new or existing.'} Either way it is one free wash for each phone number, vehicle and flat.</p>
+        </fieldset>
 
         <fieldset className="space-y-3">
           <legend className="text-sm font-bold">When</legend>
@@ -188,7 +195,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-extrabold">{c.name}</h2><Badge tone={st.tone}>{st.label}</Badge></div>
-            <p className="mt-1 text-sm text-fog">Claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)} · wash by {dayOf(c.use_by_date)} · page: /navratri</p>
+            <p className="mt-1 text-sm text-fog">{c.new_customers_only ? 'New customers only' : 'Open to everyone'} · claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)} · wash by {dayOf(c.use_by_date)} · page: /navratri</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => onEdit(c)}>Edit</Button>
@@ -270,7 +277,7 @@ export default function Campaigns() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-xl text-sm text-fog">Free-wash offers for new customers, like the Navratri campaign. Create one, switch it on, and watch the claims here.</p>
+        <p className="max-w-xl text-sm text-fog">Free-wash offers, like the Navratri campaign. Create one, switch it on, and watch the claims here.</p>
         <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing('new')}>New campaign</Button>
       </div>
       {!data.length && (
@@ -288,7 +295,7 @@ export default function Campaigns() {
               <div className="flex items-start justify-between gap-3">
                 <button onClick={() => setOpen(c.id)} className="min-w-0 text-left">
                   <p className="truncate text-lg font-bold hover:text-washo-300">{c.name}</p>
-                  <p className="text-xs text-fog">{c.code} · claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}</p>
+                  <p className="text-xs text-fog">{c.code} · {c.new_customers_only ? 'new customers only' : 'open to everyone'} · claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}</p>
                 </button>
                 <Badge tone={st.tone}>{st.label}</Badge>
               </div>

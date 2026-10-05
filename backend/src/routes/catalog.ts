@@ -12,8 +12,14 @@ catalogRouter.get(
   '/catalog',
   asyncHandler(async (_req, res) => {
     const catalog = await withAnon(async (c) => (await c.query('SELECT public.get_public_catalog() AS c')).rows[0].c);
+    // How much notice a wash needs (set in Admin). The booking pages use it to grey out times that cannot be booked, instead of
+    // letting a customer pick one and be refused at the end. The database still enforces it.
+    const rules = await withAnon(async (c) =>
+      (await c.query(`SELECT key, value_int FROM public.pricing_settings WHERE key IN ('on_demand_min_lead_hours', 'membership_min_lead_days')`)).rows as { key: string; value_int: number }[]
+    ).catch(() => []);
+    const rule = (key: string, fallback: number) => rules.find((r) => r.key === key)?.value_int ?? fallback;
     res.set('Cache-Control', 'public, max-age=60');
-    res.json({ success: true, ...catalog });
+    res.json({ success: true, ...catalog, booking_rules: { on_demand_min_lead_hours: rule('on_demand_min_lead_hours', 2), membership_min_lead_days: rule('membership_min_lead_days', 2) } });
   })
 );
 

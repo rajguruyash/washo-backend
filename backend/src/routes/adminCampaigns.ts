@@ -28,13 +28,34 @@ const body = z.object({
   pack_bp_2: z.number().int().min(0).max(5000),
   pack_bp_3plus: z.number().int().min(0).max(5000),
   active: z.boolean().optional(),
+  // true: new customers only. false: anyone can claim. Left out: unchanged (a new campaign starts as new customers only).
+  new_customers_only: z.boolean().optional(),
 });
 
 const SAVE = `SELECT public.admin_save_campaign($1, $2, $3, $4, $5::date, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14) AS id`;
+const SAVE_WITH_AUDIENCE = `SELECT public.admin_save_campaign($1, $2, $3, $4, $5::date, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14, $15::boolean) AS id`;
 const saveParams = (id: string | null, b: z.infer<typeof body>) => [
   id, b.code ?? '', b.name, b.description ?? null, b.claim_opens_on, b.claim_closes_on, b.use_by_date, b.total_cap, b.daily_cap ?? null,
   b.pack_offer_days, b.pack_bp_1, b.pack_bp_2, b.pack_bp_3plus, b.active ?? null,
 ];
+
+type Run = <T>(fn: (c: import('pg').PoolClient) => Promise<T>) => Promise<T>;
+/**
+ * Saves a campaign. The "who can claim" switch arrived with migration 15; on a database that does not have it yet, a save that does not
+ * ask for anything beyond the original behaviour still works, and asking for "anyone" says plainly that it is not switched on yet.
+ */
+async function saveCampaign(db: Run, id: string | null, b: z.infer<typeof body>): Promise<string> {
+  const params = saveParams(id, b);
+  try {
+    return await db(async (c) => (await c.query(SAVE_WITH_AUDIENCE, [...params, b.new_customers_only ?? null])).rows[0].id as string);
+  } catch (err) {
+    if ((err as { code?: string }).code !== '42883') throw err;
+    if (b.new_customers_only === false) {
+      throw new HttpError(503, 'backend_not_ready', "Letting anyone claim isn't switched on yet. The database needs its latest update; please contact whoever looks after it.");
+    }
+    return db(async (c) => (await c.query(SAVE, params)).rows[0].id as string);
+  }
+}
 
 const CAMPAIGN_SQL = `
   SELECT k.id, k.code, k.name, k.description, k.is_active, k.claim_opens_on, k.claim_closes_on, k.use_by_date, k.total_cap, k.daily_cap,
@@ -121,8 +142,7 @@ adminCampaignsRouter.post(
   '/admin/campaigns',
   asyncHandler(async (req, res) => {
     const b = parse(body, req.body);
-    const r = await req.db(async (c) => (await c.query(SAVE, saveParams(null, b))).rows[0] as { id: string });
-    res.status(201).json({ success: true, campaign_id: r.id });
+    res.status(201).json({ success: true, campaign_id: await saveCampaign(req.db, null, b) });
   })
 );
 
@@ -131,7 +151,7 @@ adminCampaignsRouter.put(
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
     const b = parse(body, req.body);
-    await req.db((c) => c.query(SAVE, saveParams(id, b)));
+    await saveCampaign(req.db, id, b);
     res.json({ success: true });
   })
 );
