@@ -1,7 +1,7 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
 import type {
-  Address, AdminAddress, AdminBooking, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  Address, AdminAddress, AdminBooking, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -288,6 +288,35 @@ export const useAdminBookings = (f: AdminBookingFilter) => {
   if (f.membership) q.set('membership', f.membership);
   return useQuery({ queryKey: keys.admin('bookings', q.toString()), queryFn: async () => (await get<{ bookings: AdminBooking[] }>(`/admin/bookings?${q}`)).bookings });
 };
+
+export interface AdminHistoryFilter {
+  from: string;
+  to: string;
+  status?: string;
+  worker?: string;
+  q?: string;
+}
+
+const HISTORY_PAGE = 50;
+
+/** Past washes, newest first, 50 at a time, with the totals for the same filter. */
+export const useAdminHistory = (f: AdminHistoryFilter) =>
+  useInfiniteQuery({
+    queryKey: keys.admin('history', f.from, f.to, f.status ?? '', f.worker ?? '', f.q ?? ''),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => {
+      const q = new URLSearchParams({ from: f.from, to: f.to, limit: String(HISTORY_PAGE), offset: String(pageParam) });
+      if (f.status) q.set('status', f.status);
+      if (f.worker) q.set('worker', f.worker);
+      if (f.q) q.set('q', f.q);
+      return get<{ bookings: AdminBooking[]; summary: AdminHistorySummary }>(`/admin/history?${q}`);
+    },
+    getNextPageParam: (last, all) => {
+      const loaded = all.reduce((n, p) => n + p.bookings.length, 0);
+      return loaded < last.summary.total && last.bookings.length > 0 ? loaded : undefined;
+    },
+    placeholderData: keepPreviousData,
+  });
 
 export const useAdminBooking = (id: string | undefined) =>
   useQuery({

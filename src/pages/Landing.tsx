@@ -53,21 +53,23 @@ export default function Landing() {
               </StarBorder>
               <ButtonLink to="/services" size="lg" variant="glass">See services</ButtonLink>
             </div>
-            {/* React Bits Split Flap Text: the WASHO tagline, clacking round like a departure board */}
-            <div aria-hidden className="mt-10">
-              <SplitFlapText
-                words={['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
-                padTo={14}
-                fontSize="clamp(19px, 5.4vw, 48px)"
-                gap={4}
-                tileRadius={5}
-                tileColor="#111a2f"
-                textColor="#cfe0ff"
-                cycleDelay={3200}
-              />
-            </div>
           </div>
           <div className="mx-auto w-full max-w-sm"><AvatarFull priority /></div>
+        </div>
+        {/* React Bits Split Flap Text: the WASHO tagline, clacking round like a departure board, across the full width */}
+        <div aria-hidden className="mx-auto mt-12 max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-center">
+            <SplitFlapText
+              words={['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
+              padTo={14}
+              fontSize="clamp(21px, 6.2vw, 76px)"
+              gap="clamp(3px, 0.6vw, 8px)"
+              tileRadius="clamp(4px, 0.8vw, 10px)"
+              tileColor="#111a2f"
+              textColor="#cfe0ff"
+              cycleDelay={3200}
+            />
+          </div>
         </div>
       </section>
 

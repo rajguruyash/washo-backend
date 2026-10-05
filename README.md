@@ -17,7 +17,7 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
   washes assigned to them; call customer → customer confirmed or call not picked up (wash stays scheduled) → start → before photos
   → after photos → complete; issues and notes.
 - **Admin** (`/admin`, email + password, role from `profiles.role`): washes (book one for a customer, edit, assign, reschedule, cancel, history, photos),
-  memberships (regular specialist), customers and specialists (add, edit, archive), services, prices and discounts, and payments or refunds that need a human.
+  **History** (every past wash, newest first: filter by date, status, specialist, search; totals for what is shown), memberships (regular specialist), customers and specialists (add, edit, archive), services, prices and discounts, and payments or refunds that need a human.
   See "Admin: create, edit, archive" below.
 - No credit system anywhere.
 

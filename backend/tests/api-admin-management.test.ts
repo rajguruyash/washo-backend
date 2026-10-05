@@ -2,6 +2,7 @@
  * The Admin page's create / edit / archive: customers (with vehicles and addresses), specialists, washes, services, prices and
  * discounts. Supabase is a local stand-in; the database rules are real. "Delete" is always archive.
  */
+import crypto from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FAKE } from './fakeSupabase';
 import { Client, activeMembership, boot, customerWithVehicle, expectOk, fake, istDate, randomPhone, shutdown, staffClient } from './helpers';
@@ -64,7 +65,7 @@ describe('customers', () => {
     expectOk(await admin.c.put(`/api/admin/customers/${me.id}`, { full_name: 'Asha K. Kulkarni', email: 'asha.k@example.com', phone: '9999999999' }));
     expect(await dbOne('select full_name, email, phone from public.profiles where id = $1', [me.id])).toEqual({ full_name: 'Asha K. Kulkarni', email: 'asha.k@example.com', phone: me.phone }); // phone untouched
     expect((await admin.c.put(`/api/admin/customers/${me.id}`, { full_name: 'A' })).status).toBe(400);
-    expect((await admin.c.get(`/api/admin/customers/${me.id.replace(/.$/, '0')}`)).status).toBe(404);
+    expect((await admin.c.get(`/api/admin/customers/${crypto.randomUUID()}`)).status).toBe(404);
   });
 
   it('archives a customer: hidden from the list, signed out, locked at Supabase, and restorable; a customer with a scheduled wash cannot be archived', async () => {
@@ -271,3 +272,74 @@ describe('services, prices and discounts', () => {
     expect(await estimate()).toBe(187200);
   });
 });
+
+describe('history of washes', () => {
+  /** Three washes for one vehicle: yesterday (done), three days ago (cancelled), 60 days ago (done). */
+  async function history() {
+    const cust = await customerWithVehicle('car');
+    const me = expectOk(await cust.c.get('/api/me')).body.user;
+    const svc = (await dbOne(`select id from public.services where code = 'car-body-wash'`)).id;
+    const at = async (daysAgo: number, status: string, cents: number) =>
+      (
+        await dbOne(
+          `insert into public.bookings (customer_profile_id, vehicle_id, service_id, booking_type, scheduled_date, time_slot, status, source, price_cents, address_id)
+           values ($1, $2, $3, 'on_demand', (now() at time zone 'Asia/Kolkata')::date - $4::int, 'morning', $5, 'website', $6, $7) returning id, reference_code`,
+          [me.id, cust.vehicle.id, svc, daysAgo, status, cents, cust.addr.id]
+        )
+      ).id as string;
+    const done = await at(1, 'completed', 15000);
+    const cancelled = await at(3, 'cancelled', 15000);
+    const old = await at(60, 'completed', 15000);
+    return { cust, me, done, cancelled, old };
+  }
+
+  it('lists past washes newest first (last 30 days by default) with totals for the same filter', async () => {
+    const admin = await staffClient('admin');
+    const h = await history();
+    const out = expectOk(await admin.c.get(`/api/admin/history?q=${encodeURIComponent(h.cust.reg)}`)).body;
+    expect(out.bookings.map((b: any) => b.id)).toEqual([h.done, h.cancelled]);
+    expect(out.bookings[0]).toMatchObject({ status: 'completed', customer_name: 'Asha Kulkarni', service_name: 'Car Body Wash', price_cents: 15000, registration_number: h.cust.reg });
+    expect(out.summary).toEqual({ total: 2, completed: 1, cancelled: 1, single_wash_cents: 15000 });
+
+    // widen the range to reach the old one
+    const from = istDate(-90);
+    const wide = expectOk(await admin.c.get(`/api/admin/history?from=${from}&to=${istDate(0)}&q=${encodeURIComponent(h.cust.reg)}`)).body;
+    expect(wide.bookings.map((b: any) => b.id)).toEqual([h.done, h.cancelled, h.old]);
+    expect(wide.summary).toMatchObject({ total: 3, completed: 2, cancelled: 1, single_wash_cents: 30000 });
+  });
+
+  it('filters by status, by specialist and by search, and pages through the results', async () => {
+    const admin = await staffClient('admin');
+    const worker = await staffClient('worker');
+    const h = await history();
+    const base = `from=${istDate(-90)}&to=${istDate(0)}&q=${encodeURIComponent(h.cust.reg)}`;
+    expect(expectOk(await admin.c.get(`/api/admin/history?${base}&status=completed`)).body.bookings.map((b: any) => b.id)).toEqual([h.done, h.old]);
+    expect(expectOk(await admin.c.get(`/api/admin/history?${base}&status=cancelled`)).body.summary.total).toBe(1);
+
+    await dbOne(`insert into public.worker_assignments (booking_id, worker_profile_id) values ($1, $2)`, [h.done, worker.profileId]);
+    const mine = expectOk(await admin.c.get(`/api/admin/history?${base}&worker=${worker.profileId}`)).body;
+    expect(mine.bookings.map((b: any) => b.id)).toEqual([h.done]);
+    expect(mine.bookings[0].worker_name).toBeTruthy();
+
+    // search by customer name, phone, reference code
+    const ref = (await dbOne('select reference_code from public.bookings where id = $1', [h.cancelled])).reference_code;
+    expect(expectOk(await admin.c.get(`/api/admin/history?${base.replace(/&q=.*/, '')}&q=${ref}`)).body.bookings.map((b: any) => b.id)).toEqual([h.cancelled]);
+    expect(expectOk(await admin.c.get(`/api/admin/history?${base.replace(/&q=.*/, '')}&q=nobody-by-this-name`)).body.bookings).toEqual([]);
+
+    // paging: one at a time, and the total stays the whole count
+    const p1 = expectOk(await admin.c.get(`/api/admin/history?${base}&limit=1&offset=0`)).body;
+    const p2 = expectOk(await admin.c.get(`/api/admin/history?${base}&limit=1&offset=1`)).body;
+    expect(p1.bookings.map((b: any) => b.id)).toEqual([h.done]);
+    expect(p2.bookings.map((b: any) => b.id)).toEqual([h.cancelled]);
+    expect(p1.summary.total).toBe(3);
+  });
+
+  it('is for admins only', async () => {
+    const cust = await customerWithVehicle('car');
+    const worker = await staffClient('worker');
+    expect((await cust.c.get('/api/admin/history')).status).toBe(403);
+    expect((await worker.c.get('/api/admin/history')).status).toBe(403);
+    expect((await new Client().get('/api/admin/history')).status).toBe(401);
+  });
+});
+

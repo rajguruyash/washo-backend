@@ -359,6 +359,13 @@ export interface AdminBooking {
   worker_name: string | null;
 }
 
+export interface AdminHistorySummary {
+  total: number;
+  completed: number;
+  cancelled: number;
+  single_wash_cents: number;
+}
+
 export interface AdminEvent {
   event_type: string;
   created_at: string;

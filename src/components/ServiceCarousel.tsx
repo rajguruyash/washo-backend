@@ -52,7 +52,7 @@ export function ServiceCarousel({ services }: { services: CatalogService[] }) {
     </div>
     <div className="mt-2 text-center" aria-hidden>
       <p className="font-display text-lg font-bold">{now.title}</p>
-      <p className="text-fog">{now.cents != null ? `${rupees(now.cents)} a wash` : now.tagline}</p>
+      <p className="text-fog">{now.cents != null ? `${rupees(now.cents)} per wash` : now.tagline}</p>
       <p className="mt-1 text-xs tabular-nums text-fog/70">{String(ring.length - slot).padStart(2, '0')} / {String(base.length).padStart(2, '0')}</p>
     </div>
     </div>

@@ -68,7 +68,7 @@ adminRouter.post(
 );
 
 // ───────────────────────── bookings ─────────────────────────
-const ADMIN_BOOKING_SQL = `
+export const ADMIN_BOOKING_SQL = `
   SELECT b.id, b.reference_code, b.status::text AS status, b.booking_type::text AS booking_type, b.scheduled_date, b.time_slot::text AS time_slot,
          b.membership_id, b.price_cents, b.customer_confirmed_at, b.parking_location, b.cancel_reason, b.notes, COALESCE(b.address_id, v.address_id) AS address_id, b.source,
          s.name AS service_name, s.wash_kind,

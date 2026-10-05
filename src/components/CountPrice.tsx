@@ -30,7 +30,7 @@ export function anchorTotalCents(lines: { code?: string; quantity: number }[]): 
  * price, or `fromCents` for a total. Shows the plain price when the animation does not apply (reduced motion, paise, or no
  * higher starting number), and when `animate` is false.
  */
-export function CountPrice({ cents, code, fromCents, animate = true, className, duration = 1.5 }: { cents: number; code?: string; fromCents?: number | null; animate?: boolean; className?: string; duration?: number }) {
+export function CountPrice({ cents, code, fromCents, animate = true, className, duration = 1.2 }: { cents: number; code?: string; fromCents?: number | null; animate?: boolean; className?: string; duration?: number }) {
   const reduce = useReducedMotion();
   const from = fromCents != null ? fromCents / 100 : code ? COUNT_FROM_RUPEES[code] : undefined;
   const to = cents / 100;

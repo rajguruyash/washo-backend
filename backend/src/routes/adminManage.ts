@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { phoneSchema } from '../phone';
+import { ADMIN_BOOKING_SQL } from './admin';
 import { fetchGatewayPayment } from '../razorpay';
 import { forgetProfile } from '../profile';
 import { gotrueAdmin } from '../supabase';
@@ -323,6 +324,58 @@ adminManageRouter.put(
     const b = parse(z.object({ address_id: z.string().uuid().nullish(), parking_location: optText(160), note: optText(300) }), req.body);
     await req.db((c) => c.query('SELECT public.admin_update_booking_details($1, $2, $3, $4)', [id, b.address_id ?? null, b.parking_location ?? null, b.note ?? null]));
     res.json({ success: true });
+  })
+);
+
+// ───────────────────────── history of washes ─────────────────────────
+// Every wash that has happened (or been cancelled) in a date range, newest first, with the totals for the same filter.
+// Defaults to the last 30 days. Searches the customer, vehicle, reference, service and specialist.
+const HISTORY_WHERE = `
+  WHERE b.scheduled_date BETWEEN COALESCE($1::date, (now() AT TIME ZONE 'Asia/Kolkata')::date - 30) AND COALESCE($2::date, (now() AT TIME ZONE 'Asia/Kolkata')::date)
+    AND ($3::text IS NULL OR b.status::text = $3)
+    AND ($4::uuid IS NULL OR wp.id = $4)
+    AND ($5::text IS NULL OR p.full_name ILIKE '%' || $5 || '%' OR p.phone ILIKE '%' || $5 || '%' OR v.registration_number ILIKE '%' || $5 || '%'
+         OR b.reference_code ILIKE '%' || $5 || '%' OR s.name ILIKE '%' || $5 || '%' OR wp.full_name ILIKE '%' || $5 || '%')`;
+
+adminManageRouter.get(
+  '/admin/history',
+  asyncHandler(async (req, res) => {
+    const q = parse(
+      z.object({
+        from: isoDate.optional().catch(undefined),
+        to: isoDate.optional().catch(undefined),
+        status: z.string().regex(/^[a-z_]+$/).optional().catch(undefined),
+        worker: z.string().uuid().optional().catch(undefined),
+        q: z.string().trim().max(60).optional().catch(undefined),
+        limit: z.coerce.number().int().min(1).max(200).catch(50),
+        offset: z.coerce.number().int().min(0).max(100_000).catch(0),
+      }),
+      req.query
+    );
+    const filter = [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.q || null];
+    const out = await req.db(async (c) => {
+      const bookings = (
+        await c.query(`${ADMIN_BOOKING_SQL} ${HISTORY_WHERE} ORDER BY b.scheduled_date DESC, b.time_slot DESC, b.created_at DESC LIMIT $6 OFFSET $7`, [...filter, q.limit, q.offset])
+      ).rows;
+      const summary = (
+        await c.query(
+          `SELECT count(*)::int AS total,
+                  count(*) FILTER (WHERE b.status = 'completed')::int AS completed,
+                  count(*) FILTER (WHERE b.status IN ('cancelled', 'refunded', 'refund_requested'))::int AS cancelled,
+                  COALESCE(sum(b.price_cents) FILTER (WHERE b.status = 'completed' AND b.booking_type = 'on_demand'), 0)::bigint AS single_wash_cents
+             FROM public.bookings b
+             JOIN public.services s ON s.id = b.service_id
+             JOIN public.vehicles v ON v.id = b.vehicle_id
+             JOIN public.profiles p ON p.id = b.customer_profile_id
+             LEFT JOIN public.worker_assignments wa ON wa.booking_id = b.id AND wa.is_active
+             LEFT JOIN public.profiles wp ON wp.id = wa.worker_profile_id
+             ${HISTORY_WHERE}`,
+          filter
+        )
+      ).rows[0];
+      return { bookings, summary: { ...summary, single_wash_cents: Number(summary.single_wash_cents) } };
+    });
+    res.json({ success: true, ...out });
   })
 );
 
