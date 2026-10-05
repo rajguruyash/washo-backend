@@ -41,7 +41,7 @@ export default function MembershipDetail() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">{m.reference_code}</p>
-          <h1 className="mt-1 text-3xl font-extrabold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} a week · {m.duration_months} month{m.duration_months > 1 ? 's' : ''}</h1>
+          <h1 className="mt-1 text-3xl font-extrabold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} per week · {m.duration_months} month{m.duration_months > 1 ? 's' : ''}</h1>
         </div>
         <Badge tone={m.status === 'active' ? 'green' : 'slate'} icon={<CheckCircle2 className="h-3.5 w-3.5" />}>{m.status === 'active' ? 'Active' : m.status}</Badge>
       </div>

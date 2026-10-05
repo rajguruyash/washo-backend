@@ -378,10 +378,10 @@ describe('the welcome offer on a wash pack', () => {
       const { p } = await withOffer(s);
       // car, 1 body wash a week, 1 month: 4 x 150 = 600
       const one = await estimate(s, p, 'car', ONE);
-      expect(one).toMatchObject({ subtotal_cents: 60000, final_cents: 57000, frequency_discount: { bp: 500, cents: 3000, label: 'Welcome offer · 1 wash a week' }, campaign_offer: { bp: 500, name: 'Navratri free wash' } });
+      expect(one).toMatchObject({ subtotal_cents: 60000, final_cents: 57000, frequency_discount: { bp: 500, cents: 3000, label: 'Welcome offer · 1 wash per week' }, campaign_offer: { bp: 500, name: 'Navratri free wash' } });
       // car, 2 a week (1 body + 1 deep): 4 x (150 + 220) = 1480
       const two = await estimate(s, p, 'car', [{ weekday: 1, kind: 'body' }, { weekday: 4, kind: 'deep' }]);
-      expect(two).toMatchObject({ subtotal_cents: 148000, final_cents: 133200, frequency_discount: { bp: 1000, label: 'Welcome offer · 2 washes a week' } });
+      expect(two).toMatchObject({ subtotal_cents: 148000, final_cents: 133200, frequency_discount: { bp: 1000, label: 'Welcome offer · 2 washes per week' } });
       // 3 a week: 2080, the normal 10% would be 1872, the offer 15% is 1768
       const three = await estimate(s, p, 'car', PATTERN_3);
       expect(three).toMatchObject({ subtotal_cents: 208000, final_cents: 176800, frequency_discount: { bp: 1500 } });

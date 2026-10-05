@@ -112,8 +112,8 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
         <fieldset className="space-y-3">
           <legend className="text-sm font-bold">Membership offer after the free wash</legend>
           <div className="grid gap-4 sm:grid-cols-4">
-            <Input label="1 wash a week (%)" inputMode="decimal" value={f.p1} error={errors.pack_bp_1} onChange={set('p1')} />
-            <Input label="2 a week (%)" inputMode="decimal" value={f.p2} error={errors.pack_bp_2} onChange={set('p2')} />
+            <Input label="1 wash per week (%)" inputMode="decimal" value={f.p1} error={errors.pack_bp_1} onChange={set('p1')} />
+            <Input label="2 per week (%)" inputMode="decimal" value={f.p2} error={errors.pack_bp_2} onChange={set('p2')} />
             <Input label="3 or more (%)" inputMode="decimal" value={f.p3} error={errors.pack_bp_3plus} onChange={set('p3')} />
             <Input label="Open for (days)" inputMode="numeric" value={f.offerDays} error={errors.pack_offer_days} onChange={set('offerDays')} />
           </div>
@@ -162,7 +162,7 @@ function ClaimRow({ c, onOpen }: { c: AdminCampaignClaim; onOpen: () => void }) 
 }
 
 function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void; onEdit: (c: AdminCampaign) => void }) {
-  const { data, isLoading, isError, refetch } = useAdminCampaign(id);
+  const { data, isLoading, isError, error, refetch } = useAdminCampaign(id);
   const act = useAdminAction();
   const toast = useToast();
   const [status, setStatus] = useState('');
@@ -172,7 +172,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
   const claims = useAdminCampaignClaims(id, status, debounced);
   const [open, setOpen] = useState<string | null>(null);
 
-  if (isError) return <ErrorState onRetry={() => void refetch()} />;
+  if (isError) return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
   const { campaign: c, days } = data;
   const st = liveState(c);
@@ -206,7 +206,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
           <Stat label="Memberships bought" value={c.packs_bought} />
           <Stat label="Membership sales" value={rupees(Number(c.packs_cents))} />
         </div>
-        <p className="mt-3 text-xs text-fog">Membership offer: {percent(c.pack_bp_1)} for 1 a week, {percent(c.pack_bp_2)} for 2, {percent(c.pack_bp_3plus)} for 3 or more, for {c.pack_offer_days} days after the free wash.</p>
+        <p className="mt-3 text-xs text-fog">Membership offer: {percent(c.pack_bp_1)} for 1 per week, {percent(c.pack_bp_2)} for 2, {percent(c.pack_bp_3plus)} for 3 or more, for {c.pack_offer_days} days after the free wash.</p>
       </div>
 
       <section>
@@ -251,7 +251,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
 
 // ───────────────────────── all campaigns ─────────────────────────
 export default function Campaigns() {
-  const { data, isLoading, isError, refetch } = useAdminCampaigns();
+  const { data, isLoading, isError, error, refetch } = useAdminCampaigns();
   const act = useAdminAction();
   const toast = useToast();
   const [open, setOpen] = useState<string | null>(null);
@@ -260,7 +260,7 @@ export default function Campaigns() {
 
   const sheetEl = <CampaignSheet open={Boolean(editing)} campaign={sheet} onClose={() => setEditing(null)} />;
   if (open) return <><CampaignDetail id={open} onBack={() => setOpen(null)} onEdit={setEditing} />{sheetEl}</>;
-  if (isError) return <ErrorState onRetry={() => void refetch()} />;
+  if (isError) return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
 
   const toggle = async (c: AdminCampaign) => {

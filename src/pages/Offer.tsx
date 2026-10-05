@@ -134,8 +134,8 @@ export default function Offer() {
           <p className="mt-2 text-sm text-fog">Loved it? For {c.pack_offer.days} days after your free wash, a membership costs less:</p>
           <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
             {[
-              ['1 wash a week', c.pack_offer.bp_1],
-              ['2 a week', c.pack_offer.bp_2],
+              ['1 wash per week', c.pack_offer.bp_1],
+              ['2 per week', c.pack_offer.bp_2],
               ['3 or more', c.pack_offer.bp_3plus],
             ].map(([label, bp]) => (
               <div key={label as string} className="rounded-2xl border border-white/[0.09] bg-white/[0.04] p-3">

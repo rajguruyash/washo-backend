@@ -441,7 +441,7 @@ BEGIN
    ORDER BY r.bp DESC LIMIT 1;
   IF v_offer IS NOT NULL AND (v_offer->>'bp')::int > v_freq_bp THEN
     v_freq_bp := (v_offer->>'bp')::int;
-    v_freq_label := 'Welcome offer · ' || v_freq || CASE WHEN v_freq = 1 THEN ' wash a week' ELSE ' washes a week' END;
+    v_freq_label := 'Welcome offer · ' || v_freq || CASE WHEN v_freq = 1 THEN ' wash per week' ELSE ' washes per week' END;
   ELSE
     v_offer := NULL;
   END IF;

@@ -123,7 +123,7 @@ function Requests() {
           {data.map((r) => (
             <div key={r.id} className="glass p-5">
               <div className="flex items-start justify-between gap-3">
-                <div><p className="eyebrow">{r.reference_code}</p><p className="mt-1 text-lg font-bold">{r.frequency_per_week} a week · {r.duration_months} mo</p></div>
+                <div><p className="eyebrow">{r.reference_code}</p><p className="mt-1 text-lg font-bold">{r.frequency_per_week} per week · {r.duration_months} mo</p></div>
                 <Badge tone={r.status === 'submitted' ? 'amber' : r.status === 'quoted' ? 'blue' : r.status === 'active' ? 'green' : 'slate'}>{r.status}</Badge>
               </div>
               <p className="mt-2 text-sm font-semibold">{r.customer.name} <a href={`tel:${r.customer.phone}`} className="font-normal text-washo-300">{prettyPhone(r.customer.phone)}</a></p>
@@ -204,7 +204,7 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
       <div className="grid gap-4 lg:grid-cols-2">
         {data?.map((m) => (
           <div key={m.id} className="glass p-5">
-            <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{m.reference_code}</p><p className="mt-1 text-lg font-bold">{m.frequency_per_week} a week · {m.duration_months} mo · {rupees(m.final_amount_cents)}</p></div><Badge tone={m.status === 'active' ? 'green' : 'slate'}>{m.status}</Badge></div>
+            <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{m.reference_code}</p><p className="mt-1 text-lg font-bold">{m.frequency_per_week} per week · {m.duration_months} mo · {rupees(m.final_amount_cents)}</p></div><Badge tone={m.status === 'active' ? 'green' : 'slate'}>{m.status}</Badge></div>
             <p className="mt-2 text-sm font-semibold">{m.customer_name} <span className="font-normal text-fog">{prettyPhone(m.customer_phone)}</span></p>
             <p className="text-sm text-fog">{m.vehicle_type?.toUpperCase()} · {m.vehicle_model} · {m.registration_number}</p>
             {m.weekly_pattern && <p className="mt-1 text-sm text-mist">{patternLabel(m.weekly_pattern)}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}

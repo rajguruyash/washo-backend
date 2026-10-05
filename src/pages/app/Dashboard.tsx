@@ -63,7 +63,7 @@ export default function Dashboard() {
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Clock className="h-6 w-6" /></span>
               <div className="min-w-0 flex-1">
                 <p className="font-bold">{r.status === 'quoted' ? 'Your price is ready' : r.status === 'accepted' ? 'Finish your payment' : 'WASHO is reviewing your request'}</p>
-                <p className="text-sm text-fog">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} a week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} · {r.vehicle_model}</p>
+                <p className="text-sm text-fog">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} · {r.vehicle_model}</p>
               </div>
               <ArrowRight className="h-5 w-5 text-fog" />
             </Link>
@@ -78,7 +78,7 @@ export default function Dashboard() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="eyebrow">{m.reference_code}</p>
-                        <p className="mt-1 text-lg font-bold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} a week · {m.duration_months} mo</p>
+                        <p className="mt-1 text-lg font-bold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} per week · {m.duration_months} mo</p>
                       </div>
                       <Badge tone="green" icon={<BadgeCheck className="h-3.5 w-3.5" />}>Active</Badge>
                     </div>
@@ -89,7 +89,7 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : !open.length ? (
-              <EmptyState title="Start your WASHO membership" text="Choose 1 to 7 washes a week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="Start your WASHO membership" text="Choose 1 to 7 washes per week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             ) : null}
           </section>}
 

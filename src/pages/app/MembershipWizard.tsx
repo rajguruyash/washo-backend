@@ -20,12 +20,12 @@ import { SlideToPay } from '../../components/SlideToPay';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
-const STEPS = ['Vehicle', 'Washes a week', 'Days & washes', 'Length', 'Start & time', 'Review & pay'] as const;
+const STEPS = ['Vehicle', 'Washes per week', 'Days & washes', 'Length', 'Start & time', 'Review & pay'] as const;
 const MONTHS = [1, 3, 6, 12] as const;
 const PER_WEEK = [1, 2, 3, 4, 5, 6, 7] as const;
 
 const perWeekHint = (n: number, bike: boolean) =>
-  bike ? `${n} bike wash${n > 1 ? 'es' : ''} a week` : n === 1 ? 'One wash type: Body or Deep' : n === 2 ? '1 Body wash + 1 Deep cleaning' : `A mix of Body washes and Deep cleanings, ${n} a week`;
+  bike ? `${n} bike wash${n > 1 ? 'es' : ''} per week` : n === 1 ? 'One wash type: Body or Deep' : n === 2 ? '1 Body wash + 1 Deep cleaning' : `A mix of Body washes and Deep cleanings, ${n} per week`;
 const KIND_LABEL: Record<WashKind, string> = { body: 'Body wash', deep: 'Deep cleaning' };
 
 /** The membership composition rules, for guidance only. The database re-checks every one of them. */
@@ -33,8 +33,8 @@ function compositionError(perWeek: number, kinds: WashKind[], bike: boolean): st
   if (bike) return null;
   const body = kinds.filter((k) => k === 'body').length;
   const deep = kinds.length - body;
-  if (perWeek === 2 && !(body === 1 && deep === 1)) return '2 washes a week is 1 body wash + 1 deep cleaning.';
-  if (perWeek >= 3 && (body < 1 || deep < 1)) return `${perWeek} washes a week mixes body washes and deep cleanings.`;
+  if (perWeek === 2 && !(body === 1 && deep === 1)) return '2 washes per week is 1 body wash + 1 deep cleaning.';
+  if (perWeek >= 3 && (body < 1 || deep < 1)) return `${perWeek} washes per week mixes body washes and deep cleanings.`;
   return null;
 }
 
@@ -175,7 +175,7 @@ export default function MembershipWizard() {
           parking_location: address?.parking_location,
           customer_notes: notes.trim() || undefined,
         }),
-        `WASHO membership · ${perWeek} a week · ${months} month${months > 1 ? 's' : ''}`
+        `WASHO membership · ${perWeek} per week · ${months} month${months > 1 ? 's' : ''}`
       );
     } catch (err) {
       // usePay reports payment problems itself; this covers plan problems the database refused (shown under the button)
@@ -212,10 +212,10 @@ export default function MembershipWizard() {
 
         {step === 1 && (
           <motion.section key="s1" {...slide}>
-            <h1 className="text-3xl font-extrabold">How many washes a week?</h1>
+            <h1 className="text-3xl font-extrabold">How many washes per week?</h1>
             <p className="mt-1.5 mb-6 text-fog">Slide the toggle to the number you want. You choose the days next.</p>
 
-            <div role="radiogroup" aria-label="Washes a week" className="grid grid-cols-7 gap-1.5 rounded-3xl border border-white/[0.09] bg-white/[0.03] p-1.5">
+            <div role="radiogroup" aria-label="Washes per week" className="grid grid-cols-7 gap-1.5 rounded-3xl border border-white/[0.09] bg-white/[0.03] p-1.5">
               {PER_WEEK.map((n) => {
                 const active = perWeek === n;
                 return (
@@ -231,9 +231,9 @@ export default function MembershipWizard() {
               <div className="glass mt-5 p-5" aria-live="polite">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-lg font-bold">{perWeek} wash{perWeek > 1 ? 'es' : ''} a week · {perWeek * weeks} a month</p>
+                    <p className="text-lg font-bold">{perWeek} wash{perWeek > 1 ? 'es' : ''} per week · {perWeek * weeks} a month</p>
                     <p className="mt-1 text-sm text-fog">{perWeekHint(perWeek, Boolean(bike))}</p>
-                    {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} a week{offerApplies(perWeek) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
+                    {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} per week{offerApplies(perWeek) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
                   </div>
                   <div className="text-right">
                     <p className="eyebrow">Price</p>
@@ -333,7 +333,7 @@ export default function MembershipWizard() {
             <div className="glass divide-y divide-white/[0.07]">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="p-5">
-                <p className="eyebrow">Weekly schedule · {perWeek} a week</p>
+                <p className="eyebrow">Weekly schedule · {perWeek} per week</p>
                 <ul className="mt-2 space-y-1.5 text-sm">
                   {sortedDays.map((d) => (<li key={d} className="flex justify-between gap-3"><span>{WEEKDAYS[d].long}</span><span className="text-mist">{serviceName(bike ? 'body' : kindByDay[d] ?? 'body')}</span></li>))}
                 </ul>

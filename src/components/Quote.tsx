@@ -1,4 +1,4 @@
-import { percent, rupees } from '../lib/format';
+import { percent, perWeekLabel, rupees } from '../lib/format';
 import type { QuoteBreakdown } from '../lib/types';
 
 const Row = ({ label, value, sub, tone, strong }: { label: string; value: string; sub?: string; tone?: 'ok' | 'warn'; strong?: boolean }) => (
@@ -23,7 +23,7 @@ export function QuoteBreakdownView({ q }: { q: QuoteBreakdown }) {
       ))}
       <Row label="Subtotal" value={rupees(q.subtotal_cents)} />
       {q.frequency_discount.cents > 0 && (
-        <Row label={`Frequency discount (${percent(q.frequency_discount.bp)})`} sub={q.frequency_discount.label ?? undefined} value={`−${rupees(q.frequency_discount.cents)}`} tone="ok" />
+        <Row label={`Frequency discount (${percent(q.frequency_discount.bp)})`} sub={perWeekLabel(q.frequency_discount.label)} value={`−${rupees(q.frequency_discount.cents)}`} tone="ok" />
       )}
       {q.duration_discount.cents > 0 && (
         <Row label={`Duration discount (${percent(q.duration_discount.bp)})`} sub={q.duration_discount.label ?? undefined} value={`−${rupees(q.duration_discount.cents)}`} tone="ok" />

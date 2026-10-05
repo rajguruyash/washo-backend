@@ -197,10 +197,10 @@ function Discounts() {
       <p className="-mt-4 text-sm text-fog">Every discount is shown to the customer as its own line. Together they never go past the cap below. Existing memberships keep the price they paid.</p>
       {(['frequency', 'duration'] as const).map((kind) => (
         <div key={kind} className="space-y-2">
-          <h3 className="text-sm font-bold text-mist">{kind === 'frequency' ? 'By washes a week' : 'By membership length'}</h3>
+          <h3 className="text-sm font-bold text-mist">{kind === 'frequency' ? 'By washes per week' : 'By membership length'}</h3>
           {group(kind).map((d) => (
             <div key={`${d.kind}:${d.key}`} className="panel flex flex-wrap items-center gap-3 p-3">
-              <div className="min-w-0 flex-1 text-sm"><p className="font-semibold">{d.label}</p><p className="text-xs text-fog">{kind === 'frequency' ? `${d.key} a week` : `${d.key} month${d.key > 1 ? 's' : ''}`}</p></div>
+              <div className="min-w-0 flex-1 text-sm"><p className="font-semibold">{d.label}</p><p className="text-xs text-fog">{kind === 'frequency' ? `${d.key} per week` : `${d.key} month${d.key > 1 ? 's' : ''}`}</p></div>
               <div className="w-28"><Input label="Percent" aria-label={`${d.label} percent`} inputMode="decimal" value={edits[`${d.kind}:${d.key}`] ?? ''} onChange={(e) => setEdits({ ...edits, [`${d.kind}:${d.key}`]: e.target.value })} /></div>
               <Button size="sm" loading={act.isPending} disabled={percentToBp(edits[`${d.kind}:${d.key}`] ?? '') === d.discount_bp} onClick={() => void saveDiscount(d.kind, d.key, d.label, edits[`${d.kind}:${d.key}`] ?? '')}>Save</Button>
               <Button size="sm" variant="ghost" aria-label={`Remove ${d.label}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => void run(() => act.mutateAsync({ path: 'discounts/remove', body: { kind: d.kind, key: d.key } }), 'Discount removed')} />
@@ -232,10 +232,10 @@ function Discounts() {
           onClick={async () => { await saveDiscount(nd.kind, Number(nd.key), nd.label.trim(), nd.pct); setAdding(false); setNd({ kind: 'frequency', key: '', pct: '', label: '' }); }}>Save discount</Button>}>
         <div className="space-y-4">
           <Select label="Applies to" value={nd.kind} onChange={(e) => setNd({ ...nd, kind: e.target.value as 'frequency' | 'duration' })}>
-            <option value="frequency">Washes a week</option>
+            <option value="frequency">Washes per week</option>
             <option value="duration">Membership length</option>
           </Select>
-          <Input label={nd.kind === 'frequency' ? 'Washes a week (1 to 7)' : 'Months (1, 3, 6 or 12)'} inputMode="numeric" value={nd.key} onChange={(e) => setNd({ ...nd, key: e.target.value.replace(/\D/g, '') })} />
+          <Input label={nd.kind === 'frequency' ? 'Washes per week (1 to 7)' : 'Months (1, 3, 6 or 12)'} inputMode="numeric" value={nd.key} onChange={(e) => setNd({ ...nd, key: e.target.value.replace(/\D/g, '') })} />
           <Input label="Percent off" inputMode="decimal" value={nd.pct} onChange={(e) => setNd({ ...nd, pct: e.target.value })} hint="Up to 50." />
           <Input label="Label the customer sees" value={nd.label} onChange={(e) => setNd({ ...nd, label: e.target.value })} maxLength={60} />
         </div>

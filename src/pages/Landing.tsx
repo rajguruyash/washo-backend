@@ -6,6 +6,7 @@ import BlurText from '../components/reactbits/BlurText';
 import SplitFlapText from '../components/reactbits/SplitFlapText';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
+import { RotatingLine } from '../components/RotatingLine';
 import { ServiceCarousel } from '../components/ServiceCarousel';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
@@ -13,7 +14,7 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { useCampaign, useCatalog } from '../lib/queries';
 
 const steps = [
-  { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, 1 to 7 washes a week, the days, and how long. The estimate updates as you go.' },
+  { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, 1 to 7 washes per week, the days, and how long. The estimate updates as you go.' },
   { icon: Wallet, title: 'Pay securely online', text: 'Pay with Razorpay. Your washes are scheduled as soon as the payment is verified.' },
   { icon: MessageSquareText, title: 'Your specialist calls ahead', text: 'We confirm with you before every wash, so you are never caught out.' },
   { icon: Camera, title: 'We wash at your parking spot', text: 'A specialist calls ahead, washes, and you see the before and after photos.' },
@@ -47,14 +48,12 @@ export default function Landing() {
                 </Link>
               )}
             </div>
-            <h1 className="sr-only">Your car and bike, washed on schedule, at your doorstep.</h1>
+            <h1 className="sr-only">Wake up to a spotless ride. Doorstep car and bike washing in Kharadi, Pune.</h1>
             <div aria-hidden className="mt-5 font-display text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
-              <div>
-                {reduceMotion ? 'Your car and bike,' : <BlurText text="Your car and bike," delay={90} animateBy="words" direction="top" className="flex-wrap" />}
-                {reduceMotion ? <span className="block text-washo-300">washed on schedule, at your doorstep.</span> : <BlurText text="washed on schedule, at your doorstep." delay={90} animateBy="words" direction="top" className="flex-wrap text-washo-300" />}
-              </div>
+              {reduceMotion ? <span className="block">Wake up to a spotless ride.</span> : <BlurText text="Wake up to a spotless ride." delay={90} animateBy="words" direction="top" className="flex-wrap" />}
+              <RotatingLine className="mt-2 text-washo-300" phrases={['Washed at your doorstep.', 'Zero queues, zero effort.', 'Shine, delivered every week.', 'Done before your first coffee.']} />
             </div>
-            <p className="mt-5 max-w-xl text-lg text-mist">Build a custom WASHO membership: 1 to 7 washes a week, on the days you choose. Pay securely online and we take care of the rest.</p>
+            <p className="mt-5 max-w-xl text-lg text-mist">Doorstep car and bike washing in Kharadi, Pune. Pick 1 to 7 washes per week, on the days you choose. We call ahead, wash at your parking spot and send before and after photos.</p>
             <div className="mt-8 flex flex-wrap gap-3">
               {/* React Bits StarBorder: the primary call to action */}
               <StarBorder as={Link} to="/app/membership/new" color="#6a9cff" speed="5s" backgroundColor="#1248b8" borderColor="rgba(155,191,255,0.35)" className="rounded-2xl" aria-label="Build my membership">
@@ -104,9 +103,9 @@ export default function Landing() {
             <p className="eyebrow">Custom membership</p>
             <h2 className="mt-2 text-3xl font-extrabold md:text-4xl">You design it. We take care of the rest.</h2>
             <ul className="mt-6 space-y-3 text-mist">
-              <li><strong className="text-white">1 to 7 washes a week:</strong> you choose the number and the days.</li>
-              <li><strong className="text-white">1 a week:</strong> one wash type, Body or Deep.</li>
-              <li><strong className="text-white">2 a week:</strong> one Body wash and one Deep cleaning.</li>
+              <li><strong className="text-white">1 to 7 washes per week:</strong> you choose the number and the days.</li>
+              <li><strong className="text-white">1 per week:</strong> one wash type, Body or Deep.</li>
+              <li><strong className="text-white">2 per week:</strong> one Body wash and one Deep cleaning.</li>
               <li><strong className="text-white">3 or more:</strong> a mix of Body washes and Deep cleanings.</li>
               <li><strong className="text-white">1, 3, 6 or 12 months.</strong> Reschedule any wash anytime.</li>
             </ul>

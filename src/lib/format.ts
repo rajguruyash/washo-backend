@@ -95,6 +95,9 @@ export const vehiclePlural: Record<VehicleType, string> = { bike: 'bikes', car: 
 
 export const percent = (bp: number): string => `${bp / 100}%`;
 
+/** Stored discount labels read "3 washes a week"; the site says "per week". */
+export const perWeekLabel = (label: string | null | undefined): string | undefined => label?.replace(/\ba week\b/, 'per week') ?? undefined;
+
 /** "+91 98765 43210" from "+919876543210". */
 export const prettyPhone = (p: string | null | undefined): string => {
   const m = (p ?? '').match(/^\+91(\d{5})(\d{5})$/);

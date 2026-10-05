@@ -9,7 +9,7 @@ describe('price count-down anchors', () => {
   });
 
   it('a pack counts down from the same plan priced at the anchors', () => {
-    // 2 a week for a month on a car: 4 body + 4 deep
+    // 2 per week for a month on a car: 4 body + 4 deep
     expect(anchorTotalCents([{ code: 'car-body-wash', quantity: 4 }, { code: 'car-deep-cleaning', quantity: 4 }])).toBe((4 * 200 + 4 * 350) * 100);
   });
 

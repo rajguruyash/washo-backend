@@ -235,7 +235,7 @@ describe('after the free wash: the welcome offer on a wash pack', () => {
     expect(new Date(offer.expires_at).getTime()).toBeGreaterThan(Date.now() + 13 * 86_400_000);
 
     const mine = await estimate(n.c);
-    expect(mine).toMatchObject({ final_cents: 57000, frequency_discount: { bp: 500, label: 'Welcome offer · 1 wash a week' }, campaign_offer: { bp: 500 } });
+    expect(mine).toMatchObject({ final_cents: 57000, frequency_discount: { bp: 500, label: 'Welcome offer · 1 wash per week' }, campaign_offer: { bp: 500 } });
     expect(await estimate(n.c, PATTERN_3)).toMatchObject({ final_cents: 176800, frequency_discount: { bp: 1500 } });
     // everyone else, and a visitor, see the normal price
     const other = await newcomer();

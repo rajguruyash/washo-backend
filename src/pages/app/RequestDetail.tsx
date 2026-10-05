@@ -73,7 +73,7 @@ export default function RequestDetail() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">{r.reference_code}</p>
-          <h1 className="mt-1 text-3xl font-extrabold">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} a week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''}</h1>
+          <h1 className="mt-1 text-3xl font-extrabold">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''}</h1>
         </div>
         <Badge tone={status.tone} icon={status.icon}>{status.label}</Badge>
       </div>

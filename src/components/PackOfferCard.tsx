@@ -14,7 +14,7 @@ export function PackOfferCard({ offer, className }: { offer: CampaignOffer; clas
         <div className="min-w-0 flex-1">
           <p className="font-bold">Your welcome offer on a membership</p>
           <p className="mt-1 text-sm text-fog">
-            Start one by {shortDayIST(offer.expires_at)} and save {percent(offer.bp_1)} on 1 wash a week, {percent(offer.bp_2)} on 2, or {percent(offer.bp_3plus)} on 3 or more. It is applied for you at checkout.
+            Start one by {shortDayIST(offer.expires_at)} and save {percent(offer.bp_1)} on 1 wash per week, {percent(offer.bp_2)} on 2, or {percent(offer.bp_3plus)} on 3 or more. It is applied for you at checkout.
           </p>
         </div>
       </div>
