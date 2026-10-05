@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
+import { campaignNames } from '../campaigns';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
 import { openOrder, reconcileOrder, verifyAndSettle } from '../razorpay';
@@ -74,7 +75,8 @@ bookingsRouter.get(
       return { booking, events, refund };
     });
     if (!out) throw new HttpError(404, 'not_found', 'Booking not found');
-    res.json({ success: true, ...out });
+    const names = await campaignNames(req.db, [id]); // a free-wash campaign wash says so (tolerant: not every database has campaigns yet)
+    res.json({ success: true, ...out, booking: { ...out.booking, campaign_name: names.get(id) ?? null } });
   })
 );
 

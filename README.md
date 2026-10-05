@@ -18,7 +18,8 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
   → after photos → complete; issues and notes.
 - **Admin** (`/admin`, email + password, role from `profiles.role`): washes (book one for a customer, edit, assign, reschedule, cancel, history, photos),
   **History** (every past wash, newest first: filter by date, status, specialist, search; totals for what is shown), memberships (regular specialist), customers and specialists (add, edit, archive), services, prices and discounts, and payments or refunds that need a human.
-  See "Admin: create, edit, archive" below.
+  See "Admin: create, edit, archive" below. **Campaigns**: free-wash offers for new customers (see "Free-wash campaigns").
+- **Free-wash campaign** (`/navratri`, banner on every public page while one is on): a new customer signs in by phone, adds a vehicle and address, picks a day and a time and slides to claim. No payment.
 - No credit system anywhere.
 
 ## Run it locally (no Supabase project needed)
@@ -110,7 +111,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0013` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0014` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarCheck, Camera, Droplets, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Camera, Droplets, Gift, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
 import { AvatarFull } from '../components/brand/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
@@ -10,7 +10,7 @@ import { ServiceCarousel } from '../components/ServiceCarousel';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
-import { useCatalog } from '../lib/queries';
+import { useCampaign, useCatalog } from '../lib/queries';
 
 const steps = [
   { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, 1 to 7 washes a week, the days, and how long. The estimate updates as you go.' },
@@ -31,13 +31,22 @@ const why = [
 export default function Landing() {
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const { data: catalog, isLoading } = useCatalog();
+  const campaign = useCampaign().data?.campaign;
+  const offerLive = campaign?.state === 'open';
 
   return (
     <>
       <section className="relative overflow-hidden pt-28 md:pt-36">
         <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
           <div>
-            <Badge tone="blue" icon={<Sparkles className="h-3.5 w-3.5" />}>Now serving Kharadi, Pune</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="blue" icon={<Sparkles className="h-3.5 w-3.5" />}>Now serving Kharadi, Pune</Badge>
+              {campaign && campaign.state !== 'full' && (
+                <Link to="/navratri" className="inline-flex items-center gap-1.5 rounded-full border border-offer/30 bg-offer/12 px-2.5 py-1 text-[11px] font-semibold text-offer transition-colors hover:bg-offer/20">
+                  <Gift className="h-3.5 w-3.5" aria-hidden /> {campaign.name}: free for new customers <ArrowRight className="h-3 w-3" aria-hidden />
+                </Link>
+              )}
+            </div>
             <h1 className="sr-only">Your car and bike, washed on schedule, at your doorstep.</h1>
             <div aria-hidden className="mt-5 font-display text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl">
               <div>
@@ -60,7 +69,7 @@ export default function Landing() {
         <div aria-hidden className="mx-auto mt-12 max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex justify-center">
             <SplitFlapText
-              words={['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
+              words={offerLive ? ['CLEAN TODAY', 'SHINE EVERYDAY', 'FREE WASH', 'DOORSTEP WASH', 'KHARADI PUNE'] : ['CLEAN TODAY', 'SHINE EVERYDAY', 'DOORSTEP WASH', 'KHARADI PUNE']}
               padTo={14}
               fontSize="clamp(21px, 6.2vw, 76px)"
               gap="clamp(3px, 0.6vw, 8px)"

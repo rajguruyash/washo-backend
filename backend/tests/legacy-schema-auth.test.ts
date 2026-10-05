@@ -151,3 +151,17 @@ describe('features whose database functions are not installed yet', () => {
     expect(mr.body.code).toBe('backend_not_ready');
   });
 });
+
+describe('the website is newer than this database (no campaign migration yet)', () => {
+  it('the campaign page quietly has no campaign instead of failing, for a visitor and for a signed-in customer', async () => {
+    const visitor = new Client();
+    const v = await visitor.get('/api/campaign');
+    expect(v.status).toBe(200);
+    expect(v.body).toMatchObject({ success: true, campaign: null, me: null, offer: null });
+    const c = new Client();
+    await c.loginCustomer();
+    const mine = await c.get('/api/campaign');
+    expect(mine.status).toBe(200);
+    expect(mine.body.campaign).toBeNull();
+  });
+});

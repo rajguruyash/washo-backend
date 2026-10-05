@@ -77,7 +77,7 @@ export default function History() {
           {rows.map((b) => (
             <button key={b.id} onClick={() => setOpen(b.id)} className="glass flex w-full flex-wrap items-center gap-x-5 gap-y-2 p-4 text-left transition-colors hover:border-washo-400/40">
               <div className="w-36 shrink-0"><p className="text-sm font-bold">{prettyDate(b.scheduled_date)}</p><p className="text-xs text-fog">{slotLabel(b.time_slot)} · {b.reference_code}</p></div>
-              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}{b.campaign_name ? ' · free wash' : ''}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
               <p className="w-32 truncate text-sm text-mist">{b.worker_name ?? <span className="text-fog">No specialist</span>}</p>
               <p className="w-20 text-right text-sm tabular-nums text-mist">{b.booking_type === 'membership' ? 'Membership' : b.price_cents == null ? '' : b.price_cents === 0 ? 'Free' : rupees(b.price_cents)}</p>
               <Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>

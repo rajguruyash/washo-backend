@@ -16,6 +16,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Landing /> },
       { path: 'services', ...page(() => import('./pages/Services')) },
+      { path: 'navratri', ...page(() => import('./pages/Offer')) },
+      { path: 'free-wash', ...page(() => import('./pages/Offer')) },
       { path: '*', element: <NotFound /> },
     ],
   },
@@ -31,6 +33,7 @@ export const router = createBrowserRouter([
       { path: 'membership/requests/:id', ...page(() => import('./pages/app/RequestDetail')) },
       { path: 'membership/:id', ...page(() => import('./pages/app/MembershipDetail')) },
       { path: 'book', ...page(() => import('./pages/app/BookWizard')) },
+      { path: 'claim', ...page(() => import('./pages/app/ClaimWizard')) },
       { path: 'bookings', ...page(() => import('./pages/app/Bookings')) },
       { path: 'bookings/:id', ...page(() => import('./pages/app/BookingDetail')) },
       { path: 'vehicles', ...page(() => import('./pages/app/Vehicles')) },

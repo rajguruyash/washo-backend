@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
+import { campaignNames, withCampaignNames } from '../campaigns';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { reconcileOrder, refundPayment } from '../razorpay';
 import { photoStorage } from '../supabase';
@@ -110,7 +111,7 @@ adminRouter.get(
         )
       ).rows
     );
-    res.json({ success: true, bookings });
+    res.json({ success: true, bookings: await withCampaignNames(req.db, bookings) });
   })
 );
 
@@ -134,7 +135,8 @@ adminRouter.get(
     });
     if (!out) throw new HttpError(404, 'not_found', 'Booking not found');
     const photos = await Promise.all(out.photoRows.map(async (p: any) => ({ id: p.id, phase: p.phase, photo_type: p.photo_type, created_at: p.created_at, url: await photoStorage.signedUrl(p.storage_path) })));
-    res.json({ success: true, booking: out.booking, events: out.events, photos });
+    const names = await campaignNames(req.db, [id]);
+    res.json({ success: true, booking: { ...out.booking, campaign_name: names.get(id) ?? null }, events: out.events, photos });
   })
 );
 

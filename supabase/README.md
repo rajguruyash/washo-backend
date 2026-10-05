@@ -111,3 +111,12 @@ Adds `profiles.archived_at` and `customer_addresses.archived_at` and the admin f
 `admin_set_service_active` / `admin_set_service_price` (versioned), `admin_set_discount` / `admin_remove_discount`, `admin_set_pricing_setting` (whitelisted keys and ranges).
 Triggers stop an archived specialist from being assigned work. Nothing is deleted. Tests: `supabase/tests/after-13-admin-management.test.ts`, `backend/tests/api-admin-management.test.ts`.
 
+
+## Free-wash campaigns (migration 14)
+
+Adds `campaigns` and `campaign_claims` (read-only to people through row-level security: an admin sees all, a customer sees their own claim and its campaign; every write goes through the functions below), and:
+`claim_campaign_wash` (customer: checks the offer is on and open, the total and per-day caps, new customer, one per phone / plate / flat, the date window, lead time and one wash per vehicle per day; creates the free body wash and the claim in one step, serialised per campaign),
+`get_campaign_status` (public: the campaign, spots left, full days, this visitor's state and their membership offer), `admin_save_campaign` / `admin_set_campaign_active`.
+A trigger on `bookings` keeps the claim in step with its wash (completed starts the offer, cancelled gives the claim back, no_show uses it up). A trigger on `memberships` records a membership priced with the offer.
+`app_private.compute_membership_quote` is replaced with the same logic plus the offer for the signed-in customer. No rows are created or changed; no campaign exists until an admin creates one.
+Tests: `supabase/tests/after-14-campaigns.test.ts`, `backend/tests/api-campaign.test.ts`.

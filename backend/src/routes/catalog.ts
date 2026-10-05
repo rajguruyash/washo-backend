@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { parse } from '../errors';
 import { withAnon } from '../db';
-import { asyncHandler } from '../middleware/http';
+import { asyncHandler, optionalSession } from '../middleware/http';
 
 export const catalogRouter = Router();
 
@@ -17,10 +17,12 @@ catalogRouter.get(
   })
 );
 
-// "What would this plan cost?" The database runs the same calculator WASHO's quote starts from (rate card x washes, explicit
-// discounts, the cap). It is only an estimate: nothing is stored, and WASHO still reviews the request and confirms the price.
+// "What would this plan cost?" The database runs the same calculator the checkout uses (rate card x washes, explicit discounts, the
+// cap). Nothing is stored. A signed-in customer gets THEIR price: the calculator knows who is asking, so a welcome offer from a free-wash
+// campaign shows here exactly as it will be charged. A visitor gets the standard price.
 catalogRouter.post(
   '/membership-estimate',
+  optionalSession,
   asyncHandler(async (req, res) => {
     const b = parse(
       z.object({
@@ -30,7 +32,8 @@ catalogRouter.post(
       }),
       req.body
     );
-    const estimate = await withAnon(async (c) =>
+    const run = req.session ? req.db : withAnon;
+    const estimate = await run(async (c) =>
       (await c.query('SELECT public.estimate_membership_price($1::public.vehicle_type, $2::jsonb, $3) AS q', [b.vehicle_type, JSON.stringify(b.weekly_pattern), b.duration_months])).rows[0].q
     );
     res.json({ success: true, estimate });

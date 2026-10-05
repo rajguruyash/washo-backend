@@ -20,12 +20,13 @@ import type { AdminBooking, AdminMembership, AdminRequest, Attention as Attentio
 import { StaffLayout } from '../../layouts/StaffLayout';
 import { AddWashSheet } from './AddWash';
 import { BookingSheet } from './BookingSheet';
+import Campaigns from './Campaigns';
 import History from './History';
 import People from './People';
 import ServicesAdmin from './ServicesAdmin';
 import { Loading, errText } from './shared';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'attention';
+type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'attention';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'requests', label: 'Requests' },
@@ -34,6 +35,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'memberships', label: 'Memberships' },
   { value: 'people', label: 'People' },
   { value: 'services', label: 'Services & prices' },
+  { value: 'campaigns', label: 'Campaigns' },
   { value: 'attention', label: 'Needs attention' },
 ];
 
@@ -170,7 +172,7 @@ function Bookings({ membership, onAdd }: { membership?: string; onAdd: () => voi
           {data.map((b: AdminBooking) => (
             <button key={b.id} onClick={() => setOpen(b.id)} className="glass flex w-full flex-wrap items-center gap-x-5 gap-y-2 p-4 text-left transition-colors hover:border-washo-400/40">
               <div className="w-28 shrink-0"><p className="text-sm font-bold">{prettyDate(b.scheduled_date)}</p><p className="text-xs text-fog">{slotLabel(b.time_slot)}</p></div>
-              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}{b.campaign_name ? ' · free wash' : ''}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
               <p className="w-32 truncate text-sm text-mist">{b.worker_name ?? <span className="text-warn">Unassigned</span>}</p>
               <Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>
             </button>
@@ -323,6 +325,7 @@ export default function Admin() {
       {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} />}
       {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
       {tab === 'services' && <ServicesAdmin />}
+      {tab === 'campaigns' && <Campaigns />}
       {tab === 'attention' && <Attention />}
       <AddWashSheet open={Boolean(adding)} customerId={adding?.customerId} onClose={() => setAdding(null)} onCreated={() => go('bookings')} />
     </StaffLayout>

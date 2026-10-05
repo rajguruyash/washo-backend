@@ -9,7 +9,7 @@ const slotIcon = { sunrise: Sunrise, sun: Sun, moon: Moon };
 
 /** A strip of dates (earliest `min`, up to `days` ahead, never past `max`) and the three daily windows. */
 export function DateSlotPicker({
-  date, slot, onDate, onSlot, min, max, days = 21, showSlot = true, label = 'date',
+  date, slot, onDate, onSlot, min, max, days = 21, showSlot = true, label = 'date', disabledDates,
 }: {
   date: string | null;
   slot: SlotId | null;
@@ -20,6 +20,8 @@ export function DateSlotPicker({
   days?: number;
   showSlot?: boolean;
   label?: string;
+  /** Days that cannot be picked (fully booked), shown struck through. */
+  disabledDates?: string[];
 }) {
   const dates = useMemo(() => {
     const out: string[] = [];
@@ -39,21 +41,25 @@ export function DateSlotPicker({
         <div role="radiogroup" aria-label={`Choose a ${label}`} className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
           {dates.map((d) => {
             const active = d === date;
+            const full = disabledDates?.includes(d) ?? false;
             return (
               <button
                 key={d}
                 type="button"
                 role="radio"
                 aria-checked={active}
+                aria-disabled={full || undefined}
+                disabled={full}
+                title={full ? 'Fully booked' : undefined}
                 onClick={() => onDate(d)}
                 className={cn(
                   'flex h-[76px] w-16 shrink-0 flex-col items-center justify-center rounded-2xl border transition-all',
-                  active ? 'border-washo-400/70 bg-washo-500/20 shadow-[0_0_24px_-8px_rgb(63_124_255/0.8)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
+                  full ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45' : active ? 'border-washo-400/70 bg-washo-500/20 shadow-[0_0_24px_-8px_rgb(63_124_255/0.8)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
                 )}
               >
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-fog">{d === today ? 'Today' : weekdayShort(d)}</span>
-                <span className="font-display text-xl font-extrabold leading-tight">{dayNumber(d)}</span>
-                <span className="text-[10px] font-medium uppercase text-fog">{monthShort(d)}</span>
+                <span className={cn('font-display text-xl font-extrabold leading-tight', full && 'line-through')}>{dayNumber(d)}</span>
+                <span className="text-[10px] font-medium uppercase text-fog">{full ? 'Full' : monthShort(d)}</span>
               </button>
             );
           })}

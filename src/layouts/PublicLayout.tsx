@@ -3,6 +3,7 @@ import { Mail, MapPin, Menu, Phone, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Logo } from '../components/brand/Logo';
+import { CampaignBanner } from '../components/CampaignBanner';
 import { ButtonLink } from '../components/ui/Button';
 import { useAuth } from '../state/auth';
 
@@ -52,6 +53,7 @@ export function PublicLayout() {
             </button>
           </div>
         </div>
+        <CampaignBanner />
         <AnimatePresence>
           {open && (
             <motion.nav initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden md:hidden" aria-label="Mobile">

@@ -10,6 +10,7 @@ UNION ALL SELECT 'admin_begin_refund() exists', to_regprocedure('public.admin_be
 UNION ALL SELECT 'refunds.failure_reason exists', EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='refunds' AND column_name='failure_reason')
 UNION ALL SELECT 'profiles.archived_at exists', EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='profiles' AND column_name='archived_at')
 UNION ALL SELECT 'admin_create_booking() exists', to_regprocedure('public.admin_create_booking(uuid, uuid, uuid, date, public.time_slot, uuid, text, text, text, text, integer)') IS NOT NULL
+UNION ALL SELECT 'claim_campaign_wash() exists (migration 14)', to_regprocedure('public.claim_campaign_wash(uuid, uuid, date, public.time_slot, uuid, text, text)') IS NOT NULL
 UNION ALL SELECT 'washo_api role exists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname='washo_api');
 
 -- What the bundle will not touch, for your information (row counts of the data it leaves alone):

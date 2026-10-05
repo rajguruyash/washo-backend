@@ -1,11 +1,13 @@
-import { ArrowLeft, CalendarClock, CalendarPlus, MapPin, Scissors, Undo2, XCircle } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CalendarPlus, Gift, MapPin, Scissors, Undo2, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
+import { PackOfferCard } from '../../components/PackOfferCard';
 import { PhotoGrid } from '../../components/PhotoGrid';
 import { RescheduleSheet } from '../../components/RescheduleSheet';
 import { CustomerStatus } from '../../components/WashBits';
+import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import TearTicket from '../../components/reactbits/TearTicket';
 import { Sheet } from '../../components/ui/Sheet';
@@ -14,7 +16,7 @@ import { useToast } from '../../components/ui/Toast';
 import { formatPlate, prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { downloadBookingIcs } from '../../lib/ics';
-import { useBooking, useCancelBooking } from '../../lib/queries';
+import { useBooking, useCampaign, useCancelBooking } from '../../lib/queries';
 import { slotLabel, slotWindow } from '../../lib/slots';
 import { isLive } from '../../lib/status';
 
@@ -48,6 +50,7 @@ export default function BookingDetail() {
   const toast = useToast();
   const { data, isLoading, isError, refetch } = useBooking(id);
   const cancel = useCancelBooking();
+  const offer = useCampaign().data?.offer;
   const [moving, setMoving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [ticketKey, setTicketKey] = useState(0); // a fresh, untorn ticket if the cancellation did not go through
@@ -62,7 +65,7 @@ export default function BookingDetail() {
   const doCancel = async () => {
     try {
       await cancel.mutateAsync({ id: b.id });
-      toast.success(b.price_cents ? `Booking cancelled. Your full ${rupees(b.price_cents)} will be refunded once WASHO approves it.` : 'Booking cancelled.');
+      toast.success(b.price_cents ? `Booking cancelled. Your full ${rupees(b.price_cents)} will be refunded once WASHO approves it.` : b.campaign_name ? 'Booking cancelled. You can claim your free wash again while the offer is open.' : 'Booking cancelled.');
       setTimeout(() => setCancelling(false), 700);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not cancel this booking.');
@@ -74,7 +77,7 @@ export default function BookingDetail() {
     <div className="mx-auto max-w-3xl">
       <Link to={b.membership_id ? `/app/membership/${b.membership_id}` : '/app/bookings'} className="mb-5 inline-flex items-center gap-1.5 text-sm text-fog hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</Link>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div><p className="eyebrow">{b.reference_code}</p><h1 className="mt-1 text-3xl font-extrabold">{b.service_name}</h1></div>
+        <div><p className="eyebrow">{b.reference_code}</p><h1 className="mt-1 text-3xl font-extrabold">{b.service_name}</h1>{b.campaign_name && <Badge tone="yellow" icon={<Gift className="h-3.5 w-3.5" />} className="mt-2">{b.campaign_name}</Badge>}</div>
         <CustomerStatus status={b.status} />
       </div>
 
@@ -83,7 +86,7 @@ export default function BookingDetail() {
           <div><p className="eyebrow">When</p><p className="mt-1 font-semibold">{prettyDate(b.scheduled_date)}</p><p className="text-xs text-fog">{slotLabel(b.time_slot)} · {slotWindow(b.time_slot)}</p></div>
           <div><p className="eyebrow">Vehicle</p><div className="mt-1.5 flex items-center gap-3"><span className="font-semibold">{b.vehicle_model}</span><Plate reg={b.registration_number} /></div></div>
           {b.parking_location && <div className="sm:col-span-2"><p className="eyebrow">Parking</p><p className="mt-1 flex items-center gap-2 text-sm"><MapPin className="h-4 w-4 text-washo-300" /> {b.parking_location}</p></div>}
-          {b.price_cents != null && <div><p className="eyebrow">Paid</p><p className="mt-1 font-semibold">{rupees(b.price_cents)}</p></div>}
+          {b.price_cents != null && <div><p className="eyebrow">{b.price_cents === 0 ? 'Price' : 'Paid'}</p><p className="mt-1 font-semibold">{b.price_cents === 0 ? 'Free' : rupees(b.price_cents)}</p></div>}
           {isMembership && b.membership_id && <div><p className="eyebrow">Membership</p><Link to={`/app/membership/${b.membership_id}`} className="mt-1 inline-block text-sm font-semibold text-washo-300 hover:text-white">View membership</Link></div>}
         </div>
         {b.cancel_reason && <div className="p-5"><p className="eyebrow">Cancellation reason</p><p className="mt-1 text-sm">{b.cancel_reason}</p></div>}
@@ -105,6 +108,8 @@ export default function BookingDetail() {
       )}
       {isMembership && live && <p className="mt-3 text-xs text-fog">Membership washes can be rescheduled but not cancelled.</p>}
 
+      {b.status === 'completed' && b.campaign_name && offer && <PackOfferCard offer={offer} className="mt-5" />}
+
       {b.status === 'completed' && <section className="mt-8"><h2 className="mb-3 text-lg font-bold">Before and after</h2><PhotoGrid bookingId={b.id} /></section>}
 
       <section className="mt-8">
@@ -121,7 +126,7 @@ export default function BookingDetail() {
       </section>
 
       <RescheduleSheet wash={moving ? { id: b.id, scheduled_date: b.scheduled_date, time_slot: b.time_slot } : null} onClose={() => setMoving(false)} />
-      <Sheet open={cancelling} onClose={() => setCancelling(false)} locked={cancel.isPending} title="Cancel this booking?" description={b.price_cents ? `Tear off the stub to cancel. You will get the full ${rupees(b.price_cents)} back on the payment method you used, once WASHO approves the refund.` : 'Tear off the stub to cancel.'} size="sm" footer={<Button variant="glass" full disabled={cancel.isPending} onClick={() => setCancelling(false)}>Keep my booking</Button>}>
+      <Sheet open={cancelling} onClose={() => setCancelling(false)} locked={cancel.isPending} title="Cancel this booking?" description={b.price_cents ? `Tear off the stub to cancel. You will get the full ${rupees(b.price_cents)} back on the payment method you used, once WASHO approves the refund.` : b.campaign_name ? 'Tear off the stub to cancel. Your free wash is given back, so you can claim it again while the offer is open.' : 'Tear off the stub to cancel.'} size="sm" footer={<Button variant="glass" full disabled={cancel.isPending} onClick={() => setCancelling(false)}>Keep my booking</Button>}>
         <div className="grid select-none place-items-center py-2" onMouseDown={(e) => e.preventDefault() /* pulling the stub must not start selecting the text around it */}>
           <TearTicket
             key={ticketKey}
@@ -143,7 +148,7 @@ export default function BookingDetail() {
               <dl className="space-y-3 text-sm">
                 <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">When</dt><dd className="mt-0.5 font-semibold">{prettyDate(b.scheduled_date)} · {slotLabel(b.time_slot)}</dd></div>
                 <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">Vehicle</dt><dd className="mt-0.5 font-semibold">{b.vehicle_model} · {formatPlate(b.registration_number)}</dd></div>
-                {b.price_cents != null && <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">Refunded in full</dt><dd className="mt-0.5 font-semibold">{rupees(b.price_cents)}</dd></div>}
+                {!!b.price_cents && <div><dt className="text-[11px] uppercase tracking-[0.16em] text-white/50">Refunded in full</dt><dd className="mt-0.5 font-semibold">{rupees(b.price_cents)}</dd></div>}
               </dl>
             </div>
           </TearTicket>

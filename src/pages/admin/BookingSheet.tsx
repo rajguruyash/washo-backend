@@ -41,13 +41,13 @@ export function BookingSheet({ id, onClose }: { id: string | null; onClose: () =
     <Sheet open={Boolean(id)} onClose={onClose} size="lg" title={b ? `${b.reference_code} · ${b.service_name}` : 'Wash'} description={b ? `${prettyDate(b.scheduled_date)}, ${slotLabel(b.time_slot)}` : undefined}>
       {!b ? <Loading /> : view === 'details' ? (
         <div className="space-y-5">
-          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.booking_type === 'membership' && <Badge tone="blue">Membership</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
+          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.booking_type === 'membership' && <Badge tone="blue">Membership</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.campaign_name && <Badge tone="yellow">Campaign · {b.campaign_name}</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
           <div className="grid gap-4 text-sm sm:grid-cols-2">
             <div><p className="eyebrow">Customer</p><p className="font-semibold">{b.customer_name}</p><a href={`tel:${b.customer_phone}`} className="text-washo-300">{prettyPhone(b.customer_phone)}</a></div>
             <div><p className="eyebrow">Vehicle</p><p>{b.vehicle_type.toUpperCase()} · {b.vehicle_model} {b.vehicle_color ?? ''}</p><p className="text-fog">{b.registration_number}</p></div>
             <div><p className="eyebrow">Address</p><p>{[b.society_name, b.building_block, b.flat_number].filter(Boolean).join(', ')}</p><p className="text-fog">{b.parking_location}</p></div>
             <div><p className="eyebrow">Specialist</p><p className="font-semibold">{b.worker_name ?? 'Unassigned'}</p></div>
-            {b.booking_type !== 'membership' && b.price_cents != null && <div><p className="eyebrow">Payment</p><p className="font-semibold">{b.price_cents === 0 ? 'Complimentary' : rupees(b.price_cents)}</p></div>}
+            {b.booking_type !== 'membership' && b.price_cents != null && <div><p className="eyebrow">Payment</p><p className="font-semibold">{b.price_cents === 0 ? (b.campaign_name ? 'Free (campaign)' : 'Complimentary') : rupees(b.price_cents)}</p></div>}
             {b.notes && <div><p className="eyebrow">Note</p><p>{b.notes}</p></div>}
           </div>
           {live && (

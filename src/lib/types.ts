@@ -82,7 +82,10 @@ export interface QuoteBreakdown {
 }
 
 /** What a plan costs from the rate card, every discount as its own line. The customer pays exactly this. */
-export type PriceEstimate = Omit<QuoteBreakdown, 'adjustment'>;
+export type PriceEstimate = Omit<QuoteBreakdown, 'adjustment'> & {
+  /** Present when this customer's welcome offer (from a free-wash campaign) set the frequency discount. */
+  campaign_offer?: { claim_id: string; campaign_id: string; name: string; bp: number };
+};
 
 export interface MembershipRequest {
   id: string;
@@ -203,6 +206,8 @@ export interface Booking {
   vehicle_make: string | null;
   vehicle_model: string;
   registration_number: string;
+  /** Set when this is a free wash claimed in a campaign (the booking detail only). */
+  campaign_name?: string | null;
 }
 
 export interface BookingRefund {
@@ -343,6 +348,8 @@ export interface AdminBooking {
   notes?: string | null;
   address_id?: string | null;
   source?: string;
+  /** The free-wash campaign this wash was claimed in, if any. */
+  campaign_name?: string | null;
   service_name: string;
   wash_kind: WashKind | null;
   vehicle_type: VehicleType;
@@ -491,4 +498,79 @@ export interface Attention {
   pending: PendingPayment[];
   unfulfilled: { id: string; amount_cents: number; payment_kind: string; provider_payment_id: string | null; updated_at: string; customer_name: string | null; customer_phone: string | null }[];
   refunds: { id: string; amount_cents: number; reason: string; status: string; failure_reason: string | null; created_at: string; customer_name: string | null; customer_phone: string | null }[];
+}
+
+// ───────── free-wash campaigns ─────────
+export interface CampaignPackOffer { days: number; bp_1: number; bp_2: number; bp_3plus: number }
+export type CampaignState = 'upcoming' | 'open' | 'full';
+export interface Campaign {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  state: CampaignState;
+  claim_opens_on: string;
+  claim_closes_on: string;
+  use_by_date: string;
+  total_cap: number;
+  spots_left: number;
+  /** Days that have reached the daily limit (nobody can pick them). */
+  full_dates: string[];
+  new_customers_only: boolean;
+  pack_offer: CampaignPackOffer;
+}
+/** What this visitor can do about the campaign. Absent when they are not signed in as a customer. */
+export type CampaignMe =
+  | { state: 'eligible' }
+  | { state: 'ineligible'; reason: 'existing_customer' }
+  | { state: 'booked' | 'completed' | 'forfeited'; booking_id: string; scheduled_date: string | null; time_slot: SlotId | null };
+/** A customer's welcome offer on wash packs (after their free wash is done). Outlives the campaign. */
+export interface CampaignOffer { claim_id: string; campaign_name: string; expires_at: string; bp_1: number; bp_2: number; bp_3plus: number }
+export interface CampaignStatus { campaign: Campaign | null; me: CampaignMe | null; offer: CampaignOffer | null }
+
+export interface AdminCampaign {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  claim_opens_on: string;
+  claim_closes_on: string;
+  use_by_date: string;
+  total_cap: number;
+  daily_cap: number | null;
+  new_customers_only: boolean;
+  pack_offer_days: number;
+  pack_bp_1: number;
+  pack_bp_2: number;
+  pack_bp_3plus: number;
+  created_at: string;
+  claimed: number;
+  booked: number;
+  completed: number;
+  forfeited: number;
+  released: number;
+  offers_open: number;
+  packs_bought: number;
+  packs_cents: number | string;
+}
+export interface AdminCampaignClaim {
+  id: string;
+  status: 'booked' | 'completed' | 'released' | 'forfeited';
+  claimed_at: string;
+  completed_at: string | null;
+  offer_expires_at: string | null;
+  offer_membership_id: string | null;
+  customer_id: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  booking_id: string;
+  reference_code: string;
+  scheduled_date: string;
+  time_slot: SlotId;
+  booking_status: BookingStatus;
+  vehicle_type: VehicleType;
+  vehicle_model: string;
+  registration_number: string;
+  pack_cents: number | null;
 }

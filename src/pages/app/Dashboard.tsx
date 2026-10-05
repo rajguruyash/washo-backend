@@ -1,13 +1,15 @@
-import { ArrowRight, BadgeCheck, CalendarDays, Car, Clock, Plus } from 'lucide-react';
+import { ArrowRight, BadgeCheck, CalendarDays, Car, Clock, Gift, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
+import { PackOfferCard } from '../../components/PackOfferCard';
 import { EmptyState, PageHeader } from '../../components/EmptyState';
 import { BookingCard } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
 import { ButtonLink } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { claimView, dayOf } from '../../lib/campaign';
 import { prettyDate } from '../../lib/format';
-import { useBookings, useMemberships, useRequests } from '../../lib/queries';
+import { useBookings, useCampaign, useMemberships, useRequests } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { useAuth } from '../../state/auth';
 
@@ -22,6 +24,10 @@ export default function Dashboard() {
   const active = memberships.data?.filter((m) => m.status === 'active') ?? [];
   const completed = past.data?.filter((b) => b.status === 'completed').slice(0, 3) ?? [];
   const loading = memberships.isLoading || requests.isLoading;
+  const campaign = useCampaign().data;
+  const view = claimView(campaign, user?.role);
+  const c = campaign?.campaign;
+  const me = campaign?.me;
 
   return (
     <>
@@ -31,6 +37,27 @@ export default function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /></div>
       ) : (
         <div className="space-y-8">
+          {view === 'eligible' && c && (
+            <Link to="/app/claim" className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">{c.name}: claim your free wash</p>
+                <p className="text-sm text-fog">A free body wash for new customers. Claim by {dayOf(c.claim_closes_on)}{c.spots_left <= 30 ? ` · only ${c.spots_left} left` : ''}.</p>
+              </div>
+              <ArrowRight className="h-5 w-5 text-fog" />
+            </Link>
+          )}
+          {view === 'booked' && me && 'booking_id' in me && (
+            <Link to={`/app/bookings/${me.booking_id}`} className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">Your free wash is booked</p>
+                <p className="text-sm text-fog">{me.scheduled_date ? `${prettyDate(me.scheduled_date)}${me.time_slot ? `, ${slotLabel(me.time_slot)}` : ''}` : 'See the details'}</p>
+              </div>
+              <ArrowRight className="h-5 w-5 text-fog" />
+            </Link>
+          )}
+          {campaign?.offer && <PackOfferCard offer={campaign.offer} />}
           {open.map((r) => (
             <Link key={r.id} to={`/app/membership/requests/${r.id}`} className="glass flex items-center gap-4 border-washo-400/30 p-5 transition-colors hover:border-washo-400/60">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Clock className="h-6 w-6" /></span>

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Bike, Check } from 'lucide-react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AddressSheet } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
 import { Logo } from '../../components/brand/Logo';
@@ -17,6 +17,9 @@ import { useAuth } from '../../state/auth';
 export default function Welcome() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  // A new customer who came for something specific (the free wash) goes straight back to it when set up.
+  const from = (useLocation().state as { from?: string } | null)?.from;
+  const after = from && /^\/app\/claim(\?|$)/.test(from) ? from : '/app/membership/new';
   const save = useSaveProfile();
   const { data: addresses } = useAddresses();
   const [step, setStep] = useState<0 | 1 | 2>(user && !user.needs_profile ? 1 : 0);
@@ -101,13 +104,13 @@ export default function Welcome() {
             <p className="mx-auto mt-2 max-w-sm text-fog">Save it once and starting a membership is a few taps.</p>
             <div className="mt-8 space-y-3">
               <Button size="lg" full icon={<Bike className="h-5 w-5" />} onClick={() => setVehOpen(true)}>Add my vehicle</Button>
-              <Button variant="ghost" full onClick={() => navigate('/app', { replace: true })}>I'll do this later</Button>
+              <Button variant="ghost" full onClick={() => navigate(after === '/app/membership/new' ? '/app' : after, { replace: true })}>I'll do this later</Button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       <AddressSheet open={addrOpen} onClose={() => setAddrOpen(false)} onSaved={() => setStep(2)} />
-      <VehicleSheet open={vehOpen} onClose={() => setVehOpen(false)} onSaved={() => navigate('/app/membership/new', { replace: true })} />
+      <VehicleSheet open={vehOpen} onClose={() => setVehOpen(false)} onSaved={() => navigate(after, { replace: true })} />
     </div>
   );
 }

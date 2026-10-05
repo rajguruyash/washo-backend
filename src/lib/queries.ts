@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
 import type {
-  Address, AdminAddress, AdminBooking, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
-  MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
+  Address, AdminAddress, AdminBooking, AdminCampaign, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
 export const keys = {
@@ -18,6 +18,7 @@ export const keys = {
   booking: (id: string) => ['booking', id] as const,
   photos: (id: string) => ['photos', id] as const,
   notifications: ['notifications'] as const,
+  campaign: ['campaign'] as const,
   workerQueue: ['worker-queue'] as const,
   workerPool: ['worker-pool'] as const,
   admin: (...p: unknown[]) => ['admin', ...p] as const,
@@ -29,6 +30,9 @@ export const useMe = () => useQuery({ queryKey: keys.me, queryFn: fetchMe, retry
 
 export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () => get<Catalog>('/catalog'), staleTime: 5 * 60_000 });
 
+/** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
+export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false });
+
 export interface EstimateInput {
   vehicle_type: VehicleType;
   weekly_pattern: PatternItem[];
@@ -36,15 +40,18 @@ export interface EstimateInput {
 }
 
 /** Live price estimate from the rate card (the database runs the calculator). Null input = nothing to price yet. */
-export const useEstimate = (input: EstimateInput | null) =>
-  useQuery({
-    queryKey: ['estimate', input],
+export const useEstimate = (input: EstimateInput | null) => {
+  // The price can include this customer's welcome offer, so it is cached per offer.
+  const offer = useCampaign().data?.offer?.claim_id ?? null;
+  return useQuery({
+    queryKey: ['estimate', input, offer],
     queryFn: async () => (await post<{ estimate: PriceEstimate }>('/membership-estimate', input)).estimate,
     enabled: Boolean(input),
     staleTime: 10 * 60_000,
     retry: false,
     placeholderData: keepPreviousData,
   });
+};
 
 /** The mix a plan starts from before the customer chooses: bikes all one wash, otherwise Body, Deep, Body, Deep... */
 export function defaultPattern(vehicleType: VehicleType, perWeek: number): PatternItem[] {
@@ -104,7 +111,7 @@ export function useRefreshAll() {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles'].map((k) =>
+      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate'].map((k) =>
         qc.invalidateQueries({ queryKey: [k] })
       )
     );
@@ -191,6 +198,16 @@ export const useStartOnDemandPayment = () =>
 export const useCancelBooking = () => {
   const refresh = useRefreshAll();
   return useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => post(`/bookings/${id}/cancel`, { reason }), onSuccess: () => refresh() });
+};
+
+export interface ClaimInput { campaign_id: string; vehicle_id: string; date: string; time_slot: SlotId; address_id?: string | null; parking_location?: string }
+/** Claim the free wash: books it in one step (the database checks every rule). */
+export const useClaimFreeWash = () => {
+  const refresh = useRefreshAll();
+  return useMutation({
+    mutationFn: (body: ClaimInput) => post<{ booking_id: string; claim_id: string; campaign_name: string; service_name: string }>('/campaign/claim', body),
+    onSuccess: () => refresh(),
+  });
 };
 
 export const useRescheduleWash = () => {
@@ -332,6 +349,16 @@ export const useAdminCustomers = (q: string, status: 'active' | 'archived' | 'al
   useQuery({ queryKey: keys.admin('customers', q, status), queryFn: async () => (await get<{ customers: AdminCustomerRow[] }>(`/admin/customers?q=${encodeURIComponent(q)}&status=${status}`)).customers });
 export const useAdminCustomer = (id: string | undefined) =>
   useQuery({ queryKey: keys.admin('customer', id ?? ''), queryFn: () => get<AdminCustomerDetail>(`/admin/customers/${id}`), enabled: Boolean(id) });
+export const useAdminCampaigns = () => useQuery({ queryKey: keys.admin('campaigns'), queryFn: async () => (await get<{ campaigns: AdminCampaign[] }>('/admin/campaigns')).campaigns });
+export const useAdminCampaign = (id: string | undefined) =>
+  useQuery({ queryKey: keys.admin('campaign', id ?? ''), queryFn: () => get<{ campaign: AdminCampaign; days: { date: string; washes: number }[] }>(`/admin/campaigns/${id}`), enabled: Boolean(id) });
+export const useAdminCampaignClaims = (id: string | undefined, status: string, q: string) =>
+  useQuery({
+    queryKey: keys.admin('campaign-claims', id ?? '', status, q),
+    queryFn: async () => (await get<{ claims: AdminCampaignClaim[] }>(`/admin/campaigns/${id}/claims?status=${status}&q=${encodeURIComponent(q)}`)).claims,
+    enabled: Boolean(id),
+    placeholderData: keepPreviousData,
+  });
 export const useAdminServices = () => useQuery({ queryKey: keys.admin('services'), queryFn: async () => (await get<{ services: AdminService[] }>('/admin/services')).services });
 export const useAdminPricing = () => useQuery({ queryKey: keys.admin('pricing'), queryFn: () => get<AdminPricing>('/admin/pricing') });
 export type { AdminAddress };

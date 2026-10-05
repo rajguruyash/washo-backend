@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
+import { withCampaignNames } from '../campaigns';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { phoneSchema } from '../phone';
 import { ADMIN_BOOKING_SQL } from './admin';
@@ -375,7 +376,7 @@ adminManageRouter.get(
       ).rows[0];
       return { bookings, summary: { ...summary, single_wash_cents: Number(summary.single_wash_cents) } };
     });
-    res.json({ success: true, ...out });
+    res.json({ success: true, ...out, bookings: await withCampaignNames(req.db, out.bookings) });
   })
 );
 

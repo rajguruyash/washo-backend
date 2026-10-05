@@ -13,7 +13,8 @@ import { TextArea } from '../../components/ui/Field';
 import { cn } from '../../lib/cn';
 import { addDays, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { defaultPattern, useAddresses, useCatalog, useEstimate, useStartMembershipPayment, useVehicles } from '../../lib/queries';
+import { defaultPattern, useAddresses, useCampaign, useCatalog, useEstimate, useStartMembershipPayment, useVehicles } from '../../lib/queries';
+import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
 import { SlideToPay } from '../../components/SlideToPay';
 import { slotLabel } from '../../lib/slots';
@@ -107,7 +108,11 @@ export default function MembershipWizard() {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
     return catalog?.services.find((x) => x.code === code)?.unit_prices?.find((p) => p.vehicle_type === vehicle?.vehicle_type)?.price_cents ?? 0;
   };
-  const discount = (kind: 'frequency' | 'duration', key: number) => catalog?.discounts.find((d) => d.kind === kind && d.key === key)?.discount_bp ?? 0;
+  // A customer whose free wash is done has a welcome offer in place of the normal frequency discount (never lower than it).
+  const offer = useCampaign().data?.offer;
+  const standard = (kind: 'frequency' | 'duration', key: number) => catalog?.discounts.find((d) => d.kind === kind && d.key === key)?.discount_bp ?? 0;
+  const discount = (kind: 'frequency' | 'duration', key: number) => (kind === 'frequency' && offer ? Math.max(standard(kind, key), offerBpFor(offer, key)) : standard(kind, key));
+  const offerApplies = (n: number) => Boolean(offer) && offerBpFor(offer!, n) > standard('frequency', n);
 
   const choosePerWeek = (n: number) => {
     setPerWeek(n);
@@ -228,7 +233,7 @@ export default function MembershipWizard() {
                   <div>
                     <p className="text-lg font-bold">{perWeek} wash{perWeek > 1 ? 'es' : ''} a week · {perWeek * weeks} a month</p>
                     <p className="mt-1 text-sm text-fog">{perWeekHint(perWeek, Boolean(bike))}</p>
-                    {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} a week</Badge>}
+                    {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} a week{offerApplies(perWeek) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
                   </div>
                   <div className="text-right">
                     <p className="eyebrow">Price</p>
@@ -310,7 +315,6 @@ export default function MembershipWizard() {
                 );
               })}
             </div>
-            {catalog && <p className="mt-4 flex items-start gap-2 text-xs text-fog"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Frequency and length discounts add up, but never beyond {percent(catalog.max_total_discount_bp)} in total.</p>}
           </motion.section>
         )}
 
@@ -340,7 +344,7 @@ export default function MembershipWizard() {
                 <div><p className="eyebrow">Starting</p><p className="mt-1 font-semibold">{prettyDate(start)}</p></div>
                 <div>
                   <p className="eyebrow">Discounts</p>
-                  <p className="mt-1 font-semibold">{[discount('frequency', perWeek) ? `${percent(discount('frequency', perWeek))} frequency` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
+                  <p className="mt-1 font-semibold">{[discount('frequency', perWeek) ? `${percent(discount('frequency', perWeek))} ${offerApplies(perWeek) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
                 </div>
               </div>
               <div className="p-5">

@@ -105,6 +105,15 @@ export const requireSession = asyncHandler(async (req, res, next) => {
   next();
 });
 
+/**
+ * For pages anyone can open that show a little more to someone signed in: uses the session if there is a good one, and carries on
+ * as a visitor if not (no error, nothing to sign in for).
+ */
+export const optionalSession: RequestHandler = (req, res, next) => {
+  if (!readCookie(req, ACCESS_COOKIE) && !readCookie(req, REFRESH_COOKIE)) return next();
+  requireSession(req, res, () => next());
+};
+
 /** The role comes from profiles.role in the database; the database's own checks still apply to every call. */
 export const requireRole = (...roles: Role[]): RequestHandler => (req, _res, next) => {
   if (!req.session || !roles.includes(req.session.profile.role)) {
