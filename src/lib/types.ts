@@ -574,3 +574,6 @@ export interface AdminCampaignClaim {
   registration_number: string;
   pack_cents: number | null;
 }
+
+/** A best guess at where the phone is, from its coordinates (nothing about it is stored). */
+export interface GeoPlace { society: string | null; area: string | null; city: string | null; pincode: string | null; road: string | null; label: string }

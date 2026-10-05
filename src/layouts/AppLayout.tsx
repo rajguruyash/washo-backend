@@ -167,7 +167,7 @@ export function AppLayout() {
   const { pathname } = useLocation();
   const focused = pathname === '/app/welcome';
   // Wizards own the bottom of the screen with their own sticky action bar.
-  const immersive = /^\/app\/(book|membership\/new)\/?$/.test(pathname);
+  const immersive = /^\/app\/(book|claim|membership\/new)\/?$/.test(pathname);
   return (
     <RequireRole role="customer">
       <PaymentRecovery />

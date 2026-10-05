@@ -63,6 +63,13 @@ export const config = {
     adminEmail: process.env.ADMIN_EMAIL || 'contact.washo@gmail.com',
   },
 
+  // "Use my location" on the address form: a reverse lookup of the coordinates through OpenStreetMap's Nominatim (free; its usage policy asks
+  // for an identifying User-Agent and at most one request a second, both done here). Only tests point `url` somewhere else.
+  geocode: {
+    url: (process.env.GEOCODE_URL || 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
+    minIntervalMs: process.env.GEOCODE_MIN_INTERVAL_MS !== undefined ? Number(process.env.GEOCODE_MIN_INTERVAL_MS) : 1100,
+  },
+
   photos: {
     maxBytes: 8 * 1024 * 1024,
     signedUrlSeconds: 15 * 60,

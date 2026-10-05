@@ -60,6 +60,9 @@ export interface FakeSupabase {
   isBanned(authUserId: string): boolean;
   /** Make the next Razorpay API call fail with this HTTP status. */
   failNextRazorpayCall(status?: number): void;
+  /** How many location lookups reached the stand-in for OpenStreetMap, and a way to make the next one fail. */
+  geoCalls(): number;
+  failNextGeocode(): void;
   /**
    * Simulates the person finishing "Continue with Google": returns the one-time code Supabase would put in the callback URL.
    * It only works for the browser that holds the verifier matching `challenge` (PKCE).
@@ -92,6 +95,8 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     otpSent: [] as string[],
     throttle: false,
     rzpFail: 0,
+    geoCalls: 0,
+    geoFail: false,
     rzpRejectRefund: '' as string,
     phoneChange: new Map<string, string>(), // auth user id -> the number a code was sent to
     banned: new Set<string>(), // auth user ids locked through the admin API
@@ -294,6 +299,23 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       }
       if (path === '/auth/v1/logout' && req.method === 'POST') return send(res, 204, {});
 
+      // ───────── OpenStreetMap Nominatim stand-in (reverse geocoding for "use my location") ─────────
+      if (path === '/geo/reverse') {
+        state.geoCalls += 1;
+        if (state.geoFail) {
+          state.geoFail = false;
+          return send(res, 503, { error: 'busy' });
+        }
+        const lat = Number(url.searchParams.get('lat'));
+        // near Yashwin Orizzonte, Kharadi -> a society; anywhere else in Pune -> only a road
+        if (Math.abs(lat - 18.5515) < 0.002) {
+          return send(res, 200, { name: 'Yashwin Orizzonte', category: 'building', type: 'apartments', display_name: 'Yashwin Orizzonte, Kharadi, Pune, Maharashtra, 411014, India',
+            address: { building: 'Yashwin Orizzonte Phase 1', road: 'EON Road', suburb: 'Kharadi', city: 'Pune', state: 'Maharashtra', postcode: '411014' } });
+        }
+        return send(res, 200, { name: '', category: 'highway', type: 'residential', display_name: 'Some Road, Hadapsar, Pune, Maharashtra, 411028, India',
+          address: { road: 'Some Road', suburb: 'Hadapsar', city: 'Pune', postcode: '411 028' } });
+      }
+
       // ───────── Razorpay REST API (orders, payments, capture) ─────────
       if (path.startsWith('/rzp/v1/')) {
         const ok = req.headers.authorization === 'Basic ' + Buffer.from(`${FAKE.razorpayKeyId}:${FAKE.razorpayKeySecret}`).toString('base64');
@@ -402,6 +424,10 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     otpSent: state.otpSent,
     razorpayBase: `${url}/rzp`,
     isBanned: (id) => state.banned.has(id),
+    geoCalls: () => state.geoCalls,
+    failNextGeocode: () => {
+      state.geoFail = true;
+    },
     failNextRazorpayCall: (status = 500) => {
       state.rzpFail = status;
     },
