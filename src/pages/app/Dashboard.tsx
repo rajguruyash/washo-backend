@@ -17,8 +17,8 @@ export default function Dashboard() {
   const { user } = useAuth();
   const memberships = useMemberships();
   const requests = useRequests();
-  const upcoming = useBookings('upcoming');
-  const past = useBookings('past');
+  const upcoming = useBookings('upcoming', true);
+  const past = useBookings('past', Boolean(upcoming.data?.length));
   const first = user?.full_name?.split(' ')[0];
   const open = requests.data?.filter((r) => ['submitted', 'quoted', 'accepted'].includes(r.status)) ?? [];
   const active = memberships.data?.filter((m) => m.status === 'active') ?? [];

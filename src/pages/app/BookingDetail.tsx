@@ -1,5 +1,6 @@
 import { ArrowLeft, CalendarClock, CalendarPlus, Gift, MapPin, Scissors, Undo2, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
@@ -16,7 +17,7 @@ import { useToast } from '../../components/ui/Toast';
 import { formatPlate, prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { downloadBookingIcs } from '../../lib/ics';
-import { useBooking, useCampaign, useCancelBooking } from '../../lib/queries';
+import { keys, useBooking, useCampaign, useCancelBooking } from '../../lib/queries';
 import { slotLabel, slotWindow } from '../../lib/slots';
 import { isLive } from '../../lib/status';
 
@@ -51,6 +52,10 @@ export default function BookingDetail() {
   const { data, isLoading, isError, refetch } = useBooking(id);
   const cancel = useCancelBooking();
   const offer = useCampaign().data?.offer;
+  // The moment the wash is done (the page follows it), look again for the welcome offer that a free wash unlocks.
+  const qc = useQueryClient();
+  const justDone = data?.booking.status === 'completed';
+  useEffect(() => { if (justDone) void qc.invalidateQueries({ queryKey: keys.campaign }); }, [justDone, qc]);
   const [moving, setMoving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [ticketKey, setTicketKey] = useState(0); // a fresh, untorn ticket if the cancellation did not go through

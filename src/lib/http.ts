@@ -30,7 +30,9 @@ export async function request<T = any>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown,
-  extraHeaders?: Record<string, string>
+  extraHeaders?: Record<string, string>,
+  /** keepalive lets a request finish even if the page is put in the background (a phone opening its dialer). */
+  opts?: { keepalive?: boolean }
 ): Promise<T> {
   let res: Response;
   try {
@@ -39,6 +41,7 @@ export async function request<T = any>(
       credentials: 'same-origin',
       headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      keepalive: opts?.keepalive,
     });
   } catch {
     throw new ApiError(0, 'network', "We couldn't reach WASHO. Check your connection and try again.");
@@ -60,6 +63,6 @@ export async function request<T = any>(
 }
 
 export const get = <T = any>(path: string) => request<T>('GET', path);
-export const post = <T = any>(path: string, body?: unknown) => request<T>('POST', path, body ?? {});
+export const post = <T = any>(path: string, body?: unknown, opts?: { keepalive?: boolean }) => request<T>('POST', path, body ?? {}, undefined, opts);
 export const put = <T = any>(path: string, body?: unknown) => request<T>('PUT', path, body);
 export const del = <T = any>(path: string) => request<T>('DELETE', path);

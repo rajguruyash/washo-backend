@@ -8,7 +8,7 @@ import { useBookings } from '../../lib/queries';
 
 export default function Bookings() {
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
-  const { data, isLoading, isError, refetch } = useBookings(tab);
+  const { data, isLoading, isError, refetch } = useBookings(tab, tab === 'upcoming');
   return (
     <>
       <PageHeader title="Washes" subtitle="Every wash, from membership or single bookings." action={<ButtonLink to="/app/book" variant="glass">Book a single wash</ButtonLink>} />

@@ -1,5 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { del, get, post, put } from './http';
+import { isLive } from './status';
 import type {
   Address, AdminAddress, AdminBooking, AdminCampaign, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
@@ -31,7 +32,7 @@ export const useMe = () => useQuery({ queryKey: keys.me, queryFn: fetchMe, retry
 export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () => get<Catalog>('/catalog'), staleTime: 5 * 60_000 });
 
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
-export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false });
+export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
 
 export interface EstimateInput {
   vehicle_type: VehicleType;
@@ -84,14 +85,21 @@ export const useMembership = (id: string | undefined) =>
     enabled: Boolean(id),
   });
 
-export const useBookings = (scope: 'upcoming' | 'past' | 'all' = 'all') =>
-  useQuery({ queryKey: keys.bookings(scope), queryFn: async () => (await get<{ bookings: Booking[] }>(`/bookings?scope=${scope}`)).bookings });
+/** `live`: check again every 30 seconds while the page is open, so a wash the specialist has just finished shows up without a refresh. */
+export const useBookings = (scope: 'upcoming' | 'past' | 'all' = 'all', live = false) =>
+  useQuery({
+    queryKey: keys.bookings(scope),
+    queryFn: async () => (await get<{ bookings: Booking[] }>(`/bookings?scope=${scope}`)).bookings,
+    refetchInterval: live ? 30_000 : false,
+  });
 
 export const useBooking = (id: string | undefined) =>
   useQuery({
     queryKey: keys.booking(id ?? ''),
     queryFn: () => get<{ booking: Booking; events: BookingEvent[]; refund: BookingRefund | null }>(`/bookings/${id}`),
     enabled: Boolean(id),
+    // While the wash is being done, follow it: assigned, called, started, completed (and its photos).
+    refetchInterval: (q) => (q.state.data && isLive(q.state.data.booking.status) ? 15_000 : false),
   });
 
 export const usePhotos = (bookingId: string | undefined, enabled = true) =>
@@ -236,7 +244,8 @@ export const useWorkerStep = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, step, body }: { id: string; step: WorkerStep; body?: Record<string, unknown> }) =>
-      (await post<{ wash: WorkerWash | null }>(`/worker/washes/${id}/${step}`, body)).wash,
+      // logging a call is sent with keepalive: the phone goes to its dialer straight after the tap
+      (await post<{ wash: WorkerWash | null }>(`/worker/washes/${id}/${step}`, body, step === 'call' ? { keepalive: true } : undefined)).wash,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.workerQueue });
       qc.invalidateQueries({ queryKey: keys.workerPool });

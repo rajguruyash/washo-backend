@@ -36,6 +36,8 @@ export default function WorkerWash() {
   const [sheet, setSheet] = useState<'issue' | 'note' | 'unreached' | null>(null);
   const [kind, setKind] = useState<(typeof ISSUES)[number]['id']>('other');
   const [text, setText] = useState('');
+  // The specialist has rung (or says they have). The next step opens at once: it never waits on the phone's dialer or on the network.
+  const [dialed, setDialed] = useState(false);
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
@@ -53,6 +55,11 @@ export default function WorkerWash() {
     }
   };
   const busy = step.isPending;
+  // Logs the call for WASHO (kept alive through the dialer). If it cannot be logged, the wash can still go on: confirming does not depend on it.
+  const logCall = () => {
+    setDialed(true);
+    step.mutate({ id: w.booking_id, step: 'call' });
+  };
   const confirmed = Boolean(w.customer_confirmed_at);
   const holds = w.bucket !== 'changed';
   const st = staffStatus[w.status];
@@ -61,8 +68,8 @@ export default function WorkerWash() {
     !holds || ['cancelled', 'refunded', 'refund_requested', 'no_show'].includes(w.status) ? 'closed' :
     w.status === 'completed' ? 'done' :
     w.status === 'in_progress' ? 'work' :
-    w.status === 'call_not_picked_up' ? 'retry' :
-    w.status === 'worker_called' ? (confirmed ? 'start' : 'respond') : 'call';
+    w.status === 'call_not_picked_up' ? (dialed ? 'respond' : 'retry') :
+    w.status === 'worker_called' ? (confirmed ? 'start' : 'respond') : dialed ? 'respond' : 'call';
 
   const submitSheet = async () => {
     const ok =
@@ -101,7 +108,8 @@ export default function WorkerWash() {
         <div className="glass p-5">
           <h2 className="text-lg font-bold">1 · Call the customer</h2>
           <p className="mt-1 text-sm text-fog">{phase === 'retry' ? `They did not pick up. Calls so far: ${w.calls_made}. The wash is still scheduled.` : 'Confirm they are ready before you start.'}</p>
-          <a href={`tel:${w.customer_phone}`} onClick={() => void run('call')} className="mt-4 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-washo-500 to-washo-700 text-base font-semibold text-white"><Phone className="h-5 w-5" /> Call {w.customer_name?.split(' ')[0]}</a>
+          <a href={`tel:${w.customer_phone}`} onClick={logCall} className="mt-4 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-washo-500 to-washo-700 text-base font-semibold text-white"><Phone className="h-5 w-5" /> Call {w.customer_name?.split(' ')[0]}</a>
+          <button type="button" onClick={logCall} className="mt-3 w-full rounded-xl py-2 text-sm font-semibold text-washo-300 hover:text-white">I have already spoken to the customer. Continue</button>
         </div>
       )}
 
@@ -112,7 +120,7 @@ export default function WorkerWash() {
             <Button size="lg" loading={busy} icon={<Check className="h-5 w-5" />} onClick={() => void run('confirm', undefined, 'Customer confirmed')}>Customer confirmed</Button>
             <Button size="lg" variant="glass" icon={<PhoneMissed className="h-5 w-5" />} onClick={() => setSheet('unreached')}>Call not picked up</Button>
           </div>
-          <a href={`tel:${w.customer_phone}`} onClick={() => void run('call')} className="mt-4 inline-block text-sm font-semibold text-washo-300">Call again</a>
+          <a href={`tel:${w.customer_phone}`} onClick={logCall} className="mt-4 inline-block text-sm font-semibold text-washo-300">Call again</a>
         </div>
       )}
 
