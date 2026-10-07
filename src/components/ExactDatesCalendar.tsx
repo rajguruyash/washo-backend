@@ -1,6 +1,7 @@
-import { RotateCcw } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../lib/cn';
+import { RUSH_NOTE } from '../lib/crowd';
 import { exactDatesProblem, weekKey, type Need } from '../lib/schedule';
 import type { CapacityDay, ExactDate, SlotId, WashKind } from '../lib/types';
 
@@ -11,7 +12,7 @@ const longDay = (date: string) => new Intl.DateTimeFormat('en-IN', { weekday: 's
 
 /**
  * Every wash of the membership on a calendar, picked by hand. Body washes are blue and Deep cleans yellow; choose a kind, then tap days.
- * Crowded days are marked amber and full ones are red and cannot be picked; nothing before the earliest start (not today or tomorrow) and
+ * Busy days are marked amber and rush days red (with a note about a slight delay), but any of them can be picked; nothing before the earliest start (not today or tomorrow) and
  * nothing after the term can be chosen; one wash a day; no more in a week than the plan's washes per week. The database checks all of it again before payment.
  */
 export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, onChange, onReset, crowd, slot }: {
@@ -23,7 +24,9 @@ export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, 
   const have = { body: value.filter((v) => v.kind === 'body').length, deep: value.filter((v) => v.kind === 'deep').length };
   const left = { body: need.body - have.body, deep: need.deep - have.deep };
   const perWeekCount = useMemo(() => { const m = new Map<string, number>(); for (const v of value) m.set(weekKey(v.date), (m.get(weekKey(v.date)) ?? 0) + 1); return m; }, [value]);
-  const problem = exactDatesProblem({ value, need, perWeek, minDate, end, slot, crowd });
+  const problem = exactDatesProblem({ value, need, perWeek, minDate, end });
+  const stateOf = (date: string) => (slot ? crowd?.[date]?.slots[slot]?.state : crowd?.[date]?.state);
+  const rushChosen = value.filter((v) => stateOf(v.date) === 'full').length;
 
   const months = useMemo(() => {
     const out: { y: number; m: number }[] = [];
@@ -86,28 +89,30 @@ export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, 
                 const date = iso(y, m, i + 1);
                 const kind = kindOf.get(date);
                 const out = date < minDate || date < start || date > end;
-                const c = slot ? crowd?.[date]?.slots[slot]?.state : crowd?.[date]?.state;
-                const full = !out && c === 'full' && !kind;
+                const c = stateOf(date);
+                const rush = !out && c === 'full';
                 const busy = !out && c === 'busy';
-                const disabled = out || full;
+                const disabled = out;
                 return (
                   <button
                     key={date}
                     type="button"
                     disabled={disabled}
                     aria-pressed={Boolean(kind)}
-                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : full ? ', fully booked' : busy ? ', busy' : out ? ', not available' : ''}`}
+                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${out ? ', not available' : ''}`}
                     onClick={() => pick(date)}
                     className={cn(
                       'relative grid aspect-square place-items-center rounded-xl border text-sm font-bold transition-colors',
                       kind === 'body' ? 'border-washo-400 bg-washo-500 text-white' : kind === 'deep' ? 'border-offer bg-offer text-ink-950' :
-                      full ? 'cursor-not-allowed border-bad/40 bg-bad/15 text-bad' : out ? 'cursor-not-allowed border-transparent text-white/20' :
+                      out ? 'cursor-not-allowed border-transparent text-white/20' :
+                      rush ? 'border-bad/50 bg-bad/10 text-bad hover:border-bad' :
                       busy ? 'border-warn/50 bg-warn/10 hover:border-warn' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25',
-                      kind && c === 'full' && 'ring-2 ring-bad'
+                      kind && rush && 'ring-2 ring-bad'
                     )}
                   >
                     {i + 1}
                     {busy && !kind && <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warn" />}
+                    {rush && !kind && <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-bad" />}
                   </button>
                 );
               })}
@@ -120,9 +125,10 @@ export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, 
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-washo-500" /> Body wash</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-offer" /> Deep clean</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-warn/60 bg-warn/20" /> Busy day</span>
-        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-bad/40 bg-bad/20" /> Fully booked</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-bad/40 bg-bad/20" /> Rush day (slight delay possible)</span>
         <span>Greyed: before {longDay(minDate)} or after your membership ends</span>
       </div>
+      {rushChosen > 0 && <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {rushChosen === 1 ? 'One of your days is a rush day' : `${rushChosen} of your days are rush days`}. {RUSH_NOTE.replace('It is a rush on this day, so there', 'There')}</p>}
       <button type="button" onClick={onReset} className="inline-flex items-center gap-1.5 text-sm font-semibold text-washo-300 hover:text-white"><RotateCcw className="h-4 w-4" /> Back to the automatic spread</button>
     </div>
   );

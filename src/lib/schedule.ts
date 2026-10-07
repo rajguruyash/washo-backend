@@ -1,5 +1,5 @@
 import { addDays } from './format';
-import type { CapacityDay, ExactDate, SlotId, WashKind } from './types';
+import type { ExactDate, WashKind } from './types';
 
 const parts = (date: string) => new Date(`${date}T00:00:00Z`);
 
@@ -14,9 +14,9 @@ export interface Need { body: number; deep: number }
 /**
  * What is wrong with a set of exact dates, in words; null when it is fine. The same rules the database enforces before it takes any money:
  * the right number of each kind of wash, one a day, inside the term and not before the earliest start (not today or tomorrow), no more in
- * a week than the plan's washes per week, and none on a day that is fully booked in the chosen time window.
+ * a week than the plan's washes per week. (A rush day is allowed: it is only shown red.)
  */
-export function exactDatesProblem(o: { value: ExactDate[]; need: Need; perWeek: number; minDate: string; end: string; slot: SlotId | null; crowd?: Record<string, CapacityDay> }): string | null {
+export function exactDatesProblem(o: { value: ExactDate[]; need: Need; perWeek: number; minDate: string; end: string }): string | null {
   const body = o.value.filter((v) => v.kind === 'body').length;
   const deep = o.value.length - body;
   if (body < o.need.body || deep < o.need.deep) {
@@ -30,10 +30,6 @@ export function exactDatesProblem(o: { value: ExactDate[]; need: Need; perWeek: 
   const perWeek = new Map<string, number>();
   for (const v of o.value) perWeek.set(weekKey(v.date), (perWeek.get(weekKey(v.date)) ?? 0) + 1);
   for (const [wk, n] of perWeek) if (n > o.perWeek) return `No more than ${o.perWeek} wash${o.perWeek > 1 ? 'es' : ''} in one week: the week of ${parts(wk).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })} has ${n}.`;
-  if (o.slot) {
-    const full = o.value.filter((v) => o.crowd?.[v.date]?.slots[o.slot!]?.state === 'full').map((v) => v.date).sort();
-    if (full.length) return `${parts(full[0]).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })} is fully booked in this time window. Pick another day.`;
-  }
   return null;
 }
 

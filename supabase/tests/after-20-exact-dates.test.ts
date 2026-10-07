@@ -64,30 +64,27 @@ describe('the planner', () => {
       }
     }));
 
-  it('passes over a day that is full (and carries on to the next chosen day), when asked to respect the limits', async () =>
+  it('a crowded (red) day is not passed over: the plan lands on the chosen weekdays whatever the crowd', async () =>
     inTx(async (s) => {
-      // three months: room for the washes to slip a day or two, whatever weekday the term starts on
       const c = await setup(s);
       const three = { months: 3, total: 24 };
       const before = await planned(s, c, three);
       await limitsToOne(s);
       await s.as('postgres');
-      await occupy(s, before[0].d); // the first wash day is now full
+      await occupy(s, before[0].d); // the first wash day is now past the red number
       const after = await planned(s, c, three);
-      expect(after.map((r: any) => r.d)).not.toContain(before[0].d);
-      expect(after).toHaveLength(24); // every wash still has a day, a little later
-      const ignoring = await planned(s, c, { ...three, respect: false });
-      expect(ignoring.map((r: any) => r.d)).toContain(before[0].d); // without the limits it would use it
+      expect(after.map((r: any) => r.d)).toEqual(before.map((r: any) => r.d)); // unchanged
+      expect(after).toHaveLength(24);
     }));
 
-  it('says so when the crowded days leave no room: fewer days than washes', async () =>
+  it('even when every chosen day is red, every wash still has its day', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       await limitsToOne(s);
       await s.as('postgres');
       const all = await planned(s, c, { respect: false, total: 20 }); // every Wed and Sat in the term
       for (const r of all) await occupy(s, r.d);
-      expect(await planned(s, c, { total: 8 })).toHaveLength(0);
+      expect(await planned(s, c, { total: 8 })).toHaveLength(8);
     }));
 });
 
@@ -104,7 +101,7 @@ describe('the preview', () => {
       expect(p.end_date >= p.dates[7].date).toBe(true);
     }));
 
-  it('says it does not fit, and still shows where it would land', async () =>
+  it('still fits when every day is red, and says which days are red so the page can mark them', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       await limitsToOne(s);
@@ -112,8 +109,8 @@ describe('the preview', () => {
       const all = await planned(s, c, { respect: false, total: 20 });
       for (const r of all) await occupy(s, r.d);
       const p = await preview(s, c);
-      expect(p.fits).toBe(false);
-      expect(p.dates.length).toBeGreaterThan(0);
+      expect(p.fits).toBe(true);
+      expect(p.dates).toHaveLength(8);
       expect(p.dates.every((d: any) => d.state === 'full')).toBe(true);
     }));
 
@@ -129,15 +126,27 @@ describe('the preview', () => {
       expect(await q(c.veh, c.start, [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }])).toMatch(/different day/);
     }));
 
-  it('a request on weekdays that cannot be laid out is refused before any payment exists', async () =>
+  it('a request on weekdays that cannot be laid out (this vehicle already has washes on them) is refused before any payment exists', async () =>
+    inTx(async (s) => {
+      const c = await setup(s);
+      await s.as('postgres');
+      const svc = await serviceId(s, 'car-body-wash');
+      // the vehicle is already booked on every chosen day of the term
+      for (const r of await planned(s, c, { respect: false, total: 20 })) {
+        await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',$4::date,'night','confirmed')`, [c.u.profileId, c.veh, svc, r.d]);
+      }
+      expect(await checkoutErr(s, c, null)).toMatch(/cannot fit all 8 washes/);
+      await s.as('postgres');
+      expect((await s.q('select count(*)::int n from public.payments'))[0].n).toBe(0);
+    }));
+
+  it('a crowd of red days does not stop the request: it is priced and ready to pay', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       await limitsToOne(s);
       await s.as('postgres');
       for (const r of await planned(s, c, { respect: false, total: 20 })) await occupy(s, r.d);
-      expect(await checkoutErr(s, c, null)).toMatch(/cannot fit all 8 washes/);
-      await s.as('postgres');
-      expect((await s.q('select count(*)::int n from public.payments'))[0].n).toBe(0);
+      expect(await checkoutErr(s, c, null)).toBeNull();
     }));
 });
 
@@ -200,7 +209,7 @@ describe('exact dates', () => {
       expect(await checkoutErr(s, c, crowded)).toMatch(/No more than 2 washes in one week: the week of .* has 3/);
     }));
 
-  it('refuses a day the vehicle already has a wash, and a day that is full', async () =>
+  it('refuses a day the vehicle already has a wash, but accepts a day that is red', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const dates = await good(s, c);
@@ -213,7 +222,7 @@ describe('exact dates', () => {
       await limitsToOne(s);
       await s.as('postgres');
       await occupy(s, dates[3].date);
-      expect(await checkoutErr(s, c, dates)).toMatch(/These days are fully booked in the morning window/);
+      expect(await checkoutErr(s, c, dates)).toBeNull(); // a rush day is shown red, not refused
     }));
 
   it('a bike has only Body washes, and malformed input is refused plainly', async () =>
@@ -228,7 +237,7 @@ describe('exact dates', () => {
 });
 
 describe('paying', () => {
-  it('a weekday plan skips a day that has filled up since it was chosen, and the customer still gets every wash', async () =>
+  it('a day that has filled up since the plan was chosen does not move a wash: the customer gets the days they chose', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const pay = await checkout(s, c, { months: 3 });
@@ -240,10 +249,10 @@ describe('paying', () => {
       expect(res.status).toBe('fulfilled');
       const rows = await bookedDates(s, res.membership_id);
       expect(rows).toHaveLength(24);
-      expect(rows.map((r: any) => r.d)).not.toContain(first);
+      expect(rows.map((r: any) => r.d)).toContain(first);
     }));
 
-  it('and when the crowd leaves no room at all, the limit gives way: a paid membership is never refused for it', async () =>
+  it('and when every chosen day is red, a paid membership is still fully scheduled', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const pay = await checkout(s, c);

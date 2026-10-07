@@ -15,7 +15,7 @@ import { Loading, errText } from './shared';
 const STATE: Record<CrowdState, { label: string; tone: Tone; text: string; bar: string }> = {
   ok: { label: 'Room', tone: 'green', text: 'text-ok', bar: 'bg-ok' },
   busy: { label: 'Busy', tone: 'amber', text: 'text-warn', bar: 'bg-warn' },
-  full: { label: 'Full', tone: 'red', text: 'text-bad', bar: 'bg-bad' },
+  full: { label: 'Rush', tone: 'red', text: 'text-bad', bar: 'bg-bad' },
 };
 const KINDS = [{ kind: 'weekday', title: 'Weekdays', sub: 'Monday to Friday' }, { kind: 'weekend', title: 'Weekends', sub: 'Saturday and Sunday' }] as const;
 type Form = Record<'weekday' | 'weekend', Record<keyof Omit<CapacityRule, 'day_kind'>, string>>;
@@ -25,7 +25,7 @@ const toForm = (rules: CapacityRule[]): Form => {
   return { weekday: f('weekday'), weekend: f('weekend') };
 };
 
-/** The two limits for a kind of day: when it turns busy (a warning) and when it is full (closed), for the whole day and for each time window. */
+/** The two numbers for a kind of day: when it turns amber (busy) and when it turns red (a rush), for the whole day and for each time window. Neither closes anything. */
 function Limits({ rules }: { rules: CapacityRule[] }) {
   const act = useAdminAction();
   const toast = useToast();
@@ -48,8 +48,8 @@ function Limits({ rules }: { rules: CapacityRule[] }) {
       <div>
         <h2 className="text-lg font-bold">How many vehicles can you wash?</h2>
         <p className="mt-1 max-w-3xl text-sm text-fog">
-          Every wash booked for a day counts: memberships, single washes and free washes. When a day or a time window reaches <strong className="text-warn">Busy</strong> customers see an amber warning; at <strong className="text-bad">Full</strong> it turns red and can no longer be picked.
-          Washes you book yourself in the Washes tab are never blocked, and a membership that is already paid for is never refused because of this.
+          Every wash booked for a day counts: memberships, single washes and free washes. When a day or a time window reaches the <strong className="text-warn">amber</strong> number customers see it in amber; at the <strong className="text-bad">red</strong> number it turns red with a note that there might be a slight delay because of the rush.
+          <strong className="text-white"> There is no upper limit:</strong> customers can still choose a red day and book it. Only the colour and the note change.
         </p>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
@@ -58,13 +58,13 @@ function Limits({ rules }: { rules: CapacityRule[] }) {
             <legend className="px-2 text-sm font-bold">{k.title} <span className="font-normal text-fog">· {k.sub}</span></legend>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-fog">Whole day</p>
             <div className="grid grid-cols-2 gap-3">
-              <Input label="Busy from" inputMode="numeric" value={f[k.kind].day_busy} onChange={set(k.kind, 'day_busy')} hint="vehicles" />
-              <Input label="Full at" inputMode="numeric" value={f[k.kind].day_full} onChange={set(k.kind, 'day_full')} hint="vehicles" />
+              <Input label="Amber from" inputMode="numeric" value={f[k.kind].day_busy} onChange={set(k.kind, 'day_busy')} hint="vehicles" />
+              <Input label="Red from" inputMode="numeric" value={f[k.kind].day_full} onChange={set(k.kind, 'day_full')} hint="vehicles" />
             </div>
             <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-fog">Each time window (morning, afternoon, night)</p>
             <div className="grid grid-cols-2 gap-3">
-              <Input label="Busy from" inputMode="numeric" value={f[k.kind].slot_busy} onChange={set(k.kind, 'slot_busy')} hint="vehicles" />
-              <Input label="Full at" inputMode="numeric" value={f[k.kind].slot_full} onChange={set(k.kind, 'slot_full')} hint="vehicles" />
+              <Input label="Amber from" inputMode="numeric" value={f[k.kind].slot_busy} onChange={set(k.kind, 'slot_busy')} hint="vehicles" />
+              <Input label="Red from" inputMode="numeric" value={f[k.kind].slot_full} onChange={set(k.kind, 'slot_full')} hint="vehicles" />
             </div>
           </fieldset>
         ))}
@@ -108,7 +108,7 @@ export default function Capacity() {
       <Limits key={JSON.stringify(data.rules)} rules={data.rules} />
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-lg font-bold">The days ahead</h2><p className="text-sm text-fog">{crowded ? `${crowded} of the next ${span} days are busy or full.` : `Nothing is busy in the next ${span} days.`} Counts are vehicles booked in each time window.</p></div>
+          <div><h2 className="text-lg font-bold">The days ahead</h2><p className="text-sm text-fog">{crowded ? `${crowded} of the next ${span} days are busy or rush.` : `Nothing is busy in the next ${span} days.`} Counts are vehicles booked in each time window.</p></div>
           <Segmented label="How far ahead" value={span} onChange={setSpan} options={[{ value: '14', label: '2 weeks' }, { value: '28', label: '4 weeks' }, { value: '60', label: '2 months' }]} />
         </div>
         <ul className="panel divide-y divide-white/[0.07] overflow-hidden">{data.days.map((d) => <Row key={d.date} d={d} />)}</ul>

@@ -34,7 +34,7 @@ export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () =
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
 export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
 
-/** How crowded each day and time window is, by date. Marks crowded days amber and full ones red on the booking pages. */
+/** How crowded each day and time window is, by date. Marks busy days amber and rush days red (never closed) on the booking pages. */
 export const useCapacity = (from: string, to: string, enabled = true) =>
   useQuery({
     queryKey: ['capacity', from, to],

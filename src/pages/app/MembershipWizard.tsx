@@ -147,7 +147,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const earliest = addDays(todayIST(), minLeadDays);
   const termEnd = preview.data?.end_date;
   const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4);
-  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * weeks * (months ?? 1), deep: counts.deep * weeks * (months ?? 1) }, perWeek, minDate: [start, earliest].sort().at(-1)!, end: termEnd, slot, crowd }) : null;
+  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * weeks * (months ?? 1), deep: counts.deep * weeks * (months ?? 1) }, perWeek, minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
   const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, weekly_pattern: pattern, duration_months: months } : null);
 
   const serviceName = (kind: WashKind) => {
@@ -346,7 +346,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               </div>
             )}
             {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Price for this plan: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
-            {planReady && <p className="mt-2 text-xs text-fog">Your washes follow these days through the whole membership. If a day is fully booked, that wash moves to your next chosen day. You can pick exact dates instead on the next steps.</p>}
+            {planReady && <p className="mt-2 text-xs text-fog">Your washes follow these days through the whole membership. You can pick exact dates instead on the next steps.</p>}
           </motion.section>
         )}
 
@@ -382,10 +382,13 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               <div className="mt-8 space-y-4">
                 {preview.isError && <p role="alert" className="flex items-start gap-2 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {(preview.error as Error).message}</p>}
                 {preview.data && !customActive && !preview.data.fits && (
-                  <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your chosen days are too crowded to fit all {preview.data.total} washes before your membership ends. Choose other days, another time window or a later start, or pick exact dates below.</p>
+                  <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your chosen days cannot fit all {preview.data.total} washes before your membership ends, because this vehicle already has a wash on some of them. Choose other days or a later start, or pick exact dates below.</p>
                 )}
-                {preview.data && !customActive && preview.data.fits && preview.data.dates.some((d) => d.state === 'busy') && (
-                  <p className="flex items-start gap-2 rounded-2xl border border-warn/30 bg-warn/10 p-4 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Some of your days are busy. Your washes are still booked, but a busy day can be harder to reschedule.</p>
+                {preview.data && !customActive && preview.data.fits && preview.data.dates.some((d) => d.state === 'full') && (
+                  <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'One of your washes falls on a rush day' : `${preview.data.dates.filter((d) => d.state === 'full').length} of your washes fall on rush days`}, so there might be a slight delay on {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'that day' : 'those days'}. Everything is still booked as you chose.</p>
+                )}
+                {preview.data && !customActive && preview.data.fits && !preview.data.dates.some((d) => d.state === 'full') && preview.data.dates.some((d) => d.state === 'busy') && (
+                  <p className="flex items-start gap-2 rounded-2xl border border-warn/30 bg-warn/10 p-4 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Some of your days are getting busy. Everything is still booked as you chose.</p>
                 )}
 
                 <div className="glass overflow-hidden">

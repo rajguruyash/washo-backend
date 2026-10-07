@@ -1,4 +1,4 @@
-/** Crowd limits and exact dates over the website API: what the pages are shown, what the admin can change, and what payment refuses. */
+/** Crowd limits and exact dates over the website API: what the pages are shown (amber, red), what the admin can change, and that a rush never stops a booking. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Client, boot, customerWithVehicle, expectOk, fake, istDate, shutdown, staffClient } from './helpers';
 
@@ -75,23 +75,25 @@ describe('the admin changes the limits', () => {
     const admin = await staffClient('admin');
     const bad = await admin.c.put('/api/admin/capacity', { weekday: { ...LIFTED, day_busy: 20, day_full: 10 }, weekend: LIFTED });
     expect(bad.status).toBe(422);
-    expect(bad.body.message).toMatch(/cannot be lower than its "busy"/);
+    expect(bad.body.message).toMatch(/red number for a day cannot be lower than its amber number/);
     expect((await admin.c.put('/api/admin/capacity', { weekday: { ...LIFTED, day_busy: 0 }, weekend: LIFTED })).status).toBe(400);
     expect((await admin.c.put('/api/admin/capacity', { weekday: LIFTED })).status).toBe(400);
   });
 });
 
-describe('payment refuses a crowded time, and exact dates follow the rules', () => {
-  it('a single wash cannot be started for a full window', async () => {
+describe('a rush never stops a booking, and exact dates follow the rules', () => {
+  it('a single wash can still be started for a window that is red', async () => {
     const admin = await staffClient('admin');
     await setLimits(admin, TIGHT);
     const day = istDate(23);
     await occupy(day, 'afternoon');
     const c = await customerWithVehicle('car');
     const service = (await fake.admin.query(`select id from public.services where code='car-body-wash'`)).rows[0].id;
-    const r = await c.c.post('/api/payments/on-demand', { vehicle_id: c.vehicle.id, service_id: service, scheduled_date: day, time_slot: 'afternoon', address_id: c.addr.id });
-    expect(r.status).toBe(422);
-    expect(r.body.message).toMatch(/fully booked in the afternoon window/);
+    // the page is told it is red ...
+    expect(expectOk(await c.c.get(`/api/capacity?from=${day}&to=${day}`)).body.days[0].slots.afternoon.state).toBe('full');
+    // ... and payment still opens
+    const r = expectOk(await c.c.post('/api/payments/on-demand', { vehicle_id: c.vehicle.id, service_id: service, scheduled_date: day, time_slot: 'afternoon', address_id: c.addr.id }));
+    expect(r.body.order.order_id).toBeTruthy();
   });
 
   it('the preview shows where a plan lands; it needs the customer\'s own vehicle', async () => {
@@ -125,18 +127,19 @@ describe('payment refuses a crowded time, and exact dates follow the rules', () 
     expect(rows).toEqual(moved.map((m: any) => m.date).sort());
   });
 
-  it('a weekday plan that crowded days leave no room for is refused before paying, with a way out', async () => {
+  it('a weekday plan on days that are all red is still priced and paid for, on the days chosen', async () => {
     const admin = await staffClient('admin');
     await setLimits(admin, { ...TIGHT, day_full: 1 }, { ...TIGHT, day_full: 1 });
     const c = await customerWithVehicle('car');
     const all = expectOk(await c.c.post('/api/membership-preview', planBody(c))).body.dates as { date: string }[];
-    for (const d of all) await occupy(d.date); // every Wednesday and Saturday of the first stretch is full
-    // and the ones after it, to the end of the term
+    for (const d of all) await occupy(d.date); // every Wednesday and Saturday of the first stretch is past the red number
     for (let i = 1; i <= 34; i++) { const day = istDate(4 + i); if ([3, 6].includes(new Date(`${day}T00:00:00Z`).getUTCDay())) await occupy(day).catch(() => undefined); }
-    const r = await c.c.post('/api/payments/membership-checkout', planBody(c));
-    expect(r.status).toBe(422);
-    expect(r.body.message).toMatch(/cannot fit all 8 washes on those days.*pick exact dates/);
     const p = expectOk(await c.c.post('/api/membership-preview', planBody(c))).body;
-    expect(p.fits).toBe(false);
+    expect(p.fits).toBe(true);
+    expect(p.dates.every((d: any) => d.state === 'full')).toBe(true); // the page can colour them red
+    const order = expectOk(await c.c.post('/api/payments/membership-checkout', planBody(c))).body.order;
+    const paid = expectOk(await c.c.post('/api/payments/verify', fake.checkout(order.order_id))).body.result;
+    const rows = (await fake.admin.query(`select scheduled_date::text d from public.bookings where membership_id = $1 order by 1`, [paid.membership_id])).rows.map((r: any) => r.d);
+    expect(rows).toEqual(all.map((d) => d.date).sort());
   });
 });

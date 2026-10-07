@@ -95,7 +95,7 @@ describe('how crowded a day is', () => {
     }));
 });
 
-describe('a full day or window is closed to new bookings', () => {
+describe('a rush day or window is shown red but is never closed', () => {
   const setup = async (s: any) => {
     const u = await createCustomer(s);
     const addr = await createAddress(s, u.profileId);
@@ -108,26 +108,37 @@ describe('a full day or window is closed to new bookings', () => {
     return s.err(`select public.create_booking_payment_intent('${c.veh}','${c.svc}','${date}'::date,'${slot}'::public.time_slot,'${c.addr}')`);
   };
 
-  it('a single wash cannot be started for a full window, but the other windows of that day are fine', async () =>
+  it('a single wash can still be started for a window past the red number (it is only reported red)', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const wed = await nextDow(s, 3);
       await load(s, wed, 'morning', 9);
-      expect(await intent(s, c, wed, 'morning')).toMatch(/fully booked in the morning window/);
+      expect((await one(s, wed)).slots.morning.state).toBe('full'); // red
+      expect(await intent(s, c, wed, 'morning')).toBeNull();        // and still bookable
       expect(await intent(s, c, wed, 'afternoon')).toBeNull();
     }));
 
-  it('a full day closes every window', async () =>
+  it('a day past the red number in total is red for every window, and every window can still be booked', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const fri = await nextDow(s, 5);
       await load(s, fri, 'morning', 5);
       await load(s, fri, 'afternoon', 5);
       await load(s, fri, 'night', 5);
-      for (const slot of ['morning', 'afternoon', 'night']) expect(await intent(s, c, fri, slot), slot).toMatch(/fully booked/);
+      expect((await one(s, fri)).state).toBe('full');
+      for (const slot of ['morning', 'afternoon', 'night']) expect(await intent(s, c, fri, slot), slot).toBeNull();
     }));
 
-  it('the free-wash claim honours it too', async () =>
+  it('there is no upper limit: far past the red number it still books', async () =>
+    inTx(async (s) => {
+      const c = await setup(s);
+      const wed = await nextDow(s, 3);
+      await load(s, wed, 'morning', 40);
+      expect((await one(s, wed)).state).toBe('full');
+      expect(await intent(s, c, wed, 'morning')).toBeNull();
+    }));
+
+  it('the free-wash claim is not closed by it either (the campaign\'s own daily cap is a separate rule)', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const wed = await nextDow(s, 3);
@@ -137,8 +148,7 @@ describe('a full day or window is closed to new bookings', () => {
         `insert into public.campaigns (code, name, is_active, claim_opens_on, claim_closes_on, use_by_date, total_cap, new_customers_only)
          values ($1,'Free wash',true,current_date,current_date + 3,current_date + 20,50,false) returning id`, [`t-${uid().slice(0, 8)}`]))[0].id;
       await s.as('authenticated', c.u.authId);
-      expect(await s.err(`select public.claim_campaign_wash('${camp}','${c.veh}','${wed}'::date,'night'::public.time_slot,'${c.addr}','P1')`)).toMatch(/fully booked in the night window/);
-      expect(await s.err(`select public.claim_campaign_wash('${camp}','${c.veh}','${wed}'::date,'morning'::public.time_slot,'${c.addr}','P1')`)).toBeNull();
+      expect(await s.err(`select public.claim_campaign_wash('${camp}','${c.veh}','${wed}'::date,'night'::public.time_slot,'${c.addr}','P1')`)).toBeNull();
     }));
 
   it('WASHO can still book a wash on a full day (the admin booking is not blocked)', async () =>
@@ -165,8 +175,8 @@ describe('the admin changes the limits', () => {
       await s.as('authenticated', admin.authId);
       expect(await s.err(`select public.admin_set_capacity('monday', 5, 10, 3, 6)`)).toMatch(/weekdays or weekends/);
       expect(await s.err(`select public.admin_set_capacity('weekday', 0, 10, 3, 6)`)).toMatch(/1 or more/);
-      expect(await s.err(`select public.admin_set_capacity('weekday', 12, 10, 3, 6)`)).toMatch(/cannot be lower than its "busy"/);
-      expect(await s.err(`select public.admin_set_capacity('weekday', 5, 10, 8, 6)`)).toMatch(/time window cannot be lower/);
+      expect(await s.err(`select public.admin_set_capacity('weekday', 12, 10, 3, 6)`)).toMatch(/red number for a day cannot be lower than its amber number/);
+      expect(await s.err(`select public.admin_set_capacity('weekday', 5, 10, 8, 6)`)).toMatch(/red number for a time window cannot be lower/);
       expect(await s.err(`select public.admin_set_capacity('weekend', 5, 900, 3, 6)`)).toMatch(/more than 500/);
 
       const wed = await nextDow(s, 3);

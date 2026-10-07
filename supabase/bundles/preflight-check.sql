@@ -21,6 +21,7 @@ UNION ALL SELECT 'preview_membership_dates() exists (migration 20)', to_regproce
 UNION ALL SELECT 'worker_reschedule_wash() exists (migration 21)', to_regprocedure('public.worker_reschedule_wash(uuid, date, public.time_slot, text)') IS NOT NULL
 UNION ALL SELECT 'remove_my_plan() exists (migration 21)', to_regprocedure('public.remove_my_plan(text, uuid)') IS NOT NULL
 UNION ALL SELECT 'customer_hidden_plans table exists (migration 21)', to_regclass('public.customer_hidden_plans') IS NOT NULL
+UNION ALL SELECT 'worker_complete_wash() no longer spends credits (migration 23)', (SELECT pg_get_functiondef(p.oid) NOT LIKE '%consume_membership_entitlement%' FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'worker_complete_wash')
 UNION ALL SELECT 'washo_api role exists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname='washo_api');
 
 -- What the bundle will not touch, for your information (row counts of the data it leaves alone):

@@ -161,3 +161,14 @@ It refuses single washes, washes the specialist does not hold, and a started was
 `customer_hidden_plans` and `public.remove_my_plan(kind, id)`: a customer clears a plan from their own pages. `kind` is `membership_request` (a plan started but not paid for, or an earlier request that has ended) or `membership` (one that has ended). Nothing is deleted: the plan is remembered as hidden (the website lists skip it; admins still see everything).
 An unpaid plan's checkout is stopped the way starting a different plan already does it (its open payment is marked failed, the request cancelled). An active membership, a request that has become a membership, and a plan whose payment has been received are refused. Tests: `supabase/tests/after-21-worker-reschedule.test.ts`, `backend/tests/api-reschedule-remove.test.ts`.
 
+## Crowd limits never block (migration 22)
+
+Admin → Capacity is now a warning, not a wall. `require_capacity()` (single-wash checkout, free-wash claim) never refuses; `plan_membership_washes()` no longer passes over a crowded day and `check_custom_dates()` no longer refuses one (a day where the same vehicle already has a wash is still refused, and so are the term, notice and per-week rules).
+`get_capacity()` is unchanged: it still reports ok / busy / full per day and window, and the website shows "full" as red ("Rush") and "busy" as amber. Wording only: `create_membership_request`'s "cannot fit" message and `admin_set_capacity`'s messages say red and amber. No data is touched. Tests: `after-19-capacity.test.ts`, `after-20-exact-dates.test.ts`, `backend/tests/api-capacity.test.ts`.
+
+## Completing a membership wash without credits (migration 23)
+
+Production still had the mobile app's original `worker_complete_wash`, which for a membership wash spends a wash credit (`consume_membership_entitlement_for_booking`). Memberships bought on the website have no credits, so a specialist's final "Mark wash completed" failed. Migration 23 replaces only that function with the credit-free one from `cutover/20261005000001` (the wash must be held by the caller and in progress,
+needs a before and an after photo, becomes completed, the schedule entry is marked completed, the event is logged and the customer notified; completing twice does nothing). Nothing else from the cutover is applied: the old mobile booking functions, photo links and the workers' view of customers are untouched. When the cutover is applied later it installs the identical function.
+Tests: `supabase/tests/after-23-worker-complete.test.ts`.
+

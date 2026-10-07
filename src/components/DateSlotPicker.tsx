@@ -1,6 +1,7 @@
-import { Moon, Sun, Sunrise } from 'lucide-react';
+import { AlertTriangle, Moon, Sun, Sunrise } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { cn } from '../lib/cn';
+import { RUSH_NOTE, RUSH_SHORT } from '../lib/crowd';
 import { addDays, dayNumber, monthShort, todayIST, weekdayShort } from '../lib/format';
 import { SLOTS } from '../lib/slots';
 import type { CapacityDay, SlotId } from '../lib/types';
@@ -29,7 +30,7 @@ export function DateSlotPicker({
   disabledDates?: string[];
   /** Hours of notice a booking needs: windows that start sooner are greyed out, and so are days with no window left. */
   leadHours?: number;
-  /** How crowded each day and window is (Admin → Capacity): crowded days show amber, full days and windows are red and cannot be picked. */
+  /** How crowded each day and window is (Admin → Capacity): busy ones show amber, rush ones red with a note about a slight delay. Neither is ever closed. */
   crowd?: Record<string, CapacityDay>;
 }) {
   const dates = useMemo(() => {
@@ -44,15 +45,15 @@ export function DateSlotPicker({
   const today = todayIST();
   const tooSoon = (d: string, s: SlotId) => leadHours != null && startsAt(d, s) < Date.now() + leadHours * 3_600_000;
   const dayGone = (d: string) => showSlot && leadHours != null && (['morning', 'afternoon', 'night'] as SlotId[]).every((s) => tooSoon(d, s));
-  // crowd: a day is red only when nothing can be booked on it (every window is full); the windows say which ones are closed
-  const dayFull = (d: string) => crowd?.[d]?.state === 'full';
-  const noneLeft = dates.length > 0 && dates.every((d) => dayGone(d) || dayFull(d) || (disabledDates?.includes(d) ?? false));
+  // crowd: a rush day (red) is only a warning; nothing is closed because of it
+  const noneLeft = dates.length > 0 && dates.every((d) => dayGone(d) || (disabledDates?.includes(d) ?? false));
+  const rushNote = Boolean(date) && (crowd?.[date!]?.state === 'full' || (slot != null && crowd?.[date!]?.slots[slot]?.state === 'full'));
 
   // A window chosen for one day may be too soon on another: drop it rather than let the booking be refused at the end.
   useEffect(() => {
-    if (date && slot && onSlot && (tooSoon(date, slot) || crowd?.[date]?.slots[slot]?.state === 'full')) onSlot(null);
+    if (date && slot && onSlot && tooSoon(date, slot)) onSlot(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, slot, leadHours, crowd]);
+  }, [date, slot, leadHours]);
 
   return (
     <div className="space-y-5">
@@ -62,9 +63,9 @@ export function DateSlotPicker({
           {dates.map((d) => {
             const active = d === date;
             const campaignFull = disabledDates?.includes(d) ?? false;
-            const crowded = dayFull(d) && !active;
-            const full = campaignFull || dayGone(d) || crowded;
-            const soon = !campaignFull && !crowded && dayGone(d);
+            const full = campaignFull || dayGone(d);
+            const soon = !campaignFull && dayGone(d);
+            const rush = !full && crowd?.[d]?.state === 'full';
             const busy = !full && crowd?.[d]?.state === 'busy';
             return (
               <button
@@ -74,18 +75,19 @@ export function DateSlotPicker({
                 aria-checked={active}
                 aria-disabled={full || undefined}
                 disabled={full}
-                title={soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : busy ? 'Getting busy' : undefined}
+                title={soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : rush ? 'Rush: there might be a slight delay' : busy ? 'Getting busy' : undefined}
                 onClick={() => onDate(d)}
                 className={cn(
                   'flex h-[76px] w-16 shrink-0 flex-col items-center justify-center rounded-2xl border transition-all',
-                  crowded || (campaignFull && !soon) ? 'cursor-not-allowed border-bad/40 bg-bad/10' : full ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                  campaignFull && !soon ? 'cursor-not-allowed border-bad/40 bg-bad/10' : full ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                    : rush ? (active ? 'border-bad bg-bad/25 shadow-[0_0_24px_-8px_rgb(255_107_122/0.8)]' : 'border-bad/50 bg-bad/10 hover:border-bad/80')
                     : active ? 'border-washo-400/70 bg-washo-500/20 shadow-[0_0_24px_-8px_rgb(63_124_255/0.8)]'
                     : busy ? 'border-warn/50 bg-warn/10 hover:border-warn/80' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
                 )}
               >
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-fog">{d === today ? 'Today' : weekdayShort(d)}</span>
                 <span className={cn('font-display text-xl font-extrabold leading-tight', full && 'line-through')}>{dayNumber(d)}</span>
-                <span className={cn('text-[10px] font-semibold uppercase', crowded || campaignFull ? 'text-bad' : busy ? 'text-warn' : 'text-fog')}>{soon ? 'Soon' : full ? 'Full' : busy ? 'Busy' : monthShort(d)}</span>
+                <span className={cn('text-[10px] font-semibold uppercase', rush || campaignFull ? 'text-bad' : busy ? 'text-warn' : 'text-fog')}>{soon ? 'Soon' : full ? 'Full' : rush ? 'Rush' : busy ? 'Busy' : monthShort(d)}</span>
               </button>
             );
           })}
@@ -103,7 +105,7 @@ export function DateSlotPicker({
               const Icon = slotIcon[s.icon];
               const soon = Boolean(date) && tooSoon(date!, s.id);
               const cs = date ? crowd?.[date]?.slots[s.id]?.state : undefined;
-              const closed = soon || cs === 'full';
+              const closed = soon;
               const active = s.id === slot && !closed;
               return (
                 <button
@@ -116,14 +118,15 @@ export function DateSlotPicker({
                   onClick={() => onSlot(s.id)}
                   className={cn(
                     'flex items-center gap-3 rounded-2xl border p-3.5 text-left transition-all',
-                    cs === 'full' && !soon ? 'cursor-not-allowed border-bad/40 bg-bad/10' : soon ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                    soon ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                      : cs === 'full' ? (active ? 'border-bad bg-bad/20' : 'border-bad/50 bg-bad/10 hover:border-bad/80')
                       : active ? 'border-washo-400/70 bg-washo-500/15' : cs === 'busy' ? 'border-warn/50 bg-warn/10 hover:border-warn/80' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
                   )}
                 >
                   <span className={cn('grid h-10 w-10 place-items-center rounded-xl', active ? 'bg-washo-500 text-white' : 'bg-white/[0.07] text-washo-300')}><Icon className="h-5 w-5" /></span>
                   <span>
                     <span className="block text-sm font-bold">{s.label}</span>
-                    <span className={cn('block text-xs', cs === 'full' && !soon ? 'font-semibold text-bad' : cs === 'busy' && !soon ? 'font-semibold text-warn' : 'text-fog')}>{soon ? 'Too soon' : cs === 'full' ? 'Fully booked' : cs === 'busy' ? `Busy · ${s.window}` : s.window}</span>
+                    <span className={cn('block text-xs', cs === 'full' && !soon ? 'font-semibold text-bad' : cs === 'busy' && !soon ? 'font-semibold text-warn' : 'text-fog')}>{soon ? 'Too soon' : cs === 'full' ? RUSH_SHORT : cs === 'busy' ? `Busy · ${s.window}` : s.window}</span>
                   </span>
                 </button>
               );
@@ -131,6 +134,7 @@ export function DateSlotPicker({
           </div>
         </div>
       )}
+      {rushNote && <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {RUSH_NOTE}</p>}
     </div>
   );
 }
