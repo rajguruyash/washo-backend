@@ -6,7 +6,6 @@ import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { Plate } from '../../components/brand/Plate';
 import { WizardStepper } from '../../components/WizardStepper';
 import { stepMotion, useStepDirection } from '../../lib/stepMotion';
-import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { PackOfferCard } from '../../components/PackOfferCard';
 import { SlideToPay } from '../../components/SlideToPay';
@@ -14,16 +13,17 @@ import { VehiclePicker } from '../../components/VehiclePicker';
 import { Button, ButtonLink } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { useToast } from '../../components/ui/Toast';
 import { claimView, dayOf } from '../../lib/campaign';
 import { cn } from '../../lib/cn';
-import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
+import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useCampaign, useCapacity, useCatalog, useClaimFreeWash, useSaveProfile, useVehicles } from '../../lib/queries';
+import { useAddresses, useCampaign, useCatalog, useClaimFreeWash, useSaveProfile, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
-import type { Campaign, SlotId, Vehicle } from '../../lib/types';
+import type { Campaign, Vehicle } from '../../lib/types';
 import { useAuth } from '../../state/auth';
 
-const STEPS = ['Vehicle', 'Day & time', 'Claim'] as const;
+const STEPS = ['Vehicle', 'Claim'] as const;
 
 /** A card that says why the wizard is not shown (offer closed, already claimed, not new, ...). */
 function Gate({ title, children, actions }: { title: string; children?: React.ReactNode; actions?: React.ReactNode }) {
@@ -37,7 +37,7 @@ function Gate({ title, children, actions }: { title: string; children?: React.Re
   );
 }
 
-/** Claim the free wash: vehicle, day and time, then slide. The database checks every rule and books it in one step. */
+/** Claim the free wash: the vehicle, then slide. There is no day or time to choose: WASHO places the wash and says when it is. The database checks every rule and books it in one step. */
 export default function ClaimWizard() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -45,16 +45,14 @@ export default function ClaimWizard() {
   const { data: vehicles } = useVehicles();
   const { data: addresses } = useAddresses();
   const { data: catalog } = useCatalog();
-  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22));
   const claim = useClaimFreeWash();
+  const toast = useToast();
   const saveProfile = useSaveProfile();
   // A customer who signed in by phone may have no email yet: ask for one, so the confirmation can be mailed. Optional.
   const [email, setEmail] = useState('');
   const [step, setStep] = useState(0);
   const dir = useStepDirection(step);
   const [picked, setVehicle] = useState<Vehicle | null>(null);
-  const [date, setDate] = useState<string | null>(null);
-  const [slot, setSlot] = useState<SlotId | null>(null);
   const [addressId, setAddressId] = useState<string | null>(null);
   const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
@@ -97,12 +95,11 @@ export default function ClaimWizard() {
   if (view === 'full') return <Gate title="All the free washes have been claimed" actions={<ButtonLink to="/app/membership/new">Build a membership</ButtonLink>}><p>Thank you for your interest.</p></Gate>;
 
   const c = campaign as Campaign;
-  const lastDay = [c.use_by_date, addDays(todayIST(), 21)].sort()[0];
-  const ok = [Boolean(vehicle), Boolean(date && slot), Boolean(address)][step];
+  const ok = [Boolean(vehicle), Boolean(address)][step];
 
   // Slide to claim: resolves once the wash is booked (the handle shows "Claimed"); throws if the database refused, so the handle springs back.
   const submit = async () => {
-    if (!vehicle || !date || !slot || !address) throw new Error('incomplete');
+    if (!vehicle || !address) throw new Error('incomplete');
     setError('');
     const mail = email.trim();
     if (!user?.email && mail) {
@@ -111,8 +108,9 @@ export default function ClaimWizard() {
     }
     setClaiming(true);
     try {
-      const r = await claim.mutateAsync({ campaign_id: c.id, vehicle_id: vehicle.id, date, time_slot: slot, address_id: address.id, parking_location: address.parking_location });
+      const r = await claim.mutateAsync({ campaign_id: c.id, vehicle_id: vehicle.id, address_id: address.id, parking_location: address.parking_location });
       booked.current = r.booking_id;
+      if (r.scheduled_date) toast.success(`Your free wash is booked: ${prettyDate(r.scheduled_date)}${r.time_slot ? `, ${slotLabel(r.time_slot)}` : ''}`);
     } catch (err) {
       setClaiming(false);
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
@@ -139,22 +137,14 @@ export default function ClaimWizard() {
           </motion.section>
         )}
 
-        {step === 1 && (
+        {step === 1 && vehicle && (
           <motion.section key="s1" {...slide}>
-            <h1 className="text-3xl font-extrabold">Pick a day and a time</h1>
-            <p className="mb-6 mt-1.5 text-fog">The free wash must be on or before {dayOf(c.use_by_date)}. A day shown as Full has no free washes left.</p>
-            <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={lastDay} days={22} disabledDates={c.full_dates} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} crowd={crowd} />
-          </motion.section>
-        )}
-
-        {step === 2 && vehicle && date && slot && (
-          <motion.section key="s2" {...slide}>
             <h1 className="text-3xl font-extrabold">Claim your free wash</h1>
             <p className="mb-6 mt-1.5 text-fog">Check the details, then slide. Nothing is charged.</p>
             <div className="glass divide-y divide-white/[0.07] text-sm">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="flex justify-between gap-4 p-5"><span className="text-fog">Wash</span><span className="font-semibold">{body?.name ?? 'Body wash'}</span></div>
-              <div className="flex justify-between gap-4 p-5"><span className="text-fog">When</span><span className="font-semibold">{prettyDate(date)}, {slotLabel(slot)}</span></div>
+              <div className="flex justify-between gap-4 p-5"><span className="text-fog">When</span><span className="max-w-[60%] text-right font-semibold">We pick the day and time, and show it as soon as you claim</span></div>
               <div className="flex items-center justify-between gap-4 p-5">
                 <span className="text-fog">Price</span>
                 <span className="flex items-baseline gap-2">{worth ? <s className="text-fog">{rupees(worth)}</s> : null}<span className="font-display text-2xl font-extrabold text-offer">FREE</span></span>

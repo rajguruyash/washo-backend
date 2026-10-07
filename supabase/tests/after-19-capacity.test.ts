@@ -138,17 +138,28 @@ describe('a rush day or window is shown red but is never closed', () => {
       expect(await intent(s, c, wed, 'morning')).toBeNull();
     }));
 
-  it('the free-wash claim is not closed by it either (the campaign\'s own daily cap is a separate rule)', async () =>
+  it('a free-wash claim is placed by WASHO on the earliest day that is not red, and is never refused for a crowd', async () =>
     inTx(async (s) => {
-      const c = await setup(s);
-      const wed = await nextDow(s, 3);
-      await load(s, wed, 'night', 9);
+      const people = [await setup(s), await setup(s), await setup(s)];
+      const days = [] as string[];
+      for (let i = 0; i <= 20; i++) days.push(await istDate(s, i));
       await s.as('postgres');
+      for (const [i, c] of people.entries()) await s.q(`update public.customer_addresses set flat_number = $2 where id = $1`, [c.addr, `Z-${i}-${uid().slice(0, 4)}`]); // one free wash per flat
       const camp = (await s.q(
         `insert into public.campaigns (code, name, is_active, claim_opens_on, claim_closes_on, use_by_date, total_cap, new_customers_only)
          values ($1,'Free wash',true,current_date,current_date + 3,current_date + 20,50,false) returning id`, [`t-${uid().slice(0, 8)}`]))[0].id;
-      await s.as('authenticated', c.u.authId);
-      expect(await s.err(`select public.claim_campaign_wash('${camp}','${c.veh}','${wed}'::date,'night'::public.time_slot,'${c.addr}','P1')`)).toBeNull();
+      const claim = async (c: any) => { await s.as('authenticated', c.u.authId); return (await s.q(`select public.claim_campaign_wash($1::uuid,$2::uuid,null,null,$3::uuid,'P1') r`, [camp, c.veh, c.addr]))[0].r; };
+      const r1 = await claim(people[0]);
+      // from now on one wash is enough to turn a day red: the next claim goes to a day that is not
+      await s.as('postgres');
+      await s.q(`update public.capacity_rules set day_busy = 1, day_full = 1, slot_busy = 1, slot_full = 1`);
+      const r2 = await claim(people[1]);
+      expect(r2.scheduled_date > r1.scheduled_date).toBe(true);
+      // and when EVERY day is red, it is still booked, on the earliest day, not refused
+      for (const d of days) await load(s, d, 'morning', 1);
+      const r3 = await claim(people[2]);
+      expect(r3.booking_id).toBeTruthy();
+      expect(r3.scheduled_date <= r2.scheduled_date).toBe(true);
     }));
 
   it('WASHO can still book a wash on a full day (the admin booking is not blocked)', async () =>

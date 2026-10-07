@@ -55,8 +55,8 @@ function ClaimButton({ campaign, size = 'lg' }: { campaign: Campaign; size?: 'md
 const steps = [
   { icon: Smartphone, title: 'Sign in with your phone', text: 'A one-time code to your mobile number. That is your claim: one free wash per number.' },
   { icon: UserPlus, title: 'Add your vehicle and address', text: 'Your society and parking spot, and your bike, car or SUV. It takes a minute.' },
-  { icon: CalendarCheck, title: 'Pick a day and a time', text: 'Morning, afternoon or night, on any day the offer allows.' },
-  { icon: Check, title: 'Slide to claim', text: 'No payment, no card. We confirm it, and a specialist calls ahead on the day.' },
+  { icon: Check, title: 'Slide to claim', text: 'No payment, no card. That is all you do: there is no date to pick.' },
+  { icon: CalendarCheck, title: 'We choose the day and time', text: 'We place your wash on the earliest day with room, tell you straight away, and a specialist calls ahead.' },
 ];
 
 export default function Offer() {
@@ -107,7 +107,7 @@ export default function Offer() {
 
       <section className="mt-16" aria-labelledby="how">
         <p className="eyebrow">How to claim</p>
-        <h2 id="how" className="mt-2 text-2xl font-extrabold">Four quick steps</h2>
+        <h2 id="how" className="mt-2 text-2xl font-extrabold">Quick and simple</h2>
         <ol className="mt-6 grid gap-4 sm:grid-cols-2">
           {steps.map((s, i) => (
             <Reveal key={s.title} delay={i * 0.05}>
@@ -126,6 +126,7 @@ export default function Offer() {
           <ul className="mt-4 space-y-2.5 text-sm text-mist">
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> {audience(c).rule}</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> One free wash for each phone number, vehicle and flat.</li>
+            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> You do not choose the day or time: we place your wash and tell you at once.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> It is a body wash: bike body wash, or car body wash for cars and SUVs.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Claim from {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}. The wash itself must be on or before {dayOf(c.use_by_date)}.</li>
             <li className="flex gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Kharadi, Pune, at your society parking spot.</li>

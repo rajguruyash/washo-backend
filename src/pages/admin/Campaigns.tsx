@@ -103,7 +103,7 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
           <div className="grid gap-4 sm:grid-cols-3">
             <Input label="Claims open" type="date" value={f.opens} error={errors.claim_opens_on} onChange={set('opens')} />
             <Input label="Claims close" type="date" value={f.closes} min={f.opens} error={errors.claim_closes_on} onChange={set('closes')} />
-            <Input label="Last day for the wash" type="date" value={f.useBy} min={f.opens} error={errors.use_by_date} onChange={set('useBy')} />
+            <Input label="Last day for the wash" type="date" value={f.useBy} min={f.opens} error={errors.use_by_date} onChange={set('useBy')} hint="Every free wash is placed on or before this day." />
           </div>
           <p className="text-xs text-fog">Both days count in full. A customer can claim until the end of the last claim day, for a wash on or before the last day for the wash.</p>
         </fieldset>
@@ -112,7 +112,7 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
           <legend className="text-sm font-bold">How many</legend>
           <div className="grid gap-4 sm:grid-cols-2">
             <Input label="Free washes in total" inputMode="numeric" value={f.total} error={errors.total_cap} onChange={set('total')} hint="Your budget: the offer closes by itself when they are gone." />
-            <Input label="Most washes on one day" inputMode="numeric" optional value={f.daily} error={errors.daily_cap} onChange={set('daily')} hint="Keeps free washes from crowding out paying customers. Empty means no limit." />
+            <Input label="Most washes on one day" inputMode="numeric" optional value={f.daily} error={errors.daily_cap} onChange={set('daily')} hint="Customers do not pick a date: free washes fill the earliest day up to this number, then move to the next day. Keeps them from crowding out paying customers. Empty means no limit." />
           </div>
         </fieldset>
 

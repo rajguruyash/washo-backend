@@ -172,3 +172,8 @@ Production still had the mobile app's original `worker_complete_wash`, which for
 needs a before and an after photo, becomes completed, the schedule entry is marked completed, the event is logged and the customer notified; completing twice does nothing). Nothing else from the cutover is applied: the old mobile booking functions, photo links and the workers' view of customers are untouched. When the cutover is applied later it installs the identical function.
 Tests: `supabase/tests/after-23-worker-complete.test.ts`.
 
+## Free washes are placed by WASHO (migration 24)
+
+A campaign claim no longer asks for a date or a time window. `app_private.pick_campaign_slot()` chooses the earliest day from today to the campaign's last day that has room under the campaign's own daily limit and where the vehicle has no other wash, preferring a day that is not red in Admin → Capacity (a red day is used only when every day is red), and on it the quietest window that is still far enough ahead (the usual notice rule).
+`claim_campaign_wash()` keeps its signature but ignores any date or window passed in, so nobody can choose by calling the API directly; it returns `scheduled_date` and `time_slot`, and refuses plainly when no day is left. Every other rule is unchanged. Tests: `after-14-campaigns.test.ts`, `after-19-capacity.test.ts`, `backend/tests/api-campaign.test.ts`.
+

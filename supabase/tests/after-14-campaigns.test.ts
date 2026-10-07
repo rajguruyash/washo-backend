@@ -161,22 +161,26 @@ describe('the admin creates and edits a campaign', () => {
 });
 
 describe('claiming the free wash', () => {
-  it('books a confirmed, free body wash with no payment, tagged to the campaign', async () =>
+  it('books a confirmed, free body wash with no payment, tagged to the campaign; WASHO picks the day and window', async () =>
     inTx(async (s) => {
       const p = await person(s, { type: 'car' });
       const camp = await campaign(s);
-      const day = await istDate(s, 2);
-      const r = await claim(s, p, camp, day, { slot: 'afternoon' });
+      const today = await istDate(s, 0);
+      const useBy = await istDate(s, 7);
+      // whatever date and window a caller sends are ignored (even a past day): the customer is not asked, and cannot choose
+      const r = await claim(s, p, camp, await istDate(s, -5), { slot: 'afternoon' });
       expect(r).toMatchObject({ campaign_name: 'Navratri free wash', service_name: 'Car Body Wash' });
+      expect(r.scheduled_date >= today && r.scheduled_date <= useBy).toBe(true);
+      expect(['morning', 'afternoon', 'night']).toContain(r.time_slot);
       await s.as('postgres');
-      const b = (await s.q(`select status::text st, booking_type::text bt, price_cents, source, to_char(scheduled_date,'YYYY-MM-DD') d, time_slot::text slot, address_id, customer_profile_id, parking_location from public.bookings where id=$1`, [r.booking_id]))[0];
-      expect(b).toEqual({ st: 'confirmed', bt: 'on_demand', price_cents: 0, source: 'website', d: day, slot: 'afternoon', address_id: p.addr, customer_profile_id: p.u.profileId, parking_location: 'Basement P1' });
+      const b = (await s.q(`select status::text st, booking_type::text bt, price_cents, source, to_char(scheduled_date,'YYYY-MM-DD') d, time_slot::text slot, address_id, customer_profile_id, parking_location, (scheduled_date + (case time_slot when 'morning' then 7 when 'afternoon' then 12 else 19 end) * interval '1 hour') at time zone 'Asia/Kolkata' >= now() as in_future from public.bookings where id=$1`, [r.booking_id]))[0];
+      expect(b).toEqual({ st: 'confirmed', bt: 'on_demand', price_cents: 0, source: 'website', d: r.scheduled_date, slot: r.time_slot, address_id: p.addr, customer_profile_id: p.u.profileId, parking_location: 'Basement P1', in_future: true });
       expect((await s.q('select count(*)::int n from public.payments where booking_id=$1', [r.booking_id]))[0].n).toBe(0);
       expect((await s.q('select status, plate, flat_key from public.campaign_claims where id=$1', [r.claim_id]))[0]).toMatchObject({ status: 'booked', plate: expect.stringMatching(/^MH12AB/), flat_key: expect.stringContaining('yashwinorizzonte|b|f-') });
       expect((await s.q(`select count(*)::int n from public.booking_events where booking_id=$1 and event_type='booking_created'`, [r.booking_id]))[0].n).toBe(1);
       expect((await s.q(`select count(*)::int n from public.notifications where profile_id=$1 and category='booking_confirmed'`, [p.u.profileId]))[0].n).toBe(1);
       expect((await s.q(`select count(*)::int n from public.audit_events where entity_id=$1 and event_type='campaign_wash_claimed'`, [r.booking_id]))[0].n).toBe(1);
-      expect((await status(s, p)).me).toMatchObject({ state: 'booked', booking_id: r.booking_id, scheduled_date: day, time_slot: 'afternoon' });
+      expect((await status(s, p)).me).toMatchObject({ state: 'booked', booking_id: r.booking_id, scheduled_date: r.scheduled_date, time_slot: r.time_slot });
     }));
 
   it('gives a bike, a car and an SUV the right body wash', async () =>
@@ -206,7 +210,7 @@ describe('claiming the free wash', () => {
       expect(await claimErr(s, noAddr, camp, day, { addr: null })).toMatch(/Add your address first/);
     }));
 
-  it('is closed before it opens, after it closes, when switched off, and for a wash past the last day', async () =>
+  it('is closed before it opens, after it closes and when switched off; and refused plainly when no day is left', async () =>
     inTx(async (s) => {
       const p = await person(s);
       const [d2, d3, d8] = [await istDate(s, 2), await istDate(s, 3), await istDate(s, 8)];
@@ -217,10 +221,17 @@ describe('claiming the free wash', () => {
       const off = await campaign(s, { active: false });
       expect(await claimErr(s, p, off, d3)).toMatch(/not running right now/);
       const open = await campaign(s, { useBy: 4 });
-      expect(await claimErr(s, p, open, d8)).toMatch(/must be on or before/);
-      expect(await claimErr(s, p, open, await istDate(s, -1))).toMatch(/Choose today or a later date/);
       expect(await claimErr(s, p, open, d2, { addr: uid() })).toMatch(/Address not found/);
       expect(await claimErr(s, p, uid(), d2)).toMatch(/not running right now/);
+      expect(await claimErr(s, p, open, d8)).toBeNull(); // a date far past the last day is ignored: the wash is placed by WASHO
+
+      // the only day on offer is today and the vehicle already has a wash today: nothing is left, and the customer is told plainly
+      const q = await person(s);
+      const lastDay = await campaign(s, { opens: 0, closes: 3, useBy: 0, newOnly: false });
+      await s.as('postgres');
+      const svc = (await s.q(`select id from public.services where code='car-body-wash'`))[0].id;
+      await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',(now() at time zone 'Asia/Kolkata')::date,'night','confirmed')`, [q.u.profileId, q.veh, svc]);
+      expect(await claimErr(s, q, lastDay, d2)).toMatch(/no day left for a free wash/);
     }));
 
   it('is for new customers only: any earlier wash or any membership rules a customer out, a cancelled wash does not', async () =>
@@ -286,36 +297,52 @@ describe('claiming the free wash', () => {
       expect(await claimErr(s, fresh, camp, day, { veh: other.veh })).toMatch(/Vehicle not found/);
     }));
 
-  it('stops at the total, and at the daily limit (listing the full days)', async () =>
+  it('stops at the total; the daily limit spreads the washes over the days (the earliest day first, then the next)', async () =>
     inTx(async (s) => {
-      const [d2, d3] = [await istDate(s, 2), await istDate(s, 3)];
       const camp = await campaign(s, { total: 3, daily: 2 });
       const [a, b, c, d] = [await person(s), await person(s), await person(s), await person(s)];
-      await claim(s, a, camp, d2);
+      const ra = await claim(s, a, camp, await istDate(s, 2));
       expect((await status(s, null)).campaign).toMatchObject({ spots_left: 2, full_dates: [] });
-      await claim(s, b, camp, d2);
-      expect((await status(s, null)).campaign).toMatchObject({ spots_left: 1, full_dates: [d2] });
-      expect(await claimErr(s, c, camp, d2, { slot: 'night' })).toMatch(/fully booked for free washes/);
-      await claim(s, c, camp, d3);
-      expect(await claimErr(s, d, camp, d3)).toMatch(/All the free washes have been claimed/);
+      const rb = await claim(s, b, camp, await istDate(s, 2));
+      expect(rb.scheduled_date).toBe(ra.scheduled_date); // two on the first day with room
+      expect((await status(s, null)).campaign).toMatchObject({ spots_left: 1, full_dates: [ra.scheduled_date] });
+      const rc = await claim(s, c, camp, await istDate(s, 2));
+      expect(rc.scheduled_date > ra.scheduled_date).toBe(true); // the first day is full: the next one
+      expect(await claimErr(s, d, camp, await istDate(s, 3))).toMatch(/All the free washes have been claimed/);
       expect((await status(s, d)).campaign).toMatchObject({ state: 'full', spots_left: 0 });
     }));
 
-  it('one wash per vehicle per day still holds', async () =>
+  it('spreads a day\'s washes over the windows, quietest first', async () =>
+    inTx(async (s) => {
+      const camp = await campaign(s, { total: 20 });
+      const slots: string[] = [];
+      const first = await person(s);
+      const r1 = await claim(s, first, camp, await istDate(s, 2));
+      slots.push(r1.time_slot);
+      for (let i = 0; i < 2; i++) { const r = await claim(s, await person(s), camp, await istDate(s, 2)); expect(r.scheduled_date).toBe(r1.scheduled_date); slots.push(r.time_slot); }
+      // three washes on one day with nothing else booked: three different windows
+      expect(new Set(slots).size).toBe(3);
+    }));
+
+  it('one wash per vehicle per day still holds: a day the vehicle already has a wash is passed over', async () =>
     inTx(async (s) => {
       const camp = await campaign(s);
-      const day = await istDate(s, 3);
       const p = await person(s);
+      const first = (await claim(s, p, await campaign(s), await istDate(s, 3))).scheduled_date; // the earliest day on offer
       await s.as('postgres');
       const svc = (await s.q(`select id from public.services where code='car-body-wash'`))[0].id;
-      await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',$4::date,'night','cancelled')`, [p.u.profileId, p.veh, svc, day]);
-      expect((await claim(s, p, camp, day)).booking_id).toBeTruthy(); // a cancelled one does not block
+      // a cancelled wash on that day does not block it
+      const p2 = await person(s);
+      await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',$4::date,'night','cancelled')`, [p2.u.profileId, p2.veh, svc, first]);
+      expect((await claim(s, p2, camp, first)).scheduled_date).toBe(first);
+      // but a live wash does: the claim lands on the next day instead
       const q = await person(s);
       await s.as('postgres');
-      await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',$4::date,'night','pending')`, [q.u.profileId, q.veh, svc, day]);
+      await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status) values ($1,$2,$3,'on_demand',$4::date,'night','pending')`, [q.u.profileId, q.veh, svc, first]);
       // q now has a live wash, so is not new either way; open the campaign to everyone to reach the day rule
       const all = await campaign(s, { newOnly: false });
-      expect(await claimErr(s, q, all, day)).toMatch(/already has a wash booked that day/);
+      const rq = await claim(s, q, all, first);
+      expect(rq.scheduled_date > first).toBe(true);
     }));
 });
 

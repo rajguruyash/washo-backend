@@ -225,12 +225,12 @@ export const useCancelBooking = () => {
   return useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => post(`/bookings/${id}/cancel`, { reason }), onSuccess: () => refresh() });
 };
 
-export interface ClaimInput { campaign_id: string; vehicle_id: string; date: string; time_slot: SlotId; address_id?: string | null; parking_location?: string }
+export interface ClaimInput { campaign_id: string; vehicle_id: string; address_id?: string | null; parking_location?: string } // no date or time: WASHO picks them
 /** Claim the free wash: books it in one step (the database checks every rule). */
 export const useClaimFreeWash = () => {
   const refresh = useRefreshAll();
   return useMutation({
-    mutationFn: (body: ClaimInput) => post<{ booking_id: string; claim_id: string; campaign_name: string; service_name: string }>('/campaign/claim', body),
+    mutationFn: (body: ClaimInput) => post<{ booking_id: string; claim_id: string; campaign_name: string; service_name: string; scheduled_date?: string; time_slot?: SlotId }>('/campaign/claim', body),
     onSuccess: () => refresh(),
   });
 };

@@ -44,7 +44,7 @@ async function newcomer(o: { type?: 'bike' | 'car' | 'suv'; flat?: string; reg?:
 }
 
 const claimBody = (camp: string, n: { vehicle: { id: string }; addr: { id: string } }, o: Record<string, unknown> = {}) => ({
-  campaign_id: camp, vehicle_id: n.vehicle.id, date: istDate(2), time_slot: 'morning', address_id: n.addr.id, parking_location: 'Basement P1', ...o,
+  campaign_id: camp, vehicle_id: n.vehicle.id, address_id: n.addr.id, parking_location: 'Basement P1', ...o, // no date or time: WASHO picks them
 });
 const completeWash = (bookingId: string) => fake.admin.query(`update public.bookings set status = 'completed', completed_at = now() where id = $1`, [bookingId]);
 
@@ -122,18 +122,19 @@ describe('a new customer claims the free wash', () => {
 
     const claimed = expectOk(await n.c.post('/api/campaign/claim', claimBody(id, n)));
     expect(claimed.status).toBe(201);
-    expect(claimed.body).toMatchObject({ campaign_name: 'Navratri free wash', service_name: 'Car Body Wash' });
+    expect(claimed.body).toMatchObject({ campaign_name: 'Navratri free wash', service_name: 'Car Body Wash', scheduled_date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), time_slot: expect.stringMatching(/^(morning|afternoon|night)$/) });
     const bookingId = claimed.body.booking_id as string;
+    const when = { date: claimed.body.scheduled_date as string, slot: claimed.body.time_slot as string }; // picked by WASHO, and told to the customer at once
 
     // an ordinary booking for the customer: confirmed, free, nothing to pay
     const list = expectOk(await n.c.get('/api/bookings?scope=upcoming')).body.bookings;
     expect(list.find((b: any) => b.id === bookingId)).toMatchObject({ status: 'confirmed', price_cents: 0, booking_type: 'on_demand', service_name: 'Car Body Wash' });
     expect(expectOk(await n.c.get(`/api/bookings/${bookingId}`)).body.booking).toMatchObject({ campaign_name: 'Navratri free wash', price_cents: 0 });
-    expect(expectOk(await n.c.get('/api/campaign')).body.me).toMatchObject({ state: 'booked', booking_id: bookingId, scheduled_date: istDate(2), time_slot: 'morning' });
+    expect(expectOk(await n.c.get('/api/campaign')).body.me).toMatchObject({ state: 'booked', booking_id: bookingId, scheduled_date: when.date, time_slot: when.slot });
     expect((await dbOne('select count(*)::int n from public.payments where booking_id = $1', [bookingId])).n).toBe(0);
 
     // WASHO sees it, tagged, in Washes, History and the wash sheet, and in the campaign's own numbers
-    const washes = expectOk(await admin.c.get(`/api/admin/bookings?from=${istDate(2)}&to=${istDate(2)}`)).body.bookings;
+    const washes = expectOk(await admin.c.get(`/api/admin/bookings?from=${when.date}&to=${when.date}`)).body.bookings;
     expect(washes.find((b: any) => b.id === bookingId)).toMatchObject({ campaign_name: 'Navratri free wash', price_cents: 0 });
     const history = expectOk(await admin.c.get(`/api/admin/history?from=${istDate(0)}&to=${istDate(5)}&q=${n.reg}`)).body.bookings;
     expect(history).toHaveLength(1);
@@ -144,7 +145,7 @@ describe('a new customer claims the free wash', () => {
     expect(claims[0]).toMatchObject({ status: 'booked', customer_name: 'Asha Kulkarni', customer_phone: `+91${n.phone}`, booking_id: bookingId, registration_number: n.reg, vehicle_model: 'Creta', pack_cents: null });
     const detail = expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body;
     expect(detail.campaign).toMatchObject({ claimed: 1, booked: 1, completed: 0 });
-    expect(detail.days).toEqual([{ date: istDate(2), washes: 1 }]);
+    expect(detail.days).toEqual([{ date: when.date, washes: 1 }]);
 
     const again = await n.c.post('/api/campaign/claim', claimBody(id, n, { date: istDate(3) }));
     expect(again.status).toBe(422);
@@ -162,13 +163,12 @@ describe('a new customer claims the free wash', () => {
     const sameFlat = await newcomer({ flat: 'T1 - 101' });
     expect((await sameFlat.c.post('/api/campaign/claim', claimBody(id, sameFlat, { date: istDate(3) }))).body.message).toMatch(/already been claimed for this address/);
 
-    // the daily limit (1 a day) is full on that day and says so on the public status
+    // the daily limit (1 a day): the first day is full and says so on the public status; the next person is simply placed on the next day
     const b = await newcomer();
-    const full = await b.c.post('/api/campaign/claim', claimBody(id, b));
-    expect(full.status).toBe(422);
-    expect(full.body.message).toMatch(/fully booked for free washes/);
-    expect(expectOk(await b.c.get('/api/campaign')).body.campaign.full_dates).toEqual([istDate(2)]);
-    expectOk(await b.c.post('/api/campaign/claim', claimBody(id, b, { date: istDate(3) })));
+    const firstDay = (await dbOne(`select to_char(b.scheduled_date,'YYYY-MM-DD') d from public.campaign_claims cl join public.bookings b on b.id = cl.booking_id where cl.campaign_id = $1`, [id])).d;
+    expect(expectOk(await b.c.get('/api/campaign')).body.campaign.full_dates).toEqual([firstDay]);
+    const next = expectOk(await b.c.post('/api/campaign/claim', claimBody(id, b)));
+    expect(next.body.scheduled_date > firstDay).toBe(true);
 
     // an existing customer (a wash on their record) is not new
     const old = await newcomer();
@@ -280,12 +280,13 @@ describe('how much notice a wash needs', () => {
     expect(before).toEqual({ on_demand_min_lead_hours: expect.any(Number), membership_min_lead_days: expect.any(Number) });
     expectOk(await admin.c.put('/api/admin/pricing-settings', { key: 'on_demand_min_lead_hours', value: 48 }));
     expect((await rules()).on_demand_min_lead_hours).toBe(48);
-    // and the database holds a claim to the same rule: tomorrow night is refused at 48 hours' notice
+    // and the database places a free wash by the same rule: at 48 hours' notice the day and window it picks start at least 48 hours from now
     const { id } = await liveCampaign();
     const n = await newcomer();
-    const refused = await n.c.post('/api/campaign/claim', claimBody(id, n, { date: istDate(1), time_slot: 'night' }));
-    expect(refused.status).toBe(422);
-    expect(refused.body.message).toMatch(/starts too soon/);
+    const placed = expectOk(await n.c.post('/api/campaign/claim', claimBody(id, n))).body;
+    const startHour = { morning: 7, afternoon: 12, night: 19 }[placed.time_slot as 'morning' | 'afternoon' | 'night'];
+    const starts = new Date(`${placed.scheduled_date}T${String(startHour).padStart(2, '0')}:00:00+05:30`).getTime();
+    expect(starts).toBeGreaterThanOrEqual(Date.now() + 48 * 3_600_000 - 60_000);
     expectOk(await admin.c.put('/api/admin/pricing-settings', { key: 'on_demand_min_lead_hours', value: before.on_demand_min_lead_hours }));
   });
 });

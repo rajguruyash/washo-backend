@@ -64,8 +64,9 @@ campaignRouter.get(
   })
 );
 
-// Claim the free wash: pick the vehicle, the day and the time. The database checks the offer is open, the caps, that this is a new
-// customer, and one per phone / vehicle / flat, and books the wash in the same step. A verified phone is part of the claim.
+// Claim the free wash: pick the vehicle. The database checks the offer is open, the caps, that this is a new customer, and one per phone /
+// vehicle / flat, picks the day and the time window itself (the customer is not asked: any date or window sent is ignored) and books the wash
+// in the same step, then says when it is. A verified phone is part of the claim.
 campaignRouter.post(
   '/campaign/claim',
   requireSession,
@@ -76,8 +77,8 @@ campaignRouter.post(
       z.object({
         campaign_id: uuid,
         vehicle_id: uuid,
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a date.'),
-        time_slot: z.enum(['morning', 'afternoon', 'night']),
+        date: z.string().optional(), // older pages still send these; the database ignores them
+        time_slot: z.string().optional(),
         address_id: uuid.nullish(),
         parking_location: z.string().trim().max(160).optional(),
       }),
@@ -86,8 +87,8 @@ campaignRouter.post(
     const r = await req.db(
       async (c) =>
         (
-          await c.query('SELECT public.claim_campaign_wash($1, $2, $3::date, $4::public.time_slot, $5, $6) AS r', [
-            b.campaign_id, b.vehicle_id, b.date, b.time_slot, b.address_id ?? null, b.parking_location ?? null,
+          await c.query('SELECT public.claim_campaign_wash($1, $2, NULL::date, NULL::public.time_slot, $3, $4) AS r', [
+            b.campaign_id, b.vehicle_id, b.address_id ?? null, b.parking_location ?? null,
           ])
         ).rows[0].r
     );

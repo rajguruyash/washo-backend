@@ -1,0 +1,710 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>WASHO Navratri Free Wash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=block" rel="stylesheet" />
+<link rel="stylesheet" href="site.css" />
+<script src="icons.js"></script>
+<style>
+  html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #05080f; }
+  body { min-height: 0 !important; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #05080f; color: #fff; font-family: Inter, sans-serif; }
+  .L { position: absolute; }
+  .scene { position: absolute; inset: 0; overflow: hidden; }
+  .disp { font-family: Sora, Inter, sans-serif; font-weight: 800; letter-spacing: -0.025em; line-height: 0.98; }
+  .center { left: 0; right: 0; text-align: center; }
+  .yellow { color: #ffd84d; }
+  .ico { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+
+  /* light + atmosphere */
+  .blob { position: absolute; border-radius: 9999px; filter: blur(140px); }
+  #grain { position: absolute; inset: 0; pointer-events: none; opacity: 0.06; mix-blend-mode: overlay; }
+  #vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 80% 60% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%); }
+  .bokeh { position: absolute; border-radius: 9999px; }
+
+  /* scene 1 */
+  #s1photo { position: absolute; left: -120px; top: 500px; width: 1500px; height: 1500px; background: url(assets/car-body-wash.webp) center/cover; transform-origin: 40% 40%; -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26%); mask-image: linear-gradient(180deg, transparent 0, #000 26%); }
+  #s1shade { position: absolute; inset: 0; background:
+      linear-gradient(180deg, #05080f 0%, #05080f 26%, rgba(5,8,15,0.55) 40%, rgba(5,8,15,0.05) 58%, rgba(5,8,15,0.15) 80%, rgba(5,8,15,0.85) 100%); }
+  .gold { background: linear-gradient(180deg, #fff6d6 10%, #ffd84d 60%, #ffb547 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .spray { position: absolute; height: 3px; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(235,245,255,0.9)); transform-origin: 0 50%; }
+  .pill { display: inline-flex; align-items: center; gap: 14px; border-radius: 9999px; border: 2px solid rgba(255,216,77,0.35); background: rgba(255,216,77,0.12); color: #ffd84d; font-weight: 700; font-size: 34px; letter-spacing: 0.14em; padding: 14px 30px; text-transform: uppercase; backdrop-filter: blur(12px); }
+
+  /* wipe */
+  #wipe { position: absolute; left: -10%; width: 120%; height: 2600px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(106,156,255,0) 0px, rgba(155,191,255,0.95) 150px, #3f7cff 230px, #1248b8 900px, #083a9b 1500px, #0a101c 2250px, rgba(5,8,15,0) 2600px);
+    border-radius: 50% 50% 0 0 / 160px 160px 0 0; }
+
+  /* scene 2 */
+  #s2tile { position: absolute; left: 90px; top: 470px; width: 900px; height: 420px; border-radius: 48px; overflow: hidden; border: 2px solid rgba(255,255,255,0.12); box-shadow: 0 40px 90px -30px rgba(0,0,0,0.9), 0 0 80px -30px rgba(63,124,255,0.6); }
+  #s2img { position: absolute; left: 0; top: -188px; width: 900px; height: 900px; background: url(assets/bike-body-wash.webp) center/cover; transform-origin: 45% 45%; }
+  #s2tileShade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,8,15,0) 50%, rgba(5,8,15,0.75) 100%); }
+  .card-glass { border-radius: 48px; border: 2px solid rgba(255,255,255,0.14); background: rgba(17,26,47,0.8); backdrop-filter: blur(40px); box-shadow: inset 0 2px 0 rgba(255,255,255,0.05), 0 40px 80px -48px rgba(0,0,0,0.7); }
+  .eyebrow-v { font-size: 24px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.18em; color: #9bbfff; }
+
+  /* scene 3: device */
+  #device { position: absolute; left: 180px; top: 470px; width: 720px; height: 1050px; border-radius: 60px; overflow: hidden; background: #05080f;
+    border: 3px solid rgba(255,255,255,0.16); box-shadow: 0 0 0 10px rgba(10,16,28,0.9), 0 0 0 12px rgba(255,255,255,0.06), 0 60px 120px -40px rgba(0,0,0,0.9), 0 0 140px -40px rgba(63,124,255,0.55); }
+  #inner { position: absolute; left: 0; top: 0; width: 390px; height: 568.8px; transform: scale(1.84615); transform-origin: 0 0; overflow: hidden; background: #05080f; }
+  #urlbar { position: absolute; left: 0; right: 0; top: 0; height: 46px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid rgba(255,255,255,0.06); background: #0a101c; }
+  #urlpill { flex: 1; height: 32px; border-radius: 9999px; background: rgba(255,255,255,0.07); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; font-weight: 600; color: #c4cde0; }
+  #urlprog { position: absolute; left: 0; bottom: -1px; height: 2px; background: #3f7cff; box-shadow: 0 0 8px #3f7cff; }
+  #screens { position: absolute; left: 0; right: 0; top: 46px; bottom: 0; overflow: hidden; background: #05080f; }
+  .screen { position: absolute; inset: 0; overflow: hidden; }
+  .scroller { position: absolute; left: 0; right: 0; top: 0; }
+  .screenbg { position: absolute; inset: 0; background: radial-gradient(60% 40% at 0% 0%, rgba(18,72,184,0.28), transparent 70%), radial-gradient(50% 40% at 100% 45%, rgba(63,124,255,0.12), transparent 70%); }
+  .btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; border-radius: 16px; font-weight: 600; color: #fff; }
+  .btn-primary { background: linear-gradient(180deg, #3f7cff, #1248b8); box-shadow: 0 8px 24px -8px rgba(42,98,230,0.8), inset 0 1px 0 rgba(255,255,255,0.22); }
+  .btn-glass { border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
+  .btn-sm { height: 36px; padding: 0 14px; font-size: 13px; }
+  .btn-lg { height: 56px; padding: 0 28px; font-size: 16px; }
+  .caret { display: inline-block; width: 2px; height: 22px; background: #6a9cff; margin-left: 2px; vertical-align: middle; }
+  .glint { position: absolute; top: 0; bottom: 0; width: 90px; background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent); }
+  .stepc { width: 32px; height: 32px; border-radius: 9999px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+  .stepline { position: relative; margin: 0 8px; height: 2px; flex: 1; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+  .stepline i { position: absolute; left: 0; top: 0; bottom: 0; background: #ffd84d; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(10,16,28,0.92); backdrop-filter: blur(20px); }
+  #track { position: relative; height: 56px; border-radius: 18px; background: #1a2542; overflow: hidden; flex: 1; }
+  #trackLabel { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px; font-weight: 500; color: rgba(63,124,255,0.85); white-space: nowrap; }
+  #fill { position: absolute; left: 4px; top: 4px; bottom: 4px; border-radius: 14px; background: #3f7cff; display: flex; align-items: center; justify-content: flex-end; color: #fff; overflow: hidden; }
+  #fillDone { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 600; color: #05080f; }
+
+  /* captions */
+  #cap { position: absolute; left: 60px; right: 60px; top: 238px; height: 200px; text-align: center; }
+  .capline { position: absolute; left: 0; right: 0; }
+  .steppill { display: inline-flex; align-items: center; gap: 12px; border-radius: 9999px; padding: 10px 24px; font-size: 26px; font-weight: 700; letter-spacing: 0.16em; color: #05080f; background: #ffd84d; }
+  .captitle { font-family: Sora, Inter, sans-serif; font-weight: 800; font-size: 66px; letter-spacing: -0.025em; line-height: 1.02; }
+  .capsub { font-size: 34px; font-weight: 600; color: #c4cde0; }
+
+  /* finger */
+  #finger { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 9999px; background: rgba(255,255,255,0.22); border: 3px solid rgba(255,255,255,0.85); box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 30px rgba(155,191,255,0.4); }
+  #ripple { position: absolute; left: 0; top: 0; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 9999px; border: 3px solid rgba(155,191,255,0.9); }
+
+  /* scene 4 */
+  #medal { position: absolute; left: 400px; top: 410px; width: 280px; height: 280px; border-radius: 9999px; background: radial-gradient(circle at 35% 30%, #7af0c4, #3dd9a0 55%, #1fae7c); box-shadow: 0 0 0 14px rgba(61,217,160,0.15), 0 30px 90px -10px rgba(61,217,160,0.7); display: grid; place-items: center; }
+  .ring { position: absolute; left: 540px; top: 550px; border-radius: 9999px; border: 3px solid rgba(61,217,160,0.7); }
+  .petal { position: absolute; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; }
+
+  /* scene 5 */
+  #ctaBtn { position: relative; display: inline-block; overflow: hidden; border-radius: 40px; padding: 2px 0; }
+  #ctaInner { position: relative; z-index: 1; display: flex; align-items: center; gap: 18px; border-radius: 40px; border: 2px solid rgba(155,191,255,0.35); background: #1248b8; padding: 34px 56px; font-size: 44px; font-weight: 700; letter-spacing: 0.04em; box-shadow: inset 0 2px 0 rgba(255,255,255,0.2); }
+  .star { position: absolute; width: 300%; height: 50%; border-radius: 9999px; opacity: 0.9; background: radial-gradient(circle, #9bbfff, transparent 10%); }
+  #url5 { position: relative; display: inline-block; }
+  #url5line { position: absolute; left: 0; bottom: -14px; height: 8px; border-radius: 8px; background: linear-gradient(90deg, #1248b8, #6a9cff, #ffd84d); box-shadow: 0 0 24px rgba(106,156,255,0.8); }
+  .shine { position: absolute; inset: 0; background: linear-gradient(100deg, transparent 35%, rgba(255,255,255,0.7) 50%, transparent 65%); background-size: 300% 100%; mix-blend-mode: overlay; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- ambient layers -->
+  <div id="amb" class="L" style="inset:0">
+    <div id="blobA" class="blob" style="width:900px;height:900px;background:rgba(18,72,184,0.42)"></div>
+    <div id="blobB" class="blob" style="width:760px;height:760px;background:rgba(63,124,255,0.20)"></div>
+    <div id="blobC" class="blob" style="width:700px;height:700px;background:rgba(255,181,71,0.13)"></div>
+  </div>
+  <div id="mandala" class="L" style="left:-210px;top:-60px;width:1500px;height:1500px"></div>
+  <div id="lights" class="L" style="left:0;top:0;width:1080px;height:320px"></div>
+
+  <!-- SCENE 1: hook -->
+  <div id="s1" class="scene">
+    <div id="s1photo"></div>
+    <div id="s1spray" class="L" style="inset:0"></div>
+    <div id="s1shade"></div>
+    <div id="s1streak" class="L" style="top:-200px;height:2400px;width:420px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent);transform-origin:center"></div>
+    <div id="s1big" class="L center" style="top:300px">
+      <div id="s1nav" class="disp" style="font-size:150px;letter-spacing:0.01em"></div>
+      <div id="s1spec" class="disp" style="font-size:84px;margin-top:18px;letter-spacing:0.12em">SPECIAL <span style="letter-spacing:0">🎉</span></div>
+    </div>
+    <div id="s1pillWrap" class="L center" style="top:282px"><span class="pill">Navratri special <span style="letter-spacing:0">🎉</span></span></div>
+    <div id="s1hook" class="L center" style="top:390px">
+      <div id="s1h1" class="disp" style="font-size:136px">YOUR WASH</div>
+      <div id="s1h2" class="disp" style="font-size:136px;margin-top:10px">IS <span id="s1onus" class="yellow" style="text-shadow:0 0 50px rgba(255,216,77,0.45)">ON US.</span></div>
+    </div>
+  </div>
+
+  <!-- SCENE 2: free wash reveal -->
+  <div id="s2" class="scene">
+    <div id="s2logo" class="L center" style="top:236px"><div style="position:relative;display:inline-block">
+      <img src="assets/washo-logo-full.webp" style="width:600px;height:auto;display:block" />
+      <div id="s2logoShine" class="shine" style="-webkit-mask:url(assets/washo-logo-full.webp) center/contain no-repeat;mask:url(assets/washo-logo-full.webp) center/contain no-repeat"></div>
+    </div></div>
+    <div id="s2tile"><div id="s2img"></div><div id="s2spray" class="L" style="inset:0"></div><div id="s2tileShade"></div>
+      <div class="L" style="left:30px;bottom:28px"><span class="inline-flex items-center gap-1.5 rounded-full border border-offer/30 bg-offer/12 text-offer" style="font-size:26px;font-weight:700;padding:10px 22px;gap:10px;backdrop-filter:blur(10px)" id="s2badge"></span></div>
+    </div>
+    <div id="s2t1" class="L center disp" style="top:935px;font-size:66px;color:#c4cde0;letter-spacing:0.14em">GET A</div>
+    <div id="s2t2" class="L center disp yellow" style="top:1008px;font-size:150px;text-shadow:0 0 60px rgba(255,216,77,0.35)">FREE WASH</div>
+    <div id="s2card" class="L card-glass" style="left:110px;width:860px;top:1190px;height:330px;text-align:center">
+      <p class="eyebrow-v" style="margin-top:44px">Body wash for bike, car or SUV</p>
+      <div style="position:relative;height:150px;margin-top:20px">
+        <div id="s2num" class="disp L center" style="top:0;font-size:150px;line-height:150px;font-variant-numeric:tabular-nums">₹150</div>
+        <div id="s2free" class="L center" style="top:0;display:flex;align-items:baseline;justify-content:center;gap:28px">
+          <s id="s2strike" style="font-size:54px;color:#93a1bf;font-weight:600">₹150</s>
+          <span class="disp yellow" style="font-size:150px;line-height:150px;text-shadow:0 0 70px rgba(255,216,77,0.5)">FREE</span>
+        </div>
+      </div>
+      <p id="s2foot" style="margin-top:16px;font-size:28px;color:#93a1bf">A car body wash is ₹150. For new customers it costs nothing.</p>
+    </div>
+  </div>
+
+  <!-- SCENE 3: how to claim (real WASHO screens) -->
+  <div id="s3" class="scene">
+    <div id="cap"></div>
+    <div id="device">
+      <div id="inner">
+        <div id="urlbar"><div id="urlpill"><span id="urlLock"></span><span id="urltext"></span><span id="urlcaret" class="caret" style="height:16px"></span></div><div id="urlprog"></div></div>
+        <div id="screens">
+          <div id="scrHome" class="screen"></div>
+          <div id="scrOffer" class="screen"></div>
+          <div id="scrLogin" class="screen"></div>
+          <div id="scrDate" class="screen"></div>
+          <div id="scrClaim" class="screen"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENE 4: confirmation -->
+  <div id="s4" class="scene">
+    <div id="rings"></div>
+    <div id="petals" class="L" style="inset:0"></div>
+    <div id="medal"><svg width="150" height="150" viewBox="0 0 24 24" fill="none" stroke="#05080f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path id="medalCheck" d="M20 6 9 17l-5-5" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/></svg></div>
+    <div id="s4t1" class="L center disp yellow" style="top:770px;font-size:124px;text-shadow:0 0 60px rgba(255,216,77,0.35)">FREE WASH</div>
+    <div id="s4t2" class="L center disp" style="top:900px;font-size:124px">CLAIMED <svg class="ico" style="margin-top:-18px" width="110" height="110" viewBox="0 0 24 24" fill="none" stroke="#3dd9a0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path id="s4tick" d="M20 6 9 17l-5-5" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/></svg></div>
+    <div id="s4card" class="L card-glass" style="left:130px;width:820px;top:1085px;height:190px;border-radius:40px"></div>
+    <div id="s4t3" class="L center disp" style="top:1335px;font-size:70px;font-weight:700;letter-spacing:-0.02em"><span class="text-gradient">See you this Navratri!</span></div>
+  </div>
+
+  <!-- SCENE 5: final CTA -->
+  <div id="s5" class="scene">
+    <div id="s5logo" class="L center" style="top:270px"><div style="position:relative;display:inline-block">
+      <img src="assets/washo-logo-full.webp" style="width:700px;height:auto;display:block" />
+      <div id="s5logoShine" class="shine" style="-webkit-mask:url(assets/washo-logo-full.webp) center/contain no-repeat;mask:url(assets/washo-logo-full.webp) center/contain no-repeat"></div>
+    </div></div>
+    <div id="s5t1" class="L center disp" style="top:600px;font-size:76px;letter-spacing:0.16em;color:#fff">NAVRATRI</div>
+    <div id="s5t2" class="L center disp yellow" style="top:690px;font-size:146px;text-shadow:0 0 60px rgba(255,216,77,0.35)">FREE WASH</div>
+    <div id="s5t3" class="L center" style="top:870px;font-size:46px;font-weight:600;color:#c4cde0">Claim yours now</div>
+    <div id="s5t4" class="L center" style="top:965px"><span id="url5" class="disp" style="font-size:112px;letter-spacing:-0.02em">washo.online<i id="url5line"></i></span></div>
+    <div id="s5t5" class="L center" style="top:1180px"><span id="ctaBtn">
+      <i id="starB" class="star" style="bottom:-11px;right:-250%"></i>
+      <i id="starT" class="star" style="top:-10px;left:-250%"></i>
+      <span id="ctaInner">CLAIM FREE WASH <span id="ctaArrow"></span></span>
+      <span id="ctaShine" class="shine" style="z-index:2;border-radius:40px"></span>
+    </span></div>
+  </div>
+
+  <div id="wipe"></div>
+  <div id="flash" class="L" style="inset:0;background:#fff"></div>
+  <div id="ripple"></div>
+  <div id="finger"></div>
+  <svg id="grain" width="1080" height="1920"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>
+  <div id="vignette"></div>
+</div>
+
+<script>
+/* ───────── helpers ───────── */
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, p) => a + (b - a) * p;
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eo5 = (x) => 1 - Math.pow(1 - x, 5);
+const eio = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const eback = (x) => { const c1 = 1.6, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+function ic(name, size = 16, extra = '', sw = 2) {
+  return `<svg class="ico ${extra}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+}
+function fx(el, { o = 1, x = 0, y = 0, s = 1, b = 0, r = 0 } = {}) {
+  el.style.opacity = o;
+  el.style.visibility = o <= 0.001 ? 'hidden' : 'visible';
+  el.style.transform = `translate(${x}px,${y}px) scale(${s}) rotate(${r}deg)`;
+  el.style.filter = b > 0.05 ? `blur(${b}px)` : 'none';
+}
+// blur-in like the site's BlurText: up from below, out of a blur
+const bin = (p, dy = 50, bl = 18) => ({ o: eo(p), y: (1 - eo(p)) * dy, b: (1 - eo(p)) * bl });
+function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+/* ───────── ambient: mandala, lights, bokeh ───────── */
+(function buildMandala() {
+  let s = '<svg viewBox="0 0 1000 1000" width="1500" height="1500" fill="none" stroke="#ffd84d" stroke-width="1.6">';
+  for (const r of [120, 190, 300, 390, 470]) s += `<circle cx="500" cy="500" r="${r}" stroke-opacity="${r === 300 ? 0.9 : 0.55}"/>`;
+  for (let i = 0; i < 24; i++) { const a = (i / 24) * 360; s += `<path transform="rotate(${a} 500 500)" d="M500 190 C 540 230, 540 270, 500 300 C 460 270, 460 230, 500 190 Z"/>`; }
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * 360 + 15; s += `<path transform="rotate(${a} 500 500)" d="M500 300 C 560 330, 560 370, 500 390 C 440 370, 440 330, 500 300 Z" stroke-opacity="0.7"/>`; }
+  for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; s += `<circle cx="${500 + Math.cos(a) * 430}" cy="${500 + Math.sin(a) * 430}" r="4" fill="#ffd84d" fill-opacity="0.8" stroke="none"/>`; }
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * 360; s += `<path transform="rotate(${a} 500 500)" d="M500 60 L 520 120 L 500 110 L 480 120 Z" fill="#ffd84d" fill-opacity="0.4" stroke="none"/>`; }
+  $('mandala').innerHTML = s + '</svg>';
+})();
+const lightDots = [];
+(function buildLights() {
+  // two strings of small festive lights, sagging across the top
+  const host = $('lights');
+  const strings = [{ y0: 40, sag: 120, n: 22 }, { y0: 10, sag: 70, n: 18 }];
+  const cols = ['#ffd84d', '#ffb547', '#ff8a3d', '#ffd84d', '#9bbfff'];
+  strings.forEach((st, si) => {
+    for (let i = 0; i < st.n; i++) {
+      const u = i / (st.n - 1); const x = u * 1080; const y = st.y0 + st.sag * 4 * u * (1 - u);
+      const d = document.createElement('div');
+      const c = cols[(i + si) % cols.length]; const sz = si ? 8 : 11;
+      d.style.cssText = `position:absolute;left:${x - sz / 2}px;top:${y - sz / 2}px;width:${sz}px;height:${sz}px;border-radius:9999px;background:${c};box-shadow:0 0 16px 4px ${c}88`;
+      host.appendChild(d); lightDots.push({ d, ph: i * 0.9 + si * 2 });
+    }
+  });
+})();
+const bokeh = [];
+(function buildBokeh() {
+  const r = rng(7); const cols = ['#ffd84d', '#ffb547', '#ff8a3d', '#ff5c8a', '#9bbfff', '#ffd84d'];
+  for (let i = 0; i < 30; i++) {
+    const d = document.createElement('div'); d.className = 'bokeh';
+    const size = 8 + r() * 30; const c = cols[Math.floor(r() * cols.length)];
+    d.style.cssText += `width:${size}px;height:${size}px;background:${c};filter:blur(${size * 0.28}px)`;
+    $('stage').insertBefore(d, $('wipe'));
+    bokeh.push({ d, bl: size * 0.28, x: r() * 1080, y: r() * 2100, sp: 25 + r() * 60, amp: 10 + r() * 30, ph: r() * 6.28, base: 0.25 + r() * 0.45 });
+  }
+})();
+function ambient(t) {
+  $('blobA').style.transform = `translate(${-260 + Math.sin(t * 0.4) * 60}px,${-200 + Math.cos(t * 0.3) * 50}px)`;
+  $('blobB').style.transform = `translate(${520 + Math.cos(t * 0.35) * 60}px,${700 + Math.sin(t * 0.3) * 70}px)`;
+  $('blobC').style.transform = `translate(${300 + Math.sin(t * 0.5) * 80}px,1350px)`; $('blobC').style.opacity = festive(t) * 0.8;
+  const m = t < 3 ? 0.06 + 0.05 * P(t, 0.2, 1.2) : t < 6 ? 0.12 : t < 11 ? 0.06 : 0.13;
+  fx($('mandala'), { o: m, r: t * 5, s: 1 + 0.03 * Math.sin(t * 0.8) });
+  const lo = (t < 2.9 ? 0.9 * P(t, 0.3, 1.0) : t < 5.9 ? 1 : t < 11 ? 0.35 : 1);
+  $('lights').style.opacity = lo;
+  lightDots.forEach(({ d, ph }) => { d.style.opacity = 0.55 + 0.45 * Math.sin(t * 5 + ph); });
+  const f = festive(t);
+  bokeh.forEach((b) => {
+    const y = ((b.y - b.sp * t) % 2100 + 2100) % 2100 - 90;
+    fx(b.d, { o: f * b.base * (0.7 + 0.3 * Math.sin(t * 2 + b.ph)), x: b.x + Math.sin(t * 0.8 + b.ph) * b.amp, y, b: b.bl });
+  });
+}
+const festive = (t) => (t < 6 ? 1 : t < 11 ? 0.35 : 1);
+
+/* ───────── scene 1: hook ───────── */
+$('s1nav').innerHTML = 'NAVRATRI'.split('').map((c) => `<span class="gold" style="display:inline-block">${c}</span>`).join('');
+const navLetters = [...$('s1nav').children];
+const sprays = [];
+(function () {
+  const r = rng(3);
+  for (let i = 0; i < 26; i++) { const d = document.createElement('div'); d.className = 'spray'; $('s1spray').appendChild(d); sprays.push({ d, off: r(), ang: -8 + r() * 30, len: 60 + r() * 110, spd: 0.9 + r() * 0.6 }); }
+})();
+function scene1(t) {
+  const el = $('s1');
+  if (t > 3.35) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  // photo: punch-in at the start, then a slow pull back
+  const punch = eo5(P(t, 0, 0.6));
+  const s = lerp(1.32, 1.12, punch) - 0.05 * eo(P(t, 0.6, 3.2));
+  const yv = lerp(60, 0, punch);
+  $('s1photo').style.transform = `translate(0px,${yv}px) scale(${s})`;
+  $('s1photo').style.filter = `brightness(${lerp(0.55, 1.0, P(t, 0, 0.5))}) saturate(1.1) contrast(1.05)`;
+  // the lance tip, in stage coordinates (photo transform origin 40% 40%)
+  const ox = -120 + 600, oy = 500 + 600; const tipLocalX = -120 + 430 * 1.5625, tipLocalY = 500 + 370 * 1.5625;
+  const tx = ox + (tipLocalX - ox) * s, ty = oy + (tipLocalY - oy) * s + yv;
+  sprays.forEach((p) => {
+    const ph = ((t * p.spd + p.off) % 1);
+    const dist = ph * 360; const a = (p.ang + 18) * Math.PI / 180;
+    p.d.style.left = tx + 'px'; p.d.style.top = ty + 'px'; p.d.style.width = p.len + 'px';
+    p.d.style.opacity = Math.sin(ph * Math.PI) * 0.75 * P(t, 0.15, 0.5);
+    p.d.style.transform = `rotate(${p.ang + 18}deg) translateX(${dist}px)`;
+  });
+  // light streak sweeps once
+  const sp = P(t, 0.05, 0.75);
+  fx($('s1streak'), { o: Math.sin(sp * Math.PI), x: lerp(-500, 1200, eio(sp)), r: 18 });
+  // NAVRATRI letters
+  const out = eio(P(t, 1.38, 1.72));
+  navLetters.forEach((l, i) => { const p = P(t, 0.1 + i * 0.045, 0.5 + i * 0.045); const v = bin(p, 70, 22); fx(l, { ...v, s: lerp(1.25, 1, eo(p)) }); });
+  fx($('s1spec'), { ...bin(P(t, 0.55, 0.95), 40, 14) });
+  fx($('s1big'), { o: 1 - out, y: -out * 120, s: 1 - out * 0.35, b: out * 16 });
+  // pill replaces it
+  fx($('s1pillWrap'), { ...bin(P(t, 1.55, 1.9), -30, 10) });
+  // the hook line
+  fx($('s1h1'), { ...bin(P(t, 1.62, 2.02), 70, 22), s: lerp(1.15, 1, eo(P(t, 1.62, 2.02))) });
+  fx($('s1h2'), { ...bin(P(t, 1.86, 2.26), 70, 22), s: lerp(1.15, 1, eo(P(t, 1.86, 2.26))) });
+  const pulse = Math.sin(P(t, 2.25, 2.7) * Math.PI);
+  $('s1onus').style.textShadow = `0 0 ${50 + pulse * 70}px rgba(255,216,77,${0.45 + pulse * 0.4})`;
+  $('s1hook').style.transform = `scale(${1 + 0.035 * P(t, 2.0, 3.0)})`;
+}
+
+/* ───────── wipe between scene 1 and 2 ───────── */
+function wipe(t) {
+  const p = P(t, 2.78, 3.38);
+  const y = lerp(1960, -2700, eio(p));
+  $('wipe').style.transform = `translateY(${y}px)`;
+  $('wipe').style.visibility = p > 0 && p < 1 ? 'visible' : 'hidden';
+  // scene 1 shows above the wave's head, scene 2 below its tail
+  $('s1').style.clipPath = p > 0 ? `inset(0 0 ${clamp(1920 - (y + 160), 0, 1920)}px 0)` : 'none';
+  $('s2').style.clipPath = p < 1 ? `inset(${clamp(y + 2450, 0, 1920)}px 0 0 0)` : 'none';
+}
+
+/* ───────── scene 2: free wash reveal ───────── */
+$('s2badge').innerHTML = ic('gift', 26) + ' Navratri Free Wash';
+const sprays2 = [];
+(function () { const r = rng(11); for (let i = 0; i < 18; i++) { const d = document.createElement('div'); d.className = 'spray'; d.style.height = '2.5px'; $('s2spray').appendChild(d); sprays2.push({ d, off: r(), ang: -4 + r() * 22, len: 40 + r() * 80, spd: 1 + r() * 0.6 }); } })();
+function scene2(t) {
+  const el = $('s2');
+  if (t < 2.9 || t > 6.3) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const outp = eio(P(t, 5.78, 6.15));
+  el.style.transform = `scale(${1 + outp * 0.12})`; el.style.opacity = 1 - outp; el.style.filter = outp > 0.01 ? `blur(${outp * 14}px)` : 'none';
+  const lp = P(t, 2.96, 3.4);
+  fx($('s2logo'), { o: eo(lp), s: lerp(0.86, 1, eo(lp)), b: (1 - eo(lp)) * 14, y: (1 - eo(lp)) * -20 });
+  $('s2logoShine').style.backgroundPosition = `${lerp(130, -30, eio(P(t, 3.55, 4.15)))}% 0`;
+  // photo tile: opens from the middle, slow push-in
+  const tp = eio(P(t, 3.08, 3.65));
+  $('s2tile').style.clipPath = `inset(${(1 - tp) * 50}% ${(1 - tp) * 12}% ${(1 - tp) * 50}% ${(1 - tp) * 12}% round 48px)`;
+  $('s2tile').style.opacity = tp > 0 ? 1 : 0;
+  $('s2img').style.transform = `scale(${1.16 - 0.1 * eo(P(t, 3.18, 6.0))}) translateX(${-10 * P(t, 3.2, 6)}px)`;
+  const nx = 328, ny = 103; const sc = 1.16 - 0.1 * eo(P(t, 3.18, 6.0));
+  const cx = 900 * 0.45, cy = -188 + 900 * 0.45; const gx = cx + (nx - cx) * sc, gy = cy + (ny + 188 - 900 * 0.45) * sc;
+  sprays2.forEach((p) => {
+    const ph = ((t * p.spd + p.off) % 1);
+    p.d.style.left = gx + 'px'; p.d.style.top = gy + 'px'; p.d.style.width = p.len + 'px';
+    p.d.style.opacity = Math.sin(ph * Math.PI) * 0.8 * tp;
+    p.d.style.transform = `rotate(${p.ang + 14}deg) translateX(${ph * 300}px)`;
+  });
+  fx($('s2badge').parentElement, { ...bin(P(t, 3.6, 3.95), 20, 8) });
+  // GET A / FREE WASH
+  fx($('s2t1'), { ...bin(P(t, 3.5, 3.85), 40, 14) });
+  const fp = P(t, 3.65, 4.1);
+  fx($('s2t2'), { o: eo(fp), s: lerp(1.35, 1, eback(fp)), b: (1 - eo(fp)) * 24 });
+  // the offer card: ₹150 counts down to FREE (Offer page FreeCountdown)
+  fx($('s2card'), { ...bin(P(t, 4.1, 4.5), 80, 16) });
+  const cp = P(t, 4.5, 5.3);
+  const n = Math.round(150 * (1 - eo(cp)));
+  const free = t >= 5.3;
+  $('s2num').textContent = '₹' + n;
+  fx($('s2num'), { o: free ? 0 : 1 });
+  const pf = P(t, 5.3, 5.6);
+  fx($('s2free'), { o: free ? eo(pf) : 0, s: free ? lerp(1.4, 1, eback(pf)) : 1 });
+  $('s2card').style.boxShadow = `inset 0 2px 0 rgba(255,255,255,0.05), 0 0 ${free ? 120 * Math.sin(pf * Math.PI) + 40 : 0}px -20px rgba(255,216,77,${free ? 0.55 : 0})`;
+}
+
+/* ───────── scene 3: the claim walkthrough, built from the site's own markup ───────── */
+const SITE_HEADER = `
+  <div style="position:absolute;left:0;right:0;top:0;z-index:5">
+    <div class="mx-auto flex h-16 items-center justify-between px-4">
+      <img src="assets/washo-logo-wordmark.webp" class="h-9 w-auto" />
+      <div class="flex items-center gap-2">
+        <span class="btn btn-primary btn-sm">Sign in</span>
+        <span class="grid h-10 w-10 place-items-center rounded-xl text-mist">${ic('menu', 20)}</span>
+      </div>
+    </div>
+    <div class="banner flex h-9 items-center justify-center gap-2 border-t border-offer/20 bg-gradient-to-r from-offer/10 via-offer/25 to-offer/10 px-4 text-[13px] font-semibold text-offer" style="position:relative;overflow:hidden">
+      ${ic('gift', 16, 'h-4 w-4 shrink-0')}<span class="truncate">Navratri Free Wash</span>
+      <span class="flex shrink-0 items-center gap-1 text-white">Claim yours ${ic('arrow-right', 14)}</span>
+      <i class="glint"></i>
+    </div>
+  </div>`;
+$('scrHome').innerHTML = `<div class="screenbg"></div>${SITE_HEADER}
+  <div class="scroller px-4" style="top:112px">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold border-washo-500/30 bg-washo-500/15 text-washo-300">${ic('sparkles', 14)} Now serving Kharadi, Pune</span>
+      <span class="inline-flex items-center gap-1.5 rounded-full border border-offer/30 bg-offer/12 px-2.5 py-1 text-[11px] font-semibold text-offer">${ic('gift', 14)} Navratri Free Wash: free for new customers ${ic('arrow-right', 12)}</span>
+    </div>
+    <div class="mt-5 font-display text-4xl font-extrabold leading-[1.05] tracking-tight">
+      <span class="block">Wake up to a spotless ride.</span>
+      <span class="mt-2 block text-washo-300">Washed at your doorstep.</span>
+    </div>
+    <p class="mt-5 text-lg text-mist">Doorstep car and bike washing in Kharadi, Pune. Pick 1 to 7 washes per week, on the days you choose.</p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <span class="btn btn-lg" style="background:#1248b8;border:1px solid rgba(155,191,255,0.35);border-radius:20px">Build my membership ${ic('arrow-right', 20)}</span>
+      <span class="btn btn-glass btn-lg">See services</span>
+    </div>
+  </div>`;
+$('scrOffer').innerHTML = `<div class="screenbg"></div>${SITE_HEADER}
+  <div class="scroller px-4" style="top:128px">
+    <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold border-offer/30 bg-offer/12 text-offer">${ic('gift', 14)} Navratri Free Wash</span>
+    <h1 class="mt-4 text-4xl font-extrabold leading-[1.05]">Your first wash is on us.</h1>
+    <p class="mt-4 max-w-xl text-lg text-mist">A free body wash at your parking spot for new WASHO customers in Kharadi, Pune. No payment, no catch.</p>
+    <div class="mt-8"><span id="claimBtn" class="btn btn-primary btn-lg">Claim my free wash ${ic('arrow-right', 20)}</span></div>
+    <div class="glass-strong relative mt-10 overflow-hidden p-8 text-center">
+      <p class="eyebrow">Body wash for bike, car or SUV</p>
+      <p class="mt-4 font-display text-7xl font-extrabold leading-none tracking-tight"><span class="text-offer">FREE</span></p>
+    </div>
+  </div>`;
+$('scrLogin').innerHTML = `<div class="screenbg"></div>
+  <div class="flex flex-col px-4 py-6">
+    <div class="flex items-center justify-between"><img src="assets/washo-logo-wordmark.webp" class="h-9 w-auto" /><span class="text-sm text-fog">Back to site</span></div>
+    <div class="glass mt-6 w-full overflow-hidden p-6">
+      <span class="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300">${ic('message-square-text', 24)}</span>
+      <h1 class="mt-5 text-3xl font-extrabold">Welcome to WASHO</h1>
+      <p class="mt-2 text-fog">Enter your mobile number and we'll text you a 6-digit code. No password needed.</p>
+      <label class="mt-7 mb-1.5 block text-[13px] font-medium text-mist">Mobile number</label>
+      <div id="phoneBox" class="flex h-14 items-center overflow-hidden rounded-2xl border bg-white/[0.04] border-white/10" style="transition:none">
+        <span class="flex h-full items-center border-r border-white/10 px-4 text-base font-semibold text-mist">+91</span>
+        <span class="flex h-full items-center px-4 text-lg font-semibold tracking-wide"><span id="phoneTxt"></span><span id="phoneCaret" class="caret"></span><span id="phonePh" style="color:rgba(147,161,191,0.5);font-weight:400">98765 43210</span></span>
+      </div>
+      <p class="mt-2 min-h-5"></p>
+      <span id="sendBtn" class="btn btn-primary btn-lg mt-3" style="width:100%">Send code ${ic('arrow-right', 20)}</span>
+    </div>
+  </div>`;
+const APP_HEADER = `<header class="flex h-14 items-center justify-between border-b border-white/[0.07] bg-ink-950/75 px-4" style="position:relative;z-index:5"><img src="assets/washo-logo-wordmark.webp" class="h-9 w-auto" /><span class="grid h-9 w-9 place-items-center overflow-hidden rounded-full" style="background:#111a2f"><img src="assets/washo-mark.webp" style="width:24px;height:auto" /></span></header>`;
+function stepper(cur) {
+  const labels = ['Vehicle', 'Day & time', 'Claim'];
+  let h = '<ol class="flex w-full items-center">';
+  labels.forEach((l, i) => {
+    const done = i < cur, on = i === cur;
+    const bg = done || on ? '#ffd84d' : '#16213b', col = done || on ? '#05080f' : '#93a1bf';
+    const inner = done ? ic('check', 16, '', 3) : on ? '<div class="h-3 w-3 rounded-full" style="background:#05080f"></div>' : `<span class="text-sm">${i + 1}</span>`;
+    h += `<li class="flex shrink-0 items-center"><div class="stepc" style="background:${bg};color:${col}">${inner}</div></li>`;
+    if (i < 2) h += `<div class="stepline"><i style="width:${i < cur ? 100 : 0}%"></i></div>`;
+  });
+  return h + `</ol><p class="mt-3 text-sm font-semibold text-mist">Step ${cur + 1} of 3 · ${labels[cur]}</p>`;
+}
+const days = [['Sat', 10], ['Sun', 11], ['Mon', 12], ['Tue', 13], ['Wed', 14]];
+const slots = [['sunrise', 'Morning', '7:00 – 11:00 AM'], ['sun', 'Afternoon', '12:00 – 4:00 PM'], ['moon', 'Night', '7:00 – 10:00 PM']];
+const BAR_BACK = `<span class="btn btn-glass btn-lg" style="padding:0 18px">${ic('arrow-left', 20)}</span>`;
+$('scrDate').innerHTML = `<div class="screenbg"></div>${APP_HEADER}
+  <div id="dateScroll" class="scroller px-4" style="top:56px;padding-top:24px">
+    <div class="mb-8">${stepper(1)}</div>
+    <h1 class="text-3xl font-extrabold">Pick a day and a time</h1>
+    <p class="mb-6 mt-1.5 text-fog">Morning, afternoon or night, on any day the offer allows.</p>
+    <p class="mb-2 text-[13px] font-medium text-mist">Choose a day</p>
+    <div class="flex gap-2">${days.map(([w, d], i) => `<div id="day${i}" class="flex h-[76px] w-16 shrink-0 flex-col items-center justify-center rounded-2xl border border-white/[0.09] bg-white/[0.03]"><span class="text-[10px] font-semibold uppercase tracking-wider text-fog">${w}</span><span class="font-display text-xl font-extrabold leading-tight">${d}</span><span class="text-[10px] font-semibold uppercase text-fog">Oct</span></div>`).join('')}</div>
+    <p class="mb-2 mt-5 text-[13px] font-medium text-mist">Choose a time window</p>
+    <div class="grid gap-2">${slots.map(([icn, l, w], i) => `<div id="slot${i}" class="flex items-center gap-3 rounded-2xl border p-3.5 text-left border-white/[0.09] bg-white/[0.03]"><span class="slotic grid h-10 w-10 place-items-center rounded-xl bg-white/[0.07] text-washo-300">${ic(icn, 20)}</span><span><span class="block text-sm font-bold">${l}</span><span class="block text-xs text-fog">${w}</span></span></div>`).join('')}</div>
+  </div>
+  <div class="bar"><div class="flex items-center gap-3 px-4 py-3">${BAR_BACK}<span id="contBtn" class="btn btn-primary btn-lg" style="flex:1">Continue ${ic('arrow-right', 20)}</span></div></div>`;
+$('scrClaim').innerHTML = `<div class="screenbg"></div>${APP_HEADER}
+  <div id="claimScroll" class="scroller px-4" style="top:56px;padding-top:24px">
+    <div class="mb-8">${stepper(2)}</div>
+    <h1 class="text-3xl font-extrabold">Claim your free wash</h1>
+    <p class="mb-6 mt-1.5 text-fog">Check the details, then slide. Nothing is charged.</p>
+    <div class="glass divide-y divide-white/[0.07] text-sm">
+      <div class="flex items-center justify-between gap-4 p-5"><div><p class="eyebrow">Vehicle</p><p class="mt-1 font-bold">Honda City</p></div>
+        <span class="inline-flex items-stretch overflow-hidden rounded-md border border-ink-950/40 bg-[#f4f1e6] text-ink-950 shadow-[0_2px_8px_rgb(0_0_0/0.4)]"><span class="grid w-4 place-items-center bg-washo-800 text-[6px] font-bold leading-none text-white">IND</span><span class="whitespace-nowrap px-2 py-0.5 font-mono text-[13px] font-bold tracking-wider">MH 12 AB 1234</span></span></div>
+      <div class="flex justify-between gap-4 p-5"><span class="text-fog">Wash</span><span class="font-semibold">Car Body Wash</span></div>
+      <div class="flex justify-between gap-4 p-5"><span class="text-fog">When</span><span class="font-semibold">Sun, 11 Oct, Morning</span></div>
+      <div class="flex items-center justify-between gap-4 p-5"><span class="text-fog">Price</span><span class="flex items-baseline gap-2"><s class="text-fog">₹150</s><span class="font-display text-2xl font-extrabold text-offer">FREE</span></span></div>
+    </div>
+  </div>
+  <div class="bar"><div class="flex items-center gap-3 px-4 py-3">${BAR_BACK}
+    <div id="track"><div id="trackLabel">Slide to claim your free wash</div>
+      <div id="fill"><span id="fillArrow" style="width:48px;display:grid;place-items:center;flex-shrink:0">${ic('arrow-right', 20)}</span><div id="fillDone">${ic('check', 18, '', 3)} Claimed</div>
+        <svg id="spin" class="L" style="right:14px;top:14px" width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="40 100" stroke-linecap="round"/></svg>
+      </div>
+    </div></div></div>`;
+$('urlLock').innerHTML = ic('lock', 13);
+
+const CAPS = [
+  { a: 5.95, b: 7.22, n: 'STEP 1', title: 'Visit washo.online', subs: [] },
+  { a: 7.22, b: 8.42, n: 'STEP 2', title: 'Tap “Claim my free wash”', subs: [] },
+  { a: 8.42, b: 99, n: 'STEP 3', title: 'Book your free wash', subs: [[8.42, 9.28, 'Sign in with your phone'], [9.28, 10.1, 'Pick a day and a time'], [10.1, 99, 'Slide to claim. Nothing to pay.']] },
+];
+$('cap').innerHTML = CAPS.map((c, i) => `<div class="capline" id="cap${i}" style="top:0">
+  <div><span class="steppill">${c.n}<span style="opacity:.55;font-weight:600">OF 3</span></span></div>
+  <div class="captitle" style="margin-top:22px">${c.title}</div>
+  <div style="position:relative;height:50px;margin-top:12px">${c.subs.map((s, k) => `<div class="capsub L center" id="sub${i}_${k}">${s[2]}</div>`).join('')}</div></div>`).join('');
+function captions(t) {
+  CAPS.forEach((c, i) => {
+    const e = $('cap' + i);
+    if (t < c.a || t > c.b + 0.16) { e.style.visibility = 'hidden'; return; }
+    const pin = P(t, c.a, c.a + 0.3), pout = P(t, c.b - 0.06, c.b + 0.16);
+    const v = bin(pin, 34, 14);
+    fx(e, { ...v, o: v.o * (1 - eo(pout)), y: v.y - eo(pout) * 30, b: v.b + pout * 12 });
+    c.subs.forEach((s, k) => {
+      const si = P(t, s[0] + (k ? 0 : 0.12), s[0] + (k ? 0.25 : 0.4)), so = P(t, s[1] - 0.05, s[1] + 0.12);
+      const sv = bin(si, 24, 10);
+      fx($(`sub${i}_${k}`), { ...sv, o: t < s[0] || t > s[1] + 0.12 ? 0 : sv.o * (1 - so), y: sv.y - so * 20 });
+    });
+  });
+}
+const rectCache = new Map();
+function rectOf(el) { const r = el.getBoundingClientRect(); if (r.width > 0) rectCache.set(el, { x: r.left + r.width / 2, y: r.top + r.height / 2, r }); return rectCache.get(el) || { x: 540, y: 1100 }; }
+function showScreen(id, t, a, b, dir = 1) {
+  // pages slide in like the site's step motion (x 24px, fade)
+  const el = $(id);
+  const pin = eo(P(t, a, a + 0.28)), pout = eio(P(t, b - 0.06, b + 0.2));
+  const vis = t >= a && t < b + 0.2;
+  if (!vis) { el.style.display = 'none'; return false; }
+  el.style.display = 'block';
+  fx(el, { o: pin * (1 - pout), x: (1 - pin) * 40 * dir - pout * 40 });
+  return true;
+}
+function setFinger(t, pts) {
+  // pts: [{t, el|x,y, tap}] — the finger glides between targets and taps
+  const f = $('finger'), rp = $('ripple');
+  const on = t >= pts[0].t - 0.25 && t <= pts[pts.length - 1].t + 0.35;
+  let i = 0; while (i < pts.length - 1 && t > pts[i + 1].t - 0.24) i++;
+  const cur = pts[i], nxt = pts[Math.min(i + 1, pts.length - 1)];
+  const pos = (p) => (p.el ? rectOf(p.el) : p);
+  const A = pos(cur), B = pos(nxt);
+  const mv = i < pts.length - 1 ? eio(P(t, nxt.t - 0.24, nxt.t - 0.03)) : 0;
+  const x = lerp(A.x, B.x, mv) + (cur.dx || 0) * (1 - mv) + (nxt.dx || 0) * mv, y = lerp(A.y, B.y, mv) + 14;
+  let press = 1; let rip = -1;
+  for (const p of pts) { if (p.tap !== false) { const d = t - p.t; if (d > -0.06 && d < 0.12) press = 0.8; if (d >= 0 && d < 0.45) rip = d / 0.45; } }
+  const o = on ? Math.min(P(t, pts[0].t - 0.25, pts[0].t - 0.05), 1 - P(t, pts[pts.length - 1].t + 0.2, pts[pts.length - 1].t + 0.35)) : 0;
+  fx(f, { o, x, y, s: press });
+  fx(rp, { o: rip >= 0 ? (1 - rip) * o : 0, x, y, s: 1 + rip * 1.6 });
+}
+function scene3(t) {
+  const el = $('s3');
+  if (t < 5.8 || t > 11.4) { el.style.display = 'none'; $('finger').style.visibility = 'hidden'; $('ripple').style.visibility = 'hidden'; return; }
+  el.style.display = 'block';
+  const ip = eo(P(t, 5.82, 6.3));
+  const op = eio(P(t, 10.98, 11.35));
+  el.style.opacity = 1 - op;
+  // device enters from below; at the end it pushes in toward the slider
+  const dev = $('device');
+  dev.style.transformOrigin = '60% 96%';
+  dev.style.transform = `translateY(${(1 - ip) * 260}px) scale(${lerp(0.9, 1, ip) * (1 + op * 0.5)}) rotateX(0deg)`;
+  dev.style.opacity = ip;
+  dev.style.filter = op > 0.01 ? `blur(${op * 10}px)` : 'none';
+  captions(t);
+  // URL bar: type washo.online, then load
+  const url = 'washo.online';
+  const k = Math.floor(clamp((t - 6.0) / 0.5) * url.length);
+  $('urltext').textContent = t < 6.0 ? '' : url.slice(0, Math.max(k, t > 6.5 ? url.length : 0));
+  $('urlcaret').style.opacity = t < 6.55 && Math.floor(t * 4) % 2 === 0 ? 1 : t < 6.55 ? 0.3 : 0;
+  $('urlLock').style.opacity = t > 6.55 ? 1 : 0.35;
+  const lp = P(t, 6.52, 6.82);
+  $('urlprog').style.width = lp * 100 + '%'; $('urlprog').style.opacity = lp > 0 && lp < 1 ? 1 : 0;
+  // screens
+  showScreen('scrHome', t, 6.62, 7.28);
+  showScreen('scrOffer', t, 7.28, 8.46);
+  showScreen('scrLogin', t, 8.46, 9.3);
+  showScreen('scrDate', t, 9.3, 10.1);
+  showScreen('scrClaim', t, 10.1, 99);
+  // the campaign banner glint (CampaignGlare)
+  document.querySelectorAll('.glint').forEach((g) => { g.style.left = lerp(-120, 420, ((t - 6.6) % 1.4) / 1.4) + 'px'; });
+  // offer page: button press
+  $('claimBtn').style.transform = `scale(${t > 8.12 && t < 8.3 ? 0.96 : 1})`;
+  // login: type the number
+  const ph = '98765 43210';
+  const pk = Math.floor(clamp((t - 8.68) / 0.42) * ph.length);
+  $('phoneTxt').textContent = ph.slice(0, pk);
+  $('phonePh').style.display = pk > 0 ? 'none' : 'inline';
+  $('phoneCaret').style.opacity = t < 9.15 && Math.floor(t * 4) % 2 === 0 ? 1 : 0.2;
+  const focus = t > 8.6;
+  $('phoneBox').style.borderColor = focus ? '#6a9cff' : 'rgba(255,255,255,0.1)';
+  $('phoneBox').style.boxShadow = focus ? '0 0 0 4px rgba(63,124,255,0.15)' : 'none';
+  $('sendBtn').style.transform = `scale(${t > 9.14 && t < 9.3 ? 0.96 : 1})`;
+  // day & time: pick Sun 11, scroll, pick Morning, Continue
+  const dayOn = t > 9.46, slotOn = t > 9.76;
+  days.forEach((_, i) => { const d = $('day' + i); const on = i === 1 && dayOn; d.style.borderColor = on ? 'rgba(106,156,255,0.7)' : 'rgba(255,255,255,0.09)'; d.style.background = on ? 'rgba(63,124,255,0.2)' : 'rgba(255,255,255,0.03)'; d.style.boxShadow = on ? '0 0 24px -8px rgb(63 124 255 / 0.8)' : 'none'; });
+  slots.forEach((_, i) => { const s = $('slot' + i); const on = i === 0 && slotOn; s.style.borderColor = on ? 'rgba(106,156,255,0.7)' : 'rgba(255,255,255,0.09)'; s.style.background = on ? 'rgba(63,124,255,0.15)' : 'rgba(255,255,255,0.03)'; const b = s.querySelector('.slotic'); b.style.background = on ? '#3f7cff' : 'rgba(255,255,255,0.07)'; b.style.color = on ? '#fff' : '#9bbfff'; });
+  $('dateScroll').style.transform = `translateY(${-118 * eio(P(t, 9.5, 9.64))}px)`;
+  $('contBtn').style.transform = `scale(${t > 10.0 && t < 10.14 ? 0.96 : 1})`;
+  $('claimScroll').style.transform = `translateY(${-112}px)`;
+  // slide to claim
+  const tr = $('track').getBoundingClientRect().width / 1.84615 || 230;
+  const sp = eio(P(t, 10.38, 10.8));
+  const full = tr - 8;
+  $('fill').style.width = lerp(48, full, sp) + 'px';
+  $('trackLabel').style.opacity = 1 - sp;
+  const pending = t > 10.8 && t < 10.98, done = t >= 10.98;
+  $('fillArrow').style.opacity = pending || done ? 0 : 1;
+  $('spin').style.opacity = pending ? 1 : 0; $('spin').style.transform = `rotate(${t * 900}deg)`;
+  $('fill').style.background = done ? '#3dd9a0' : '#3f7cff';
+  $('fillDone').style.opacity = done ? 1 : 0;
+  // the finger
+  setFinger(t, [
+    { t: 6.95, el: document.querySelector('#scrHome .banner span.text-white') },
+    { t: 8.15, el: $('claimBtn') },
+    { t: 8.62, el: $('phoneBox'), dx: 60 },
+    { t: 9.18, el: $('sendBtn') },
+    { t: 9.46, el: $('day1') },
+    { t: 9.76, el: $('slot0'), dx: -80 },
+    { t: 10.04, el: $('contBtn') },
+    { t: 10.36, el: $('fill'), dx: -0 , tap: false },
+    { t: 10.8, el: $('fill'), dx: 0, tap: false },
+  ].map((p) => (p.t >= 10.36 ? { ...p, el: null, ...sliderPoint(t, p.t) } : p)));
+}
+function sliderPoint(t, at) {
+  const r = $('fill').getBoundingClientRect();
+  return { x: r.right - 44, y: r.top + r.height / 2 };
+}
+
+/* ───────── scene 4: confirmation ───────── */
+const rings = [];
+for (let i = 0; i < 3; i++) { const d = document.createElement('div'); d.className = 'ring'; $('rings').appendChild(d); rings.push(d); }
+const petals = [];
+(function () {
+  const r = rng(21); const cols = ['#ffd84d', '#ffb547', '#ff8a3d', '#9bbfff', '#3dd9a0', '#ff5c8a'];
+  for (let i = 0; i < 46; i++) {
+    const d = document.createElement('div'); d.className = 'petal';
+    const w = 10 + r() * 14; d.style.width = w + 'px'; d.style.height = w * 1.4 + 'px'; d.style.background = cols[Math.floor(r() * cols.length)];
+    $('petals').appendChild(d);
+    const a = r() * Math.PI * 2; const v = 600 + r() * 900;
+    petals.push({ d, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 500, spin: (r() - 0.5) * 900, ph: r() * 6 });
+  }
+})();
+$('s4card').innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;height:100%;padding:0 46px">
+  <div style="text-align:left"><p class="eyebrow-v" style="font-size:22px">Your free wash</p><p style="margin-top:10px;font-size:40px;font-weight:700">Car Body Wash</p><p style="margin-top:6px;font-size:30px;color:#93a1bf">Sun, 11 Oct · Morning</p></div>
+  <div style="text-align:right"><s style="font-size:32px;color:#93a1bf;margin-right:14px">₹150</s><span class="disp yellow" style="font-size:72px">FREE</span></div></div>`;
+function scene4(t) {
+  const el = $('s4');
+  if (t < 10.95 || t > 13.25) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const op = eio(P(t, 12.85, 13.18));
+  el.style.opacity = 1 - op; el.style.transform = `translateY(${-op * 80}px)`; el.style.filter = op > 0.01 ? `blur(${op * 14}px)` : 'none';
+  const mp = P(t, 11.08, 11.48);
+  fx($('medal'), { o: eo(mp), s: lerp(0.3, 1, eback(mp)) });
+  $('medalCheck').setAttribute('stroke-dashoffset', 1 - eo(P(t, 11.3, 11.62)));
+  rings.forEach((d, i) => {
+    const p = P(t, 11.2 + i * 0.16, 12.2 + i * 0.16); const R = 160 + p * 520;
+    d.style.width = d.style.height = R * 2 + 'px'; d.style.marginLeft = d.style.marginTop = -R + 'px'; d.style.opacity = (1 - p) * 0.8 * (p > 0 ? 1 : 0);
+  });
+  const dt = t - 11.22;
+  petals.forEach((p) => {
+    if (dt < 0) { p.d.style.opacity = 0; return; }
+    const x = 540 + p.vx * dt * Math.exp(-dt * 1.6) + Math.sin(dt * 3 + p.ph) * 20;
+    const y = 550 + p.vy * dt * Math.exp(-dt * 1.6) + 260 * dt * dt;
+    fx(p.d, { o: clamp(1.4 - dt * 0.75), x, y, r: p.spin * dt });
+  });
+  fx($('s4t1'), { ...bin(P(t, 11.4, 11.75), 50, 18), s: lerp(1.2, 1, eo(P(t, 11.4, 11.75))) });
+  fx($('s4t2'), { ...bin(P(t, 11.52, 11.87), 50, 18), s: lerp(1.2, 1, eo(P(t, 11.52, 11.87))) });
+  $('s4tick').setAttribute('stroke-dashoffset', 1 - eo(P(t, 11.8, 12.05)));
+  fx($('s4card'), { ...bin(P(t, 11.75, 12.1), 60, 14) });
+  fx($('s4t3'), { ...bin(P(t, 12.0, 12.38), 40, 16) });
+}
+
+/* ───────── scene 5: final CTA ───────── */
+$('ctaArrow').innerHTML = ic('arrow-right', 46, '', 2.6);
+function scene5(t) {
+  const el = $('s5');
+  if (t < 12.95) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const lp = P(t, 13.0, 13.42);
+  fx($('s5logo'), { o: eo(lp), s: lerp(1.25, 1, eo(lp)), b: (1 - eo(lp)) * 20 });
+  $('s5logoShine').style.backgroundPosition = `${lerp(130, -30, eio(P(t, 14.15, 14.75)))}% 0`;
+  fx($('s5t1'), { ...bin(P(t, 13.15, 13.5), 40, 14) });
+  const fp = P(t, 13.25, 13.65);
+  fx($('s5t2'), { o: eo(fp), s: lerp(1.3, 1, eback(fp)), b: (1 - eo(fp)) * 20 });
+  fx($('s5t3'), { ...bin(P(t, 13.4, 13.72), 30, 12) });
+  fx($('s5t4'), { ...bin(P(t, 13.5, 13.85), 40, 16) });
+  $('url5line').style.width = eio(P(t, 13.75, 14.15)) * 100 + '%';
+  const cp = P(t, 13.65, 14.05);
+  fx($('s5t5'), { o: eo(cp), y: (1 - eo(cp)) * 60, s: lerp(0.9, 1, eback(cp)) * (1 + 0.035 * Math.sin(P(t, 14.3, 14.75) * Math.PI)) });
+  // React Bits StarBorder: two glows travel along the button's edges
+  const sp = ((t - 13.6) % 2.4) / 2.4;
+  $('starB').style.transform = `translate(${-sp * 100}%,0)`; $('starB').style.opacity = 1 - sp;
+  $('starT').style.transform = `translate(${sp * 100}%,0)`; $('starT').style.opacity = 1 - sp;
+  $('ctaShine').style.backgroundPosition = `${lerp(130, -30, eio(P(t, 14.3, 14.85)))}% 0`;
+  $('ctaArrow').style.transform = `translateX(${Math.sin(t * 6) * 6}px)`;
+}
+
+/* ───────── master ───────── */
+function render(t) {
+  ambient(t);
+  scene1(t); scene2(t); wipe(t); scene3(t); scene4(t); scene5(t);
+  // a white flash on the first frame, and a softer one as the final card lands
+  const f1 = 1 - eo(P(t, 0, 0.22));
+  const f2 = Math.sin(P(t, 12.98, 13.2) * Math.PI) * 0.5;
+  const f3 = Math.sin(P(t, 10.96, 11.2) * Math.PI) * 0.25;
+  $('flash').style.opacity = Math.max(f1 * 0.3, f2, f3);
+  $('flash').style.background = t > 10.9 && t < 11.3 ? '#3dd9a0' : '#fff';
+}
+window.render = render;
+window.READY = false;
+Promise.all([
+  document.fonts.load('800 100px Sora'), document.fonts.load('700 100px Sora'), document.fonts.load('600 20px Inter'), document.fonts.load('500 20px Inter'), document.fonts.load('400 20px Inter'), document.fonts.load('700 20px Inter'),
+  ...[...document.images].map((i) => (i.complete ? 1 : new Promise((r) => { i.onload = i.onerror = r; }))),
+  ...['assets/car-body-wash.webp', 'assets/bike-body-wash.webp'].map((src) => new Promise((r) => { const im = new Image(); im.onload = im.onerror = r; im.src = src; })),
+]).then(() => document.fonts.ready).then(() => { render(0); window.READY = true; });
+const q = new URLSearchParams(location.search);
+if (q.has('t')) setTimeout(() => render(parseFloat(q.get('t'))), 600);
+</script>
+</body>
+</html>
