@@ -108,14 +108,17 @@ The Auth admin API (create a customer, lock a login, set a password) needs `SUPA
 
 ## Sign-in
 
-- **Mobile number + code** (Supabase Auth phone OTP, Twilio Verify). The main way in for customers.
-- **Continue with Google**: OAuth through Supabase Auth with PKCE. `GET /api/auth/google` keeps a one-time secret in an httpOnly cookie and sends the browser to Supabase; `GET /api/auth/callback` exchanges the returned code with that secret and sets the usual session cookies.
-  Needs the Google provider switched on in Supabase (Authentication → Providers → Google) and `https://washo.online/api/auth/callback` in Authentication → URL Configuration → Redirect URLs.
-  Optional `PUBLIC_URL=https://washo.online` pins the address sent to Supabase (otherwise the request's own address is used).
-- **Continue with Email**: email + password, for any account that has one (specialists and admins today). Where they land depends on their role.
+- **Mobile number + code** (Supabase Auth phone OTP, Twilio Verify). The main way in for customers, and the only one that gives them a verified number.
+- **Continue with Email** (customers): enter the email, get a 6-digit code **by email**, copy it and paste it in (pasting a 6-digit code signs in at once). `POST /api/auth/email/otp/request` asks Supabase Auth (service role, `generate_link`) for a code for that address
+  (a new address becomes a customer account) and **emails it itself through Resend** (`RESEND_API_KEY`, `EMAIL_FROM`; the sender domain must be verified in Resend to reach any address); the code is never sent to the browser. `POST /api/auth/email/otp/verify` checks it with Supabase Auth (`/verify`, type `email`; its expiry and attempt limits apply),
+  then sets the usual httpOnly cookies. A code can be asked for once every 30 seconds and 6 times an hour per address. Specialists and admins cannot sign in with a code (refused, no session): they use the password link below.
+- **Specialists and admins**: email + password ("Specialist or admin? Sign in with a password" on the email screen, or `/login?mode=email&staff=1`).
+- *Continue with Google* is no longer offered on the page. Its server routes (`/api/auth/google`, `/api/auth/callback`) are still there but unused; Google does not need to be enabled in Supabase.
 
-A customer who signed in with Google has no mobile number, and a specialist has to ring the customer. They are asked to add one (a code is texted to it; Supabase refuses a number that already belongs to another account),
-and `409 phone_required` stops them paying until they have. Customers who sign in by phone always have one.
+A customer who signed in with their email has no mobile number, and a specialist has to ring the customer. Setup asks only for their name. **A mobile number is compulsory at the last step of a membership, a single wash and a free-wash claim**: the step shows "Add your mobile number to pay",
+the customer types a 10-digit +91 number and saves it (**no code, no confirmation**), and the payment slider stays off until it is saved; `409 phone_required` stops payment on the server too. They can also add or correct it on the Account page.
+`PUT /api/me/phone` saves it through `set_my_phone()` (migration 25), which refuses a number another WASHO account already has and anyone who signs in with a confirmed number, then attaches it, unconfirmed, to the same login at Supabase Auth, so if the same person later signs in WITH that number they reach this same account instead of a second one.
+A typed number is never treated as verified and never merges accounts by itself. Customers who sign in by phone always have one, and see none of this.
 
 ## Production database checklist
 
@@ -127,7 +130,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0024` (`…0016` lets a membership be any mix of Body and Deep washes; `…0017` reads a membership's last day in Pune time; `…0018` remembers sent emails; `…0019` adds crowd limits; `…0020` lets a membership use exact dates; `…0021` lets a specialist move a membership wash and a customer clear a plan; `…0022` makes the crowd limits a warning, never a wall; `…0023` lets a specialist complete a membership wash without credits; `…0024` has WASHO place a free wash (no date to pick); `…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns; `…0015` lets a campaign be open to anyone) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0025` (`…0016` lets a membership be any mix of Body and Deep washes; `…0017` reads a membership's last day in Pune time; `…0018` remembers sent emails; `…0019` adds crowd limits; `…0020` lets a membership use exact dates; `…0021` lets a specialist move a membership wash and a customer clear a plan; `…0022` makes the crowd limits a warning, never a wall; `…0023` lets a specialist complete a membership wash without credits; `…0024` has WASHO place a free wash (no date to pick); `…0025` lets an email customer save a typed mobile number; `…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns; `…0015` lets a campaign be open to anyone) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

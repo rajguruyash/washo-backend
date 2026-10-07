@@ -13,7 +13,7 @@ const base =
 const variants: Record<Variant, string> = {
   primary:
     'bg-gradient-to-b from-washo-500 to-washo-700 text-white shadow-[0_8px_24px_-8px_rgb(42_98_230/0.8),inset_0_1px_0_rgb(255_255_255/0.22)] hover:from-washo-400 hover:to-washo-600',
-  glass: 'border border-white/[0.12] bg-white/[0.06] text-white backdrop-blur-md hover:bg-white/[0.1]',
+  glass: 'border border-white/[0.12] bg-white/[0.06] text-white hover:bg-white/[0.1]', // no backdrop-blur: it sits in blurred cards, and Safari paints a nested blur solid white
   ghost: 'text-mist hover:bg-white/[0.06] hover:text-white',
   danger: 'border border-bad/30 bg-bad/10 text-bad hover:bg-bad/20',
   light: 'bg-white text-ink-950 hover:bg-washo-50',

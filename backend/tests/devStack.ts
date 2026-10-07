@@ -26,7 +26,11 @@ async function main() {
   await fake.createStaff('worker', { email: 'worker@washo.test', password: 'Worker-pass-1', name: 'Ravi Patil', phone: '9000000002' });
 
   const { createApp } = await import('../src/app');
+  const { setMailTransport } = await import('../src/notify');
   const { config } = await import('../src/config');
+  // No real email in dev: mail goes to a little inbox, read at GET /__dev/mail?to=<address> (newest first).
+  const inbox: { to: string; subject: string; html: string }[] = [];
+  setMailTransport(async (m) => { inbox.unshift(m); console.log(`[dev mail] to ${m.to}: ${m.subject}`); });
   // Dev-only helper so a browser stub of Razorpay Checkout can obtain the signed result Razorpay would return.
   const outer = express();
   outer.get('/__dev/checkout', (req, res) => {
@@ -35,6 +39,10 @@ async function main() {
     } catch (e) {
       res.status(404).json({ error: (e as Error).message });
     }
+  });
+  outer.get('/__dev/mail', (req, res) => {
+    const to = String(req.query.to ?? '').toLowerCase();
+    res.json(inbox.filter((m) => !to || m.to.toLowerCase() === to));
   });
   outer.use(createApp());
   outer.listen(config.port, () => {

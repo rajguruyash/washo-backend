@@ -91,7 +91,7 @@ function Sidebar() {
         <AvatarHead className="h-10 w-10" ring={false} />
         <Link to="/app/account" className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{user?.full_name}</p>
-          <p className="truncate text-xs text-fog">{user?.phone}</p>
+          <p className="truncate text-xs text-fog">{user?.phone ?? user?.email}</p>
         </Link>
         <button onClick={() => void logout()} aria-label="Sign out" className="grid h-9 w-9 place-items-center rounded-xl text-fog hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /></button>
       </div>

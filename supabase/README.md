@@ -177,3 +177,8 @@ Tests: `supabase/tests/after-23-worker-complete.test.ts`.
 A campaign claim no longer asks for a date or a time window. `app_private.pick_campaign_slot()` chooses the earliest day from today to the campaign's last day that has room under the campaign's own daily limit and where the vehicle has no other wash, preferring a day that is not red in Admin → Capacity (a red day is used only when every day is red), and on it the quietest window that is still far enough ahead (the usual notice rule).
 `claim_campaign_wash()` keeps its signature but ignores any date or window passed in, so nobody can choose by calling the API directly; it returns `scheduled_date` and `time_slot`, and refuses plainly when no day is left. Every other rule is unchanged. Tests: `after-14-campaigns.test.ts`, `after-19-capacity.test.ts`, `backend/tests/api-campaign.test.ts`.
 
+## A typed mobile number for email customers (migration 25)
+
+`public.set_my_phone(number)` sets (or, with NULL, clears) the number on the caller's own customer profile, without a code: 10 digits starting 6 to 9 (a +91 or 91 in front is accepted), stored as +91XXXXXXXXXX. It refuses someone who signs in WITH a confirmed number (that number is their identity), a number another profile already has, staff and visitors.
+It is a typed number, not a verified one, and never links or merges accounts (only a number a login has confirmed does that). It raises the same `washo.allow_identity_change` switch the account-merge function uses, so the profile phone lock in `cutover/20261005000005`, when it is applied, still lets it through. The audit trail records `phone_added_unverified` with the last four digits. Tests: `after-25-set-my-phone.test.ts`, `backend/tests/api-email-login.test.ts`.
+

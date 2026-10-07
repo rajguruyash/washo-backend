@@ -19,23 +19,8 @@ type OtpProblem = null | { kind: 'invalid' | 'throttled' | 'network'; message: s
 
 const prettyPhone = (p: string) => `+91 ${p.slice(0, 5)} ${p.slice(5)}`;
 const signInErrors: Record<string, string> = {
-  google_failed: "Google sign-in didn't finish. Please try again.",
-  google_cancelled: 'Google sign-in was cancelled.',
   archived: 'This account has been deactivated. Please contact WASHO.',
-  google_profile: "You're signed in with Google, but we couldn't load your WASHO profile. Please try again in a moment.",
 };
-
-/** The Google "G" (brand colours), as Google's sign-in guidelines ask. */
-function GoogleMark() {
-  return (
-    <svg viewBox="0 0 48 48" className="h-5 w-5" aria-hidden>
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-    </svg>
-  );
-}
 
 const homeFor = (role: Role) => (role === 'admin' ? '/admin' : role === 'worker' ? '/worker' : '/app');
 
@@ -74,23 +59,18 @@ export default function Login() {
   const [shakeKey, setShakeKey] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Email sign-in
+  // Email sign-in: customers ask for a code and paste it in; specialists and admins use their password (?staff=1 opens that directly).
+  const [emailStep, setEmailStep] = useState<'enter' | 'code' | 'password'>(params.get('staff') === '1' ? 'password' : 'enter');
   const [email, setEmail] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [emailProblem, setEmailProblem] = useState('');
+  const [emailVerifying, setEmailVerifying] = useState(false);
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
 
-  // "Continue with Google" is a full-page trip through the server (and Supabase), so it is a plain link.
-  const googleHref = useMemo(() => {
-    const q = new URLSearchParams();
-    if (next) q.set('next', next);
-    const s = getSource();
-    if (s) q.set('source', s);
-    return `/api/auth/google${q.size ? `?${q}` : ''}`;
-  }, [next]);
-
   // Already signed in (and not mid-login): go straight through.
-  if (user && step !== 'done' && !emailBusy) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
+  if (user && step !== 'done' && !emailBusy && !emailVerifying) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
 
   const digits = phone.replace(/\D/g, '');
 
@@ -171,12 +151,54 @@ export default function Login() {
     }
   };
 
+  // Asks for the emailed code. The server sends it (never to the browser); the customer copies it from the email and pastes it here.
+  const sendEmailCode = async (isResend = false) => {
+    const addr = email.trim();
+    if (!/^\S+@\S+\.\S+$/.test(addr)) {
+      setEmailError('Enter a valid email address.');
+      return;
+    }
+    setEmailError('');
+    setEmailProblem('');
+    setSending(true);
+    try {
+      await post('/auth/email/otp/request', { email: addr });
+      startResend(30);
+      setEmailCode('');
+      setEmailStep('code');
+      if (isResend) setEmailProblem('');
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.fields.email ?? err.message : 'Something went wrong. Please try again.';
+      if (emailStep === 'code') setEmailProblem(msg);
+      else setEmailError(msg);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const verifyEmailCode = async (value: string) => {
+    setEmailVerifying(true);
+    setEmailProblem('');
+    try {
+      await post('/auth/email/otp/verify', { email: email.trim(), code: value, source: getSource() });
+      const me = await refresh();
+      setWelcomeName(me.full_name ?? null);
+      setStep('done');
+      setTimeout(() => navigate(next && next.startsWith(homeFor(me.role)) ? next : homeFor(me.role), { replace: true }), CELEBRATE_MS);
+    } catch (err) {
+      setEmailVerifying(false);
+      setEmailProblem(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    }
+  };
+
   const switchMode = (toEmail: boolean) => {
     const p = new URLSearchParams(params);
     p.delete('staff');
     p.delete('error');
-    if (toEmail) p.set('mode', 'email');
-    else p.delete('mode');
+    if (toEmail) {
+      p.set('mode', 'email');
+      setEmailStep('enter');
+    } else p.delete('mode');
     setParams(p, { replace: true });
   };
 
@@ -199,21 +221,85 @@ export default function Login() {
             <motion.div layout className="glass w-full max-w-md overflow-hidden p-6 sm:p-9" transition={{ layout: { duration: 0.3 } }}>
               <AnimatePresence mode="wait" initial={false}>
                 {emailMode ? (
-                  <motion.form key="email" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} onSubmit={emailSubmit} noValidate className="space-y-5">
-                    <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
-                    <div>
-                      <h1 className="text-3xl font-extrabold">Sign in with email</h1>
-                      <p className="mt-2 text-fog">Use the email and password for your account. Specialists and admins use the details WASHO gave them.</p>
-                    </div>
-                    <Input label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
-                    <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                    {emailError && <p role="alert" className="text-sm text-bad">{emailError}</p>}
-                    <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>Sign in</Button>
-                    <div className="grid gap-1 pt-1 text-center text-sm">
-                      <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
-                      <a href={googleHref} className="text-fog hover:text-white">Continue with Google</a>
-                    </div>
-                  </motion.form>
+                  emailStep === 'enter' ? (
+                    <motion.form
+                      key="email-enter"
+                      initial={{ opacity: 0, x: 24 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -24 }}
+                      onSubmit={(e) => { e.preventDefault(); void sendEmailCode(); }}
+                      noValidate
+                      className="space-y-5"
+                    >
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
+                      <div>
+                        <h1 className="text-3xl font-extrabold">Sign in with email</h1>
+                        <p className="mt-2 text-fog">Enter your email and we'll send you a 6-digit code. Copy it and paste it in. No password needed.</p>
+                      </div>
+                      <Input label="Email" type="email" autoComplete="email" inputMode="email" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(''); }} error={emailError} autoFocus required />
+                      <Button type="submit" size="lg" full loading={sending} iconRight={<ArrowRight className="h-5 w-5" />}>Email me a code</Button>
+                      {problemCode && signInErrors[problemCode] && <p role="alert" className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
+                      <div className="grid gap-1 pt-1 text-center text-sm">
+                        <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
+                        <button type="button" onClick={() => { setEmailError(''); setEmailStep('password'); }} className="text-fog hover:text-white">Specialist or admin? Sign in with a password</button>
+                      </div>
+                    </motion.form>
+                  ) : emailStep === 'code' ? (
+                    <motion.form
+                      key="email-code"
+                      initial={{ opacity: 0, x: 24 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -24 }}
+                      onSubmit={(e) => { e.preventDefault(); if (/^\d{4,10}$/.test(emailCode)) void verifyEmailCode(emailCode); else setEmailProblem('Paste the code from the email.'); }}
+                      noValidate
+                      className="space-y-5"
+                    >
+                      <button type="button" onClick={() => { setEmailStep('enter'); setEmailProblem(''); setEmailCode(''); }} className="-ml-1 inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-sm text-fog hover:text-white">
+                        <ArrowLeft className="h-4 w-4" /> Change email
+                      </button>
+                      <div>
+                        <h1 className="text-3xl font-extrabold">Check your email</h1>
+                        <p className="mt-2 text-fog">We sent a 6-digit code to <span className="break-all font-semibold text-white">{email.trim()}</span>. Copy it and paste it here. It can take a minute to arrive; look in spam too.</p>
+                      </div>
+                      <Input
+                        label="Code from the email"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={10}
+                        autoFocus
+                        disabled={emailVerifying}
+                        value={emailCode}
+                        error={emailProblem}
+                        onChange={(e) => { setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 10)); setEmailProblem(''); }}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 10);
+                          if (pasted.length === 6) { e.preventDefault(); setEmailCode(pasted); void verifyEmailCode(pasted); } // a pasted 6-digit code signs in at once
+                        }}
+                        className="[&_input]:h-14 [&_input]:text-center [&_input]:font-display [&_input]:text-2xl [&_input]:tracking-[0.35em]"
+                      />
+                      <Button type="submit" size="lg" full loading={emailVerifying} iconRight={<ArrowRight className="h-5 w-5" />}>Verify and sign in</Button>
+                      <p className="text-center text-sm text-fog">
+                        Didn't get it?{' '}
+                        {resendIn > 0 ? <span className="tabular-nums">Resend in {resendIn}s</span> : <button type="button" onClick={() => void sendEmailCode(true)} disabled={sending} className="font-semibold text-washo-300 hover:text-white disabled:opacity-50">{sending ? 'Sending…' : 'Send a new code'}</button>}
+                      </p>
+                    </motion.form>
+                  ) : (
+                    <motion.form key="email-password" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} onSubmit={emailSubmit} noValidate className="space-y-5">
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
+                      <div>
+                        <h1 className="text-3xl font-extrabold">Sign in with a password</h1>
+                        <p className="mt-2 text-fog">For specialists and admins: use the email and password WASHO gave you.</p>
+                      </div>
+                      <Input label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
+                      <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                      {emailError && <p role="alert" className="text-sm text-bad">{emailError}</p>}
+                      <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>Sign in</Button>
+                      <div className="grid gap-1 pt-1 text-center text-sm">
+                        <button type="button" onClick={() => { setEmailError(''); setEmailStep('enter'); }} className="text-fog hover:text-white">Email me a code instead</button>
+                        <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
+                      </div>
+                    </motion.form>
+                  )
                 ) : (
                   <>
                     {step === 'phone' && (
@@ -262,10 +348,8 @@ export default function Login() {
                         {problemCode && signInErrors[problemCode] && <p role="alert" className="mt-4 rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
 
                         <div className="my-6 flex items-center gap-3 text-xs text-fog/70" aria-hidden><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
-                        <div className="grid gap-3">
-                          <a href={googleHref} className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white backdrop-blur-md transition-colors hover:bg-white/[0.1]"><GoogleMark /> Continue with Google</a>
-                          <button type="button" onClick={() => switchMode(true)} className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white backdrop-blur-md transition-colors hover:bg-white/[0.1]"><Mail className="h-5 w-5 text-washo-300" /> Continue with Email</button>
-                        </div>
+                        {/* no backdrop-blur here: the card is already blurred, and Safari paints a nested blur solid white */}
+                        <button type="button" onClick={() => switchMode(true)} className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white transition-colors hover:bg-white/[0.1]"><Mail className="h-5 w-5 text-washo-300" /> Continue with Email</button>
                       </motion.form>
                     )}
 

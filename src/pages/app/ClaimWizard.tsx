@@ -8,6 +8,8 @@ import { WizardStepper } from '../../components/WizardStepper';
 import { stepMotion, useStepDirection } from '../../lib/stepMotion';
 import { ErrorState } from '../../components/EmptyState';
 import { PackOfferCard } from '../../components/PackOfferCard';
+import { PayPhoneGate } from '../../components/PayPhoneGate';
+import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { Button, ButtonLink } from '../../components/ui/Button';
@@ -52,6 +54,7 @@ export default function ClaimWizard() {
   const [email, setEmail] = useState('');
   const [step, setStep] = useState(0);
   const dir = useStepDirection(step);
+  const needsPhone = useNeedsPhone(); // signed in by email: a verified mobile number first
   const [picked, setVehicle] = useState<Vehicle | null>(null);
   const [addressId, setAddressId] = useState<string | null>(null);
   const [addrOpen, setAddrOpen] = useState(false);
@@ -169,6 +172,7 @@ export default function ClaimWizard() {
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-offer" />
               <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open (until {dayOf(c.claim_closes_on)}). A specialist calls ahead on the day.</p>
             </div>
+            <PayPhoneGate what="claim" />
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
           </motion.section>
         )}
@@ -180,7 +184,7 @@ export default function ClaimWizard() {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <SlideToPay label="Slide to claim your free wash" doneLabel="Claimed" errorLabel="Could not claim" disabled={!ok || claim.isPending} onConfirm={submit} onDone={afterClaim} />
+            <SlideToPay label="Slide to claim your free wash" doneLabel="Claimed" errorLabel="Could not claim" disabled={!ok || claim.isPending || needsPhone} onConfirm={submit} onDone={afterClaim} />
           )}
         </div>
       </div>

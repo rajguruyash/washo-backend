@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { phoneSchema } from '../phone';
 import { forgetProfile, loadProfile, needsProfile } from '../profile';
+import { gotrueAdmin } from '../supabase';
 
 export const accountRouter = Router();
 accountRouter.use(['/me', '/addresses', '/vehicles', '/notifications'], requireSession);
@@ -37,6 +39,30 @@ accountRouter.put(
       return loadProfile(c, req.session!.claims);
     });
     forgetProfile(req.session!.claims.sub);
+    res.json({ success: true, user: { ...user, needs_profile: user ? needsProfile(user) : false } });
+  })
+);
+
+// A customer who signed in with their email gives a 10-digit mobile number (no code: it is only so a specialist can ring them). The database
+// checks it (set_my_phone) and refuses a number another account has, or one the customer signs in with; the number is then attached,
+// unconfirmed, to the same login at Supabase Auth, so signing in later WITH that number lands in this same account.
+accountRouter.put(
+  '/me/phone',
+  requireRole('customer'),
+  asyncHandler(async (req, res) => {
+    const { phone } = parse(z.object({ phone: phoneSchema }), req.body);
+    const sub = req.session!.claims.sub;
+    const before = req.session!.profile.phone;
+    await req.db((c) => c.query('SELECT public.set_my_phone($1)', [phone]));
+    try {
+      await gotrueAdmin.attachPhone(sub, phone);
+    } catch (err) {
+      await req.db((c) => c.query('SELECT public.set_my_phone($1)', [before])).catch(() => undefined); // put back what they had
+      forgetProfile(sub);
+      throw err;
+    }
+    forgetProfile(sub);
+    const user = await req.db((c) => loadProfile(c, req.session!.claims));
     res.json({ success: true, user: { ...user, needs_profile: user ? needsProfile(user) : false } });
   })
 );

@@ -126,6 +126,25 @@ export function renewalEmail(d: RenewalEmail): { subject: string; html: string }
   };
 }
 
+// ───────────────────────── sign-in code ─────────────────────────
+/** The email a customer asked for to sign in: the code, big, to copy and paste. Sent straight away and never logged or retried. */
+export function signInCodeEmail(code: string): { subject: string; html: string } {
+  const spaced = code.replace(/(\d{3})(?=\d)/g, '$1 ').trim();
+  const body =
+    p('Use this code to sign in to WASHO. Copy it, go back to the page you were on, and paste it in.') +
+    `<p style="margin:18px 0 20px;text-align:center"><span style="display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:14px 22px;font-size:34px;font-weight:800;letter-spacing:6px;color:#0f172a;font-family:'SFMono-Regular',Menlo,Consolas,monospace">${esc(code)}</span></p>` +
+    p('The code works for a short while and only once.');
+  return {
+    subject: `${spaced} is your WASHO sign-in code`,
+    html: layout({
+      preheader: `Your WASHO sign-in code is ${spaced}.`,
+      heading: 'Your sign-in code',
+      body,
+      foot: 'If you did not ask for this, you can ignore this email: nobody can sign in without the code, and it goes to no one else.',
+    }),
+  };
+}
+
 // ───────────────────────── sending each one once ─────────────────────────
 export type SendResult = 'sent' | 'already' | 'failed';
 

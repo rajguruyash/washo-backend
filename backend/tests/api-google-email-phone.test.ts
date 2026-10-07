@@ -47,16 +47,16 @@ describe('Continue with Google', () => {
     expect(response.headers.get('location')).not.toContain(saved.v); // only the hash travels
   });
 
-  it('a new Google customer is signed in, named from Google, and sent to finish setup (no mobile number yet)', async () => {
+  it('a new Google customer is signed in and named from Google; no mobile number is asked for until they pay', async () => {
     const { c, back } = await googleCustomer({ name: 'Meera Joshi' });
     expect(back.status).toBe(302);
-    expect(back.headers.get('location')).toBe('/app/welcome');
+    expect(back.headers.get('location')).toBe('/app');
     expect(back.setCookies.filter((s) => /^washo_(at|rt)=/.test(s)).length).toBe(2);
     for (const sc of back.setCookies) expect(sc).toMatch(/HttpOnly/i);
     expect(c.cookies.has('washo_pkce')).toBe(false); // one use
 
     const me = expectOk(await c.get('/api/me')).body.user;
-    expect(me).toMatchObject({ role: 'customer', full_name: 'Meera Joshi', phone: null, needs_profile: true });
+    expect(me).toMatchObject({ role: 'customer', full_name: 'Meera Joshi', phone: null, needs_profile: false });
     expect(me.email).toMatch(/@example\.com$/);
   });
 
@@ -189,10 +189,12 @@ describe('a mobile number for people who signed in with Google', () => {
     expect((await (await googleCustomer()).c.post('/api/auth/phone/request', { phone: '12345' })).status).toBe(400);
   });
 
-  it('saving your name does not clear the need for a number', async () => {
-    const { c } = await googleCustomer();
+  it('a customer with no name is sent to finish setup; saving the name completes it, and the number waits until they pay', async () => {
+    const { c, back } = await googleCustomer({ name: '' });
+    expect(back.headers.get('location')).toBe('/app/welcome');
+    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ phone: null, needs_profile: true });
     const saved = expectOk(await c.put('/api/me', { full_name: 'Meera J', email: '' }));
-    expect(saved.body.user.needs_profile).toBe(true);
+    expect(saved.body.user).toMatchObject({ phone: null, needs_profile: false });
   });
 });
 

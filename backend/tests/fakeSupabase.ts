@@ -99,6 +99,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     geoFail: false,
     rzpRejectRefund: '' as string,
     phoneChange: new Map<string, string>(), // auth user id -> the number a code was sent to
+    emailOtps: new Map<string, string>(), // email -> the sign-in code Supabase Auth made for it (the website mails it; tests read it from the mail)
     banned: new Set<string>(), // auth user ids locked through the admin API
     codes: new Map<string, { userId: string; challenge: string }>(), // Google one-time codes
   };
@@ -192,6 +193,17 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
         if (req.headers.authorization !== `Bearer ${FAKE.serviceKey}`) return send(res, 401, { code: 401, error_code: 'not_admin', msg: 'User not allowed' });
         if (path === '/auth/v1/admin/users' && req.method === 'POST') {
           const b = json();
+          if (b.email) {
+            const email = String(b.email).toLowerCase();
+            const dup = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
+            if (dup.rows.length) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
+            const { rows } = await admin.query(
+              `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, $2, '{"provider":"email","providers":["email"]}'::jsonb, $3::jsonb, now(), now()) RETURNING id`,
+              [email, b.email_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {})]
+            );
+            return send(res, 200, { id: rows[0].id, email });
+          }
           const digits = String(b.phone ?? '').replace(/\D/g, '');
           if (digits) {
             const dup = await admin.query(`SELECT 1 FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1`, [digits]);
@@ -204,6 +216,16 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           );
           return send(res, 200, { id: rows[0].id, phone: b.phone });
         }
+        if (path === '/auth/v1/admin/generate_link' && req.method === 'POST') {
+          const b = json();
+          const email = String(b.email ?? '').toLowerCase();
+          const { rows } = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
+          if (!rows.length) return send(res, 404, { code: 404, error_code: 'user_not_found', msg: 'User not found' });
+          if (b.type !== 'magiclink') return send(res, 400, { msg: 'fake supabase: only magiclink' });
+          state.emailOtps.set(email, FAKE.otpCode);
+          // what GoTrue returns: the one-time code and the link; it sends NO email for an admin-generated link
+          return send(res, 200, { id: rows[0].id, email, action_link: 'http://127.0.0.1/auth/v1/verify?token=x&type=magiclink', email_otp: FAKE.otpCode, hashed_token: 'hashed', verification_type: 'magiclink' });
+        }
         const um = path.match(/^\/auth\/v1\/admin\/users\/([^/]+)$/);
         if (um && req.method === 'PUT') {
           const id = decodeURIComponent(um[1]);
@@ -211,6 +233,14 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           if (b.ban_duration !== undefined) {
             if (b.ban_duration === 'none') state.banned.delete(id);
             else state.banned.add(id);
+          }
+          if (b.phone !== undefined) {
+            const digits = String(b.phone).replace(/\D/g, '');
+            if (digits) {
+              const dup = await admin.query(`SELECT 1 FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1 AND id <> $2`, [digits, id]);
+              if (dup.rows.length) return send(res, 422, { code: 422, error_code: 'phone_exists', msg: 'Phone number already registered by another user' });
+            }
+            await admin.query(`UPDATE auth.users SET phone = $1, phone_confirmed_at = $2, updated_at = now() WHERE id = $3`, [digits ? b.phone : null, digits && b.phone_confirm ? new Date() : null, id]);
           }
           if (b.password !== undefined) {
             if (String(b.password).length < 8) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 8 characters.' });
@@ -261,9 +291,24 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           await admin.query('UPDATE auth.users SET phone = $1, phone_confirmed_at = now(), updated_at = now() WHERE id = $2', [phone, uid]);
           return send(res, 200, await full(uid));
         }
+        if (type === 'email') {
+          const email = String(json().email ?? '').toLowerCase();
+          if (state.emailOtps.get(email) !== token) return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' });
+          state.emailOtps.delete(email);
+          const { rows } = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
+          if (!rows.length) return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' });
+          try {
+            return send(res, 200, await full(rows[0].id));
+          } catch (e) {
+            if ((e as { banned?: boolean }).banned) return send(res, 400, { code: 400, error_code: 'user_banned', msg: 'User is banned' });
+            throw e;
+          }
+        }
         if (type !== 'sms' || state.otps.get(phone) !== token) return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Token has expired or is invalid' });
         state.otps.delete(phone);
         let { rows } = await admin.query('SELECT id FROM auth.users WHERE phone = $1', [phone]);
+        // what GoTrue does when the number is confirmed by the person who holds the code (the database's own trigger then links the profile)
+        if (rows.length) await admin.query('UPDATE auth.users SET phone_confirmed_at = coalesce(phone_confirmed_at, now()), updated_at = now() WHERE id = $1', [rows[0].id]);
         if (!rows.length) {
           rows = (
             await admin.query(

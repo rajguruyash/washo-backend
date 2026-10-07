@@ -73,6 +73,16 @@ export const gotrue = {
     throw new HttpError(400, 'otp_invalid', "That code isn't right, or it has expired. Check it or ask for a new one.");
   },
 
+  /** Checks the code a customer was emailed (see gotrueAdmin.emailOtp) and signs them in. */
+  async verifyEmailOtp(email: string, token: string): Promise<AuthSession> {
+    const { status, body } = await auth('/verify', { method: 'POST', body: JSON.stringify({ type: 'email', email, token }) });
+    if (status < 300 && body.access_token) return body as AuthSession;
+    if (isBanned(body)) throw archivedError();
+    if (status === 429) throw new HttpError(429, 'otp_limit', 'Too many attempts. Please wait a few minutes.');
+    if (status >= 500) throw new HttpError(503, 'otp_unavailable', 'Sign-in is unavailable right now. Please try again shortly.');
+    throw new HttpError(400, 'otp_invalid', "That code isn't right, or it has expired. Check it or ask for a new one.");
+  },
+
   /** Staff (specialists and WASHO admins) have email + password accounts, created by admin_create_worker. */
   async passwordLogin(email: string, password: string): Promise<AuthSession> {
     const { status, body } = await auth('/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email, password }) });
@@ -165,6 +175,40 @@ export const gotrueAdmin = {
     }
     console.error('Creating a customer failed:', status, body.error_code, body.msg || body.message);
     throw new HttpError(502, 'create_failed', 'We could not create that customer. Please try again.');
+  },
+
+  /**
+   * A sign-in code for an email address. Supabase Auth makes and remembers the code (and checks it later, with its expiry and attempt
+   * limits); this server emails it itself (Resend), so nothing depends on Supabase's own mail settings. The code is returned to the caller
+   * ONLY so it can be put in that email: it is never sent to the browser. A first-time address becomes a customer account (a database
+   * trigger gives it a profile); the address is only trusted once the code that was mailed to it comes back.
+   */
+  async emailOtp(email: string): Promise<string> {
+    // The account must exist before a code can be made for it. An address that already has one is fine.
+    const made = await authAdmin('/users', { method: 'POST', body: { email, email_confirm: true } });
+    if (made.status >= 300 && !/exists|registered/i.test(String(made.body.error_code || '') + String(made.body.msg || ''))) {
+      console.error('Creating an email account failed:', made.status, made.body.error_code, made.body.msg || made.body.message);
+      throw new HttpError(502, 'otp_unavailable', 'We cannot send codes right now. Please try again shortly.');
+    }
+    const { status, body } = await authAdmin('/generate_link', { method: 'POST', body: { type: 'magiclink', email } });
+    const code = body.email_otp ?? body.properties?.email_otp;
+    if (status < 300 && typeof code === 'string' && code) return code;
+    console.error('Making an email sign-in code failed:', status, body.error_code, body.msg || body.message);
+    throw new HttpError(503, 'otp_unavailable', 'We cannot send codes right now. Please try again shortly.');
+  },
+
+  /**
+   * Puts a typed (NOT confirmed) mobile number on a login that signed in by email, so that if the same person later signs in WITH that number they
+   * reach this same account, not a second one. Supabase refuses a number another login already has. No text message is sent.
+   */
+  async attachPhone(userId: string, phone: string | null): Promise<void> {
+    const { status, body } = await authAdmin(`/users/${encodeURIComponent(userId)}`, { method: 'PUT', body: phone ? { phone, phone_confirm: false } : { phone: '' } });
+    if (status < 300) return;
+    if (String(body.error_code || '') === 'phone_exists' || status === 422) {
+      throw new HttpError(409, 'phone_taken', 'That number is already registered with WASHO. Sign in with that number instead.');
+    }
+    console.error('Attaching a mobile number failed:', status, body.error_code, body.msg || body.message);
+    throw new HttpError(502, 'phone_failed', 'We could not save that number. Please try again.');
   },
 
   /** Locks (or unlocks) a login at Supabase, so an archived person is also kept out of the mobile app. Best effort: the website checks the profile too. */

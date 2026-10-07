@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
+import { PhoneEntry } from '../../components/PhoneEntry';
 import { PageHeader } from '../../components/EmptyState';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -49,14 +50,15 @@ export default function Account() {
             <AvatarHead className="h-16 w-16" />
             <div>
               <p className="text-lg font-bold">{user?.full_name}</p>
-              <p className="text-sm text-fog">{prettyPhone(user?.phone)}</p>
+              <p className="text-sm text-fog">{user?.phone ? prettyPhone(user.phone) : user?.email}</p>
             </div>
           </div>
           <Input label="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} error={errors.full_name} required />
           <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={errors.email} optional />
-          <Input label="Mobile number" value={prettyPhone(user?.phone)} disabled hint="Your sign-in number can't be changed here. Contact WASHO to change it." readOnly />
+          {user?.phone && <Input label="Mobile number" value={prettyPhone(user.phone)} disabled hint="Your sign-in number can't be changed here. Contact WASHO to change it." readOnly />}
           <Button type="submit" loading={save.isPending}>Save changes</Button>
         </form>
+        {!user?.phone && <div className="glass p-6 lg:col-start-1"><PhoneEntry compact intro="You signed in with your email. Add a mobile number now, or when you first pay: your specialist rings you before every wash." /></div>}
 
         <div className="space-y-6">
           <div className="glass p-6">

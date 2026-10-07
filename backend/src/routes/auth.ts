@@ -7,7 +7,9 @@ import { ACCESS_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCook
 import { Claims, withUser } from '../db';
 import { phoneSchema } from '../phone';
 import { Profile, forgetProfile, needsProfile, profileFor } from '../profile';
-import { gotrue } from '../supabase';
+import { signInCodeEmail } from '../emails';
+import { mailConfigured, sendMail } from '../notify';
+import { gotrue, gotrueAdmin } from '../supabase';
 import { verifyAccessToken } from '../jwt';
 
 export const authRouter = Router();
@@ -76,6 +78,73 @@ authRouter.post(
       clearSessionCookies(res);
       throw err;
     }
+    res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
+  })
+);
+
+// ───────────────────────── customers: sign in with an emailed code ─────────────────────────
+// The customer types their email, gets a 6-digit code by email (sent from here through Resend; Supabase Auth makes and later checks the code,
+// with its expiry and attempt limits) and pastes it in. Only customers: specialists and admins keep their password, so a mailbox alone can
+// never open a staff account. A new address becomes a customer account.
+const emailSchema = z.email('Enter a valid email address.').max(254);
+const COOLDOWN_MS = 30_000;
+const HOURLY_MAX = 6;
+const asked = new Map<string, number[]>(); // email -> when codes were last asked for (this server only; Supabase and the IP limiter back it up)
+const tooMany = (email: string): HttpError | null => {
+  const now = Date.now();
+  const recent = (asked.get(email) ?? []).filter((t) => now - t < 3_600_000);
+  if (recent.length && now - recent[recent.length - 1] < COOLDOWN_MS) return new HttpError(429, 'otp_cooldown', 'Please wait a little before asking for another code.');
+  if (recent.length >= HOURLY_MAX) return new HttpError(429, 'otp_cooldown', 'Too many codes were asked for this email. Please try again in an hour.');
+  recent.push(now);
+  asked.set(email, recent);
+  if (asked.size > 2000) asked.clear();
+  return null;
+};
+
+authRouter.post(
+  '/auth/email/otp/request',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { email } = parse(z.object({ email: emailSchema }), req.body);
+    const addr = email.trim().toLowerCase();
+    if (!mailConfigured()) throw new HttpError(503, 'otp_unavailable', 'We cannot email codes right now. Please use your mobile number, or try again shortly.');
+    const limited = tooMany(addr);
+    if (limited) throw limited;
+    const code = await gotrueAdmin.emailOtp(addr);
+    const mail = signInCodeEmail(code);
+    try {
+      await sendMail({ to: addr, ...mail });
+    } catch (err) {
+      console.error('Sign-in code email failed:', (err as Error).message);
+      throw new HttpError(503, 'otp_unavailable', 'We could not email that code. Please check the address and try again.');
+    }
+    res.json({ success: true, resend_in_seconds: 30 });
+  })
+);
+
+authRouter.post(
+  '/auth/email/otp/verify',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { email, code, source } = parse(
+      z.object({ email: emailSchema, code: z.string().trim().regex(/^\d{4,10}$/, 'Enter the code from your email.'), source: sourceSchema }),
+      req.body
+    );
+    const session = await gotrue.verifyEmailOtp(email.trim().toLowerCase(), code);
+    const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
+    let profile: Profile;
+    try {
+      profile = await profileFor(claims, { fresh: true });
+    } catch (err) {
+      await gotrue.logout(session.access_token);
+      throw err;
+    }
+    if (profile.role !== 'customer') {
+      await gotrue.logout(session.access_token);
+      throw new HttpError(403, 'staff_use_password', 'Specialists and admins sign in with their email and password.');
+    }
+    setSessionCookies(res, session);
+    await recordSource(claims, source);
     res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
   })
 );

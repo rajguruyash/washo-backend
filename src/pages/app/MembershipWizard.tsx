@@ -21,6 +21,8 @@ import { ApiError } from '../../lib/http';
 import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, useStartMembershipPayment, useVehicles } from '../../lib/queries';
 import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
+import { PayPhoneGate } from '../../components/PayPhoneGate';
+import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { SlideToPay } from '../../components/SlideToPay';
 import { slotLabel } from '../../lib/slots';
 import { exactDatesProblem } from '../../lib/schedule';
@@ -237,6 +239,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   };
 
   const dir = useStepDirection(step);
+  const needsPhone = useNeedsPhone(); // signed in by email: a verified mobile number first
   const slide = stepMotion(dir);
 
   return (
@@ -487,6 +490,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               </div>
             )}
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> You pay once, now, with Razorpay. Your membership and every wash are created when the payment is verified.</div>
+            <PayPhoneGate />
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
           </motion.section>
         )}
@@ -498,7 +502,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!canNext} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={!canNext || !chosenEstimate.data || checkout.isPending || paying} onConfirm={submit} onDone={afterPaid} />
+            <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={!canNext || !chosenEstimate.data || checkout.isPending || paying || needsPhone} onConfirm={submit} onDone={afterPaid} />
           )}
         </div>
       </div>

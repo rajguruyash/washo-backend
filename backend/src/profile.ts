@@ -36,8 +36,11 @@ export async function loadProfile(c: PoolClient, claims: Claims): Promise<Profil
   };
 }
 
-/** A customer is not set up until we know their name and have a mobile number a specialist can ring. */
-export const needsProfile = (p: Profile) => p.role === 'customer' && (!p.full_name || !p.phone);
+/**
+ * A customer is set up once we know their name. A mobile number (a specialist rings before every wash) is asked for, and verified, at the
+ * moment they pay, not before: someone who signed in with their email can look around freely first. Payments refuse without it (requirePhone).
+ */
+export const needsProfile = (p: Profile) => p.role === 'customer' && !p.full_name;
 
 // The role and name rarely change. Re-reading them on EVERY request doubled the database round trips, so they are remembered
 // briefly. Anything that changes them (profile save, sign-in) calls forgetProfile().
