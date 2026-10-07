@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarCheck, Camera, Droplets, Gift, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
-import { AvatarFull } from '../components/brand/Avatar';
+import { HeroSwap } from '../components/HeroSwap';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
@@ -63,7 +63,7 @@ export default function Landing() {
               <ButtonLink to="/services" size="lg" variant="glass">See services</ButtonLink>
             </div>
           </div>
-          <div className="mx-auto w-full max-w-sm"><AvatarFull priority /></div>
+          <HeroSwap />
         </div>
         {/* React Bits Split Flap Text: the WASHO tagline, clacking round like a departure board, across the full width */}
         <div aria-hidden className="mx-auto mt-12 max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -104,10 +104,8 @@ export default function Landing() {
             <p className="eyebrow">Custom membership</p>
             <h2 className="mt-2 text-3xl font-extrabold md:text-4xl">You design it. We take care of the rest.</h2>
             <ul className="mt-6 space-y-3 text-mist">
-              <li><strong className="text-white">1 to 7 washes per week:</strong> you choose the number and the days.</li>
-              <li><strong className="text-white">1 per week:</strong> one wash type, Body or Deep.</li>
-              <li><strong className="text-white">2 per week:</strong> one Body wash and one Deep cleaning.</li>
-              <li><strong className="text-white">3 or more:</strong> a mix of Body washes and Deep cleanings.</li>
+              <li><strong className="text-white">Body washes and Deep cleans:</strong> choose how many of each you want every week, up to 7 in total.</li>
+              <li><strong className="text-white">Your days:</strong> tell us which days suit you for each, and we manage your whole month accordingly.</li>
               <li><strong className="text-white">1, 3, 6 or 12 months.</strong> Reschedule any wash anytime.</li>
             </ul>
             <ButtonLink to="/app/membership/new" className="mt-8" iconRight={<ArrowRight className="h-5 w-5" />}>Build my plan</ButtonLink>

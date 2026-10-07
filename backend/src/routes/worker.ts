@@ -39,6 +39,16 @@ const STEPS: Record<string, { sql: Step; schema?: z.ZodType }> = {
     schema: z.object({ notes: z.string().trim().max(300).optional() }),
     sql: (c, id, b) => c.query('SELECT public.worker_customer_unavailable($1, $2)', [id, b.notes || 'Customer did not pick up / unavailable']),
   },
+  // The customer's vehicle is not available that day: the specialist moves this membership wash to another day (and window, if they like).
+  // The database applies the membership's own rules (inside the term, not on a day the vehicle already has a wash) and keeps the wash with them.
+  reschedule: {
+    schema: z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose the new date.'),
+      time_slot: z.enum(['morning', 'afternoon', 'night']).optional(),
+      reason: z.string().trim().max(300).optional(),
+    }),
+    sql: (c, id, b) => c.query('SELECT public.worker_reschedule_wash($1, $2::date, $3::public.time_slot, $4)', [id, b.date, b.time_slot ?? null, b.reason || null]),
+  },
   start: { sql: (c, id) => c.query('SELECT public.worker_start_wash($1)', [id]) },
   complete: { sql: (c, id) => c.query('SELECT public.worker_complete_wash($1)', [id]) },
   issue: {

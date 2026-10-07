@@ -36,10 +36,11 @@ describe('1 to 7 washes a week', () => {
       expect((await est(s, 'anon', 'car', wk(['body', 'deep', 'body']), 12)).cap.applied).toBe(true); // 10% + 15% is capped at 15%
     }));
 
-  it('4 or more a week mixes body and deep; bikes have one wash type; 8 a week does not exist', async () =>
+  it('any mix of Body and Deep is allowed (even all one kind); bikes have one wash type; 8 a week does not exist', async () =>
     inTx(async (s) => {
-      expect(await estErr(s, 'car', wk(['body', 'body', 'body', 'body']), 1)).toMatch(/4 washes a week mixes body washes and deep cleanings/);
-      expect(await estErr(s, 'car', wk(['deep', 'deep', 'deep', 'deep', 'deep']), 1)).toMatch(/5 washes a week mixes/);
+      // the mix is the customer's: four Body washes, or five Deep cleanings, are fine (migration 16)
+      expect((await est(s, 'anon', 'car', wk(['body', 'body', 'body', 'body']), 1)).subtotal_cents).toBe(16 * 15000);
+      expect((await est(s, 'anon', 'car', wk(['deep', 'deep', 'deep', 'deep', 'deep']), 1)).subtotal_cents).toBe(20 * 22000);
       expect(await estErr(s, 'bike', wk(['body', 'deep', 'body', 'body']), 1)).toMatch(/Bikes have one wash type/);
       expect(await estErr(s, 'car', [...wk(['body', 'deep', 'body', 'deep', 'body', 'deep', 'body']), { weekday: 7, kind: 'deep' }], 1)).toMatch(/1 to 7 washes/);
       expect(await estErr(s, 'car', [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }, { weekday: 2, kind: 'body' }, { weekday: 3, kind: 'deep' }], 1)).toMatch(/different day/);

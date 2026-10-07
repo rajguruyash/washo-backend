@@ -125,3 +125,39 @@ Tests: `supabase/tests/after-14-campaigns.test.ts`, `backend/tests/api-campaign.
 
 Replaces `admin_save_campaign` with a version that takes `p_new_customers_only` (NULL = leave as it is; a new campaign with no answer stays "new customers only"), so a campaign can be open to anyone. `claim_campaign_wash` and `get_campaign_status` already honoured `campaigns.new_customers_only`; the one-per-phone / plate / flat rules, the caps and the dates apply either way.
 The old 14-argument version is dropped so a call cannot be ambiguous. Tests: `supabase/tests/after-15-campaign-audience.test.ts`, `backend/tests/api-campaign.test.ts`.
+
+## Any mix of Body and Deep washes (migration 16)
+
+`app_private.compute_membership_quote` loses its composition rules: 2 a week no longer has to be 1 Body + 1 Deep, and 3 or more no longer has to include both. A membership is 1 to 7 washes a week in total on different weekdays, any mix of Body and Deep (a bike only has the Body wash). The price calculation, discounts, cap and the welcome offer are unchanged.
+
+## A membership's last day in Pune time (migration 17)
+
+`app_private.fulfil_membership` compared the schedule against `end_at::date`, which in a UTC session is the evening before the last day (end_at is midnight in Pune), so the final day of a term could never be used and a tight plan with a skipped day could fail to schedule. It now reads the last day in Pune time, as the reschedule function already does.
+
+## Sent emails (migration 18)
+
+`email_log` (admins can read it; nobody else) with a unique (kind, ref_id), and three functions for the website server (service role and the website's database role only): `svc_claim_email` (takes the right to send; NULL if already sent, being sent, or given up after 3 tries),
+`svc_finish_email` (records sent or failed) and `svc_membership_reminders_due` (active memberships ending within N days, with an email, not yet reminded, not already renewed for the same vehicle). Tests: `supabase/tests/after-18-email-log.test.ts`, `backend/tests/api-emails.test.ts`.
+
+## Crowd limits (migration 19)
+
+`capacity_rules` (one row for weekdays, one for weekends: whole-day busy/full and per-window busy/full; defaults 10/15 and 6/9 on weekdays, 15/20 and 9/12 on weekends), editable only through `admin_set_capacity` (admin, audited as `capacity_changed`; it refuses a "full" below its "busy").
+`app_private.washes_on` counts the washes holding a place (everything except cancelled, refunded, refund_requested, no_show and rescheduled), `public.get_capacity(from, to)` (any signed-in user, at most 400 days) returns each day's total, limit and state plus each window's state, and
+`app_private.require_capacity` is called by `create_booking_payment_intent` and `claim_campaign_wash`, so a full day or window cannot be booked however the request arrives. Admin-made bookings and paid memberships are never blocked. Tests: `supabase/tests/after-19-capacity.test.ts`, `backend/tests/api-capacity.test.ts`.
+
+## Exact dates for a membership (migration 20)
+
+`membership_requests.custom_dates` (jsonb), the planner `app_private.plan_membership_washes` (lays a weekly pattern across the term, skipping days when the vehicle already has a wash and, when asked, days that are full; says "cannot fit all N washes" when it falls short),
+`app_private.check_custom_dates` (exact count per wash kind, one a day, on or after today + `membership_min_lead_days`, within the term, at most the weekly number in any Monday to Sunday week, no clash, no full days) and `public.preview_membership_dates` (shows a customer where a plan lands).
+`create_membership_request` and `start_membership_checkout` gain a final `p_custom_dates jsonb DEFAULT NULL` argument (the old 9-argument versions are dropped so a call cannot be ambiguous), and `fulfil_membership` lays the washes out with the planner or the chosen dates (includes the migration 17 fix).
+Tests: `supabase/tests/after-20-exact-dates.test.ts`.
+
+## A specialist moves a wash; a customer clears a plan (migration 21)
+
+`public.worker_reschedule_wash(booking, new_date, new_slot?, reason?)`: a specialist who holds a membership wash moves it when the vehicle is not available. It runs the same core as the customer's and the admin's reschedule (`app_private.reschedule_wash`, which now records `by` = customer | worker | admin in the booking event), so the same rules hold:
+the membership must be active, the wash not started, the new day inside the term and not earlier than the wash's original day, and no other wash for that vehicle that day. A specialist may choose today or any later day (a customer needs 2 days' notice). The wash stays with that specialist on its new day unless the membership has a different regular specialist.
+It refuses single washes, washes the specialist does not hold, and a started wash.
+
+`customer_hidden_plans` and `public.remove_my_plan(kind, id)`: a customer clears a plan from their own pages. `kind` is `membership_request` (a plan started but not paid for, or an earlier request that has ended) or `membership` (one that has ended). Nothing is deleted: the plan is remembered as hidden (the website lists skip it; admins still see everything).
+An unpaid plan's checkout is stopped the way starting a different plan already does it (its open payment is marked failed, the request cancelled). An active membership, a request that has become a membership, and a plan whose payment has been received are refused. Tests: `supabase/tests/after-21-worker-reschedule.test.ts`, `backend/tests/api-reschedule-remove.test.ts`.
+

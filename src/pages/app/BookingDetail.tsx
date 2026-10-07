@@ -62,7 +62,9 @@ export default function BookingDetail() {
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-1/2" /><Skeleton className="h-64" /></div>;
-  const { booking: b, events, refund } = data;
+  const { booking: b, refund } = data;
+  // A move is logged twice (a bare entry by the system, and the full one that says who moved it and why): show the full one.
+  const events = data.events.filter((e) => !(e.event_type === 'rescheduled' && !e.meta.by && data.events.some((o) => o.event_type === 'rescheduled' && o.meta.by && Math.abs(+new Date(o.created_at) - +new Date(e.created_at)) < 2000)));
   const live = isLive(b.status);
   const isMembership = b.booking_type === 'membership';
 
@@ -123,8 +125,9 @@ export default function BookingDetail() {
           {events.map((e, i) => (
             <li key={i} className="relative">
               <span className="absolute -left-[1.62rem] top-1.5 h-2.5 w-2.5 rounded-full bg-washo-400" />
-              <p className="text-sm font-semibold">{eventText[e.event_type] ?? e.event_type}</p>
+              <p className="text-sm font-semibold">{e.event_type === 'rescheduled' ? (e.meta.by === 'worker' ? 'Your specialist moved this wash' : e.meta.by === 'admin' ? 'WASHO moved this wash' : 'You rescheduled this wash') : (eventText[e.event_type] ?? e.event_type)}</p>
               <p className="text-xs text-fog">{new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(e.created_at))}{e.event_type === 'rescheduled' && e.meta.new_date ? ` · to ${prettyDate(e.meta.new_date)}` : ''}</p>
+              {e.event_type === 'rescheduled' && e.meta.by === 'worker' && e.meta.reason && <p className="mt-0.5 text-xs text-mist">{e.meta.reason}</p>}
             </li>
           ))}
         </ol>

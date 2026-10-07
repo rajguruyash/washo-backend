@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
+import { campaignsNotInstalled } from '../campaigns';
 import { notifyAdminOfRequest } from '../notify';
-import { openOrder } from '../razorpay';
+import { openOrder, reconcileOrder } from '../razorpay';
 
 export const membershipsRouter = Router();
 membershipsRouter.use(['/membership-requests', '/memberships'], requireSession, requireRole('customer'));
@@ -31,10 +32,25 @@ const REQUESTS_SQL = `
   SELECT r.*, v.vehicle_type::text AS vehicle_type, v.make AS vehicle_make, v.model AS vehicle_model, v.registration_number
     FROM public.my_membership_requests() r JOIN public.vehicles v ON v.id = r.vehicle_id`;
 
+// Plans the customer has cleared from their own pages (migration 21). Nothing is deleted: WASHO still sees everything. A database
+// without migration 21 simply has nothing cleared, so the lists carry on as before.
+const notCleared = (kind: 'membership' | 'membership_request', col: string) =>
+  `NOT EXISTS (SELECT 1 FROM public.customer_hidden_plans h WHERE h.kind = '${kind}' AND h.ref_id = ${col})`;
+async function listTolerant<T>(run: (hideCleared: boolean) => Promise<T>): Promise<T> {
+  try {
+    return await run(true);
+  } catch (err) {
+    if (!campaignsNotInstalled(err)) throw err;
+    return run(false);
+  }
+}
+
 membershipsRouter.get(
   '/membership-requests',
   asyncHandler(async (req, res) => {
-    const requests = await req.db(async (c) => (await c.query(`${REQUESTS_SQL} ORDER BY r.created_at DESC`)).rows);
+    const requests = await listTolerant((hide) =>
+      req.db(async (c) => (await c.query(`${REQUESTS_SQL}${hide ? ` WHERE ${notCleared('membership_request', 'r.id')}` : ''} ORDER BY r.created_at DESC`)).rows)
+    );
     res.json({ success: true, requests });
   })
 );
@@ -88,6 +104,24 @@ membershipsRouter.post(
   })
 );
 
+// Clear a plan from the customer's own pages: one they started but never paid for, or one that has ended. Nothing is deleted. An unpaid
+// plan's checkout is stopped; an active membership, or a payment that has come in, is never touched (the database refuses).
+membershipsRouter.post(
+  '/membership-requests/:id/remove',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    // They may have paid in a UPI app without the browser reporting back: ask Razorpay first, so a real payment is recorded, not thrown away.
+    try {
+      const waiting = await req.db(async (c) => (await c.query(`SELECT provider_order_id FROM public.payments WHERE membership_request_id = $1 AND status = 'pending' AND provider_order_id IS NOT NULL`, [id])).rows as { provider_order_id: string }[]);
+      for (const w of waiting) await reconcileOrder(w.provider_order_id, req.session!.profile.id, 'remove-plan');
+    } catch (err) {
+      console.warn('Re-checking a payment before removing a plan failed:', (err as Error).message);
+    }
+    const r = await req.db(async (c) => (await c.query(`SELECT public.remove_my_plan('membership_request', $1) AS r`, [id])).rows[0].r);
+    res.json({ success: true, ...r });
+  })
+);
+
 // ───────────────────────── active memberships ─────────────────────────
 const MEMBERSHIP_SQL = `
   SELECT m.id, m.status, m.duration_months, m.start_at, m.end_at, m.base_amount_cents, m.discount_amount_cents, m.final_amount_cents,
@@ -105,8 +139,20 @@ const MEMBERSHIP_SQL = `
 membershipsRouter.get(
   '/memberships',
   asyncHandler(async (req, res) => {
-    const memberships = await req.db(async (c) => (await c.query(`${MEMBERSHIP_SQL} ORDER BY m.created_at DESC`)).rows);
+    const memberships = await listTolerant((hide) =>
+      req.db(async (c) => (await c.query(`${MEMBERSHIP_SQL}${hide ? ` WHERE ${notCleared('membership', 'm.id')}` : ''} ORDER BY m.created_at DESC`)).rows)
+    );
     res.json({ success: true, memberships });
+  })
+);
+
+// An ended membership, cleared from the customer's pages (never an active one).
+membershipsRouter.post(
+  '/memberships/:id/remove',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const r = await req.db(async (c) => (await c.query(`SELECT public.remove_my_plan('membership', $1) AS r`, [id])).rows[0].r);
+    res.json({ success: true, ...r });
   })
 );
 
@@ -120,7 +166,7 @@ membershipsRouter.get(
       const washes = (
         await c.query(
           `SELECT b.id, b.reference_code, b.scheduled_date, b.time_slot::text AS time_slot, b.status::text AS status,
-                  b.membership_schedule_occurrence_id AS occurrence_id, s.name AS service_name, s.wash_kind
+                  b.membership_schedule_occurrence_id AS occurrence_id, b.completed_at, s.name AS service_name, s.wash_kind
              FROM public.bookings b JOIN public.services s ON s.id = b.service_id
             WHERE b.membership_id = $1 ORDER BY b.scheduled_date, b.time_slot`,
           [id]

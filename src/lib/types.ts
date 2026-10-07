@@ -183,6 +183,7 @@ export interface MembershipWash {
   occurrence_id: string | null;
   service_name: string;
   wash_kind: WashKind | null;
+  completed_at: string | null;
 }
 
 export interface Booking {
@@ -579,3 +580,24 @@ export interface AdminCampaignClaim {
 
 /** A best guess at where the phone is, from its coordinates (nothing about it is stored). */
 export interface GeoPlace { society: string | null; area: string | null; city: string | null; pincode: string | null; road: string | null; label: string }
+
+// ───────── crowded days (Admin → Capacity) ─────────
+export type CrowdState = 'ok' | 'busy' | 'full';
+export interface CapacityDay {
+  date: string;
+  kind: 'weekday' | 'weekend';
+  total: number;
+  limit: number;
+  state: CrowdState;
+  slots: Record<SlotId, { n: number; limit: number; state: CrowdState }>;
+}
+export interface CapacityRule { day_kind: 'weekday' | 'weekend'; day_busy: number; day_full: number; slot_busy: number; slot_full: number }
+/** Where a membership plan would land, day by day (nothing is saved), and whether it fits at all. */
+export interface PlanPreview {
+  total: number;
+  start_date: string;
+  end_date: string;
+  fits: boolean;
+  dates: { date: string; kind: WashKind; state: CrowdState }[];
+}
+export interface ExactDate { date: string; kind: WashKind }

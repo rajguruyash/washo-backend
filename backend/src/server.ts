@@ -1,6 +1,7 @@
 import { createApp } from './app';
 import { config } from './config';
 import { pool, withApiRole } from './db';
+import { startReminderScheduler } from './reminders';
 
 async function main() {
   if (!config.supabase.serviceRoleKey) {
@@ -18,9 +19,12 @@ async function main() {
   const timer = setInterval(sweep, 60 * 60_000);
   timer.unref();
   void sweep();
+  // Renewal reminder emails: a week before a membership ends (needs RESEND_API_KEY and migration 18; quietly does nothing without them).
+  const stopReminders = startReminderScheduler();
 
   const shutdown = () => {
     clearInterval(timer);
+    stopReminders();
     server.close(() => pool.end().finally(() => process.exit(0)));
   };
   process.on('SIGTERM', shutdown);

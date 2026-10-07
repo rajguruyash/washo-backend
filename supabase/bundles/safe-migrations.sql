@@ -3898,4 +3898,1468 @@ END $$;
 REVOKE ALL ON FUNCTION public.admin_save_campaign(uuid, text, text, text, date, date, date, integer, integer, integer, integer, integer, integer, boolean, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_save_campaign(uuid, text, text, text, date, date, date, integer, integer, integer, integer, integer, integer, boolean, boolean) TO authenticated; -- is_admin() inside
 
+-- ═════════════ 20261004000016_free_mix_of_washes.sql ═════════════
+-- 20261004000016_free_mix_of_washes.sql
+-- SAFE and re-runnable. A membership is now ANY mix of Body washes and Deep cleans, 1 to 7 a week in total.
+--
+-- Before: 2 a week had to be exactly 1 Body + 1 Deep, and 3 or more a week had to include at least one of each. The membership page now lets the
+-- customer say how many Body washes and how many Deep cleans they want each week (for example 2 Body and 0 Deep, or 1 Body and 3 Deep), and then which
+-- days each goes on. So those two rules are gone. What stays: 1 to 7 washes a week in total, a different weekday for each wash (one wash per vehicle
+-- per day), bikes have only the Body wash, and the price calculation, discounts, cap and the welcome offer are exactly as they were.
+--
+-- This is migration 14's compute_membership_quote() with only the composition block replaced.
+
+CREATE OR REPLACE FUNCTION app_private.compute_membership_quote(p_vehicle_type public.vehicle_type, p_weekly_pattern jsonb, p_duration_months integer)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_freq integer;
+  v_weeks integer := app_private.setting('weeks_per_month');
+  v_cap_bp integer := app_private.setting('max_total_discount_bp');
+  v_bodies integer;
+  v_deeps integer;
+  v_lines jsonb := '[]'::jsonb;
+  v_subtotal bigint := 0;
+  v_freq_bp integer;
+  v_freq_label text;
+  v_dur_bp integer;
+  v_freq_cents bigint;
+  v_dur_cents bigint;
+  v_combined bigint;
+  v_cap_cents bigint;
+  v_cap_adj bigint := 0;
+  v_total_discount bigint;
+  v_offer jsonb;
+  rec record;
+BEGIN
+  IF p_weekly_pattern IS NULL OR jsonb_typeof(p_weekly_pattern) <> 'array' THEN
+    RAISE EXCEPTION 'Choose your washes for the week';
+  END IF;
+  v_freq := jsonb_array_length(p_weekly_pattern);
+  IF v_freq NOT BETWEEN 1 AND 7 THEN
+    RAISE EXCEPTION 'A membership has 1 to 7 washes a week';
+  END IF;
+
+  IF (SELECT count(DISTINCT (e->>'weekday')) FROM jsonb_array_elements(p_weekly_pattern) e) <> v_freq THEN
+    RAISE EXCEPTION 'Choose a different day for each wash';
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_weekly_pattern) e
+              WHERE (e->>'weekday') IS NULL OR (e->>'weekday') !~ '^[0-6]$' OR (e->>'kind') NOT IN ('body', 'deep') OR (e->>'kind') IS NULL) THEN
+    RAISE EXCEPTION 'Each wash needs a weekday (0-6) and a kind (body or deep)';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.membership_discount_rules WHERE active AND kind = 'duration' AND key_value = p_duration_months) THEN
+    RAISE EXCEPTION 'Membership length must be 1, 3, 6 or 12 months';
+  END IF;
+
+  SELECT count(*) FILTER (WHERE e->>'kind' = 'body'), count(*) FILTER (WHERE e->>'kind' = 'deep')
+    INTO v_bodies, v_deeps FROM jsonb_array_elements(p_weekly_pattern) e;
+
+  -- Composition: any mix of Body washes and Deep cleans, 1 to 7 a week in total (on different days). Bikes have only the one wash type.
+  IF p_vehicle_type = 'bike' AND v_deeps > 0 THEN RAISE EXCEPTION 'Bikes have one wash type'; END IF;
+
+  -- Lines: one per service
+  FOR rec IN
+    SELECT o.service_id, s.code, s.name, k.kind, k.n AS per_week
+      FROM (SELECT e->>'kind' AS kind, count(*)::int AS n FROM jsonb_array_elements(p_weekly_pattern) e GROUP BY 1) k
+      LEFT JOIN public.membership_service_options o ON o.vehicle_type = p_vehicle_type AND o.wash_kind = k.kind
+      LEFT JOIN public.services s ON s.id = o.service_id
+     ORDER BY k.kind
+  LOOP
+    IF rec.service_id IS NULL THEN
+      RAISE EXCEPTION 'No % wash is offered for this vehicle', rec.kind;
+    END IF;
+    DECLARE
+      v_unit integer := app_private.unit_price_cents(rec.service_id, p_vehicle_type);
+      v_qty integer := rec.per_week * v_weeks * p_duration_months;
+    BEGIN
+      IF v_unit IS NULL THEN RAISE EXCEPTION 'No price is set for % on this vehicle', rec.name; END IF;
+      v_lines := v_lines || jsonb_build_array(jsonb_build_object(
+        'service_id', rec.service_id, 'code', rec.code, 'name', rec.name, 'kind', rec.kind,
+        'per_week', rec.per_week, 'quantity', v_qty, 'unit_cents', v_unit, 'line_cents', v_unit::bigint * v_qty));
+      v_subtotal := v_subtotal + v_unit::bigint * v_qty;
+    END;
+  END LOOP;
+
+  SELECT discount_bp, label INTO v_freq_bp, v_freq_label FROM public.membership_discount_rules WHERE active AND kind = 'frequency' AND key_value = v_freq;
+  SELECT discount_bp INTO v_dur_bp  FROM public.membership_discount_rules WHERE active AND kind = 'duration'  AND key_value = p_duration_months;
+  v_freq_bp := COALESCE(v_freq_bp, 0);
+  v_dur_bp := COALESCE(v_dur_bp, 0);
+
+  -- The welcome offer for a customer whose free-wash campaign wash is done (their own rate for this many washes a week).
+  SELECT jsonb_build_object('claim_id', cl.id, 'campaign_id', k.id, 'name', k.name, 'bp', r.bp)
+    INTO v_offer
+    FROM public.campaign_claims cl
+    JOIN public.campaigns k ON k.id = cl.campaign_id
+    CROSS JOIN LATERAL (SELECT CASE WHEN v_freq = 1 THEN k.pack_offer_bp_1 WHEN v_freq = 2 THEN k.pack_offer_bp_2 ELSE k.pack_offer_bp_3plus END AS bp) r
+   WHERE cl.customer_profile_id = public.current_profile_id()
+     AND cl.status = 'completed' AND cl.offer_membership_id IS NULL AND cl.offer_expires_at > now()
+   ORDER BY r.bp DESC LIMIT 1;
+  IF v_offer IS NOT NULL AND (v_offer->>'bp')::int > v_freq_bp THEN
+    v_freq_bp := (v_offer->>'bp')::int;
+    v_freq_label := 'Welcome offer · ' || v_freq || CASE WHEN v_freq = 1 THEN ' wash per week' ELSE ' washes per week' END;
+  ELSE
+    v_offer := NULL;
+  END IF;
+
+  -- Sequential: frequency off the subtotal, then duration off what remains. Half-up rounding to the paisa.
+  v_freq_cents := round(v_subtotal::numeric * v_freq_bp / 10000);
+  v_dur_cents  := round((v_subtotal - v_freq_cents)::numeric * v_dur_bp / 10000);
+  v_combined   := v_freq_cents + v_dur_cents;
+  v_cap_cents  := round(v_subtotal::numeric * v_cap_bp / 10000);
+
+  IF v_combined > v_cap_cents THEN
+    v_cap_adj := v_combined - v_cap_cents;   -- the part of the discount the cap takes back
+    v_total_discount := v_cap_cents;
+  ELSE
+    v_total_discount := v_combined;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'vehicle_type', p_vehicle_type,
+    'frequency_per_week', v_freq,
+    'duration_months', p_duration_months,
+    'weeks_per_month', v_weeks,
+    'washes_total', v_freq * v_weeks * p_duration_months,
+    'lines', v_lines,
+    'subtotal_cents', v_subtotal,
+    'frequency_discount', jsonb_build_object('bp', v_freq_bp, 'cents', v_freq_cents, 'label', v_freq_label),
+    'duration_discount',  jsonb_build_object('bp', v_dur_bp,  'cents', v_dur_cents,  'label', (SELECT label FROM public.membership_discount_rules WHERE active AND kind='duration'  AND key_value=p_duration_months)),
+    'cap', jsonb_build_object('max_bp', v_cap_bp, 'applied', v_cap_adj > 0, 'adjustment_cents', v_cap_adj),
+    'total_discount_cents', v_total_discount,
+    'final_cents', v_subtotal - v_total_discount,
+    'rounding', 'half_up_to_paisa'
+  ) || CASE WHEN v_offer IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('campaign_offer', v_offer) END;
+END;
+$$;
+REVOKE ALL ON FUNCTION app_private.compute_membership_quote(public.vehicle_type, jsonb, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION app_private.compute_membership_quote(public.vehicle_type, jsonb, integer) TO service_role;
+
+-- ═════════════ 20261004000017_membership_last_day_ist.sql ═════════════
+-- 20261004000017_membership_last_day_ist.sql
+-- SAFE and re-runnable. A membership's washes are laid out on the customer's weekdays from the start date to the LAST DAY of the term. That last day
+-- was worked out as `end_at::date`, and end_at is midnight in Pune: cast in a UTC session (Supabase's) that is the evening of the day BEFORE, so the final
+-- day of the term could never be used. With a tight plan and one day skipped (the vehicle already has a wash that day) a customer could pay and find
+-- the schedule "does not fit". The last day is now read in Pune time, the same way the reschedule function already reads it.
+--
+-- This is migration 5's fulfil_membership() with that one comparison changed.
+
+CREATE OR REPLACE FUNCTION app_private.fulfil_membership(p_pay public.payments) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_req public.membership_requests%ROWTYPE;
+  v_vehicle public.vehicles%ROWTYPE;
+  v_b jsonb;
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_start date;
+  v_start_at timestamptz;
+  v_end_at timestamptz;
+  v_weeks integer := app_private.setting('weeks_per_month');
+  v_total integer;
+  v_subtotal integer;
+  v_total_discount integer;
+  v_adj integer;
+  v_base integer;
+  v_discount integer;
+  v_membership uuid;
+  v_schedule uuid;
+  v_occ uuid;
+  v_booking uuid;
+  v_created integer := 0;
+  v_skipped integer := 0;
+  v_date date;
+  v_kind text;
+  v_service uuid;
+  line jsonb;
+BEGIN
+  SELECT * INTO v_req FROM public.membership_requests
+   WHERE id = (p_pay.intent->>'request_id')::uuid AND payment_id = p_pay.id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request_not_found'; END IF;
+  IF v_req.status <> 'accepted' THEN RAISE EXCEPTION 'request_not_accepted'; END IF;
+  IF v_req.customer_profile_id <> p_pay.customer_profile_id THEN RAISE EXCEPTION 'request_owner_mismatch'; END IF;
+  IF v_req.quoted_amount_cents IS DISTINCT FROM p_pay.amount_cents THEN RAISE EXCEPTION 'request_amount_mismatch'; END IF;
+
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = v_req.vehicle_id AND customer_profile_id = v_req.customer_profile_id AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'vehicle_unavailable'; END IF;
+
+  v_b := v_req.quoted_breakdown;
+  v_subtotal := (v_b->>'subtotal_cents')::integer;
+  v_total_discount := (v_b->>'total_discount_cents')::integer;
+  v_adj := COALESCE((v_b->'adjustment'->>'cents')::integer, 0);
+  v_base := v_subtotal + GREATEST(v_adj, 0);          -- a surcharge is part of the base
+  v_discount := v_total_discount + GREATEST(-v_adj, 0); -- an extra WASHO discount is part of the discount
+  IF v_base - v_discount <> v_req.quoted_amount_cents THEN RAISE EXCEPTION 'breakdown_does_not_add_up'; END IF;
+
+  -- Never start in the past if the customer paid late.
+  v_start := GREATEST(v_req.start_date, v_today + app_private.setting('membership_min_lead_days'));
+  v_start_at := (v_start::timestamp AT TIME ZONE 'Asia/Kolkata');
+  v_end_at := v_start_at + make_interval(months => v_req.duration_months) - interval '1 day'; -- same formula the table trigger enforces
+  v_total := v_req.frequency_per_week * v_weeks * v_req.duration_months;
+
+  INSERT INTO public.memberships (customer_profile_id, status, duration_months, quantity_per_period, start_at, end_at,
+                                  base_amount_cents, discount_amount_cents, final_amount_cents, pricing_snapshot, membership_request_id)
+  VALUES (v_req.customer_profile_id, 'active', v_req.duration_months, v_req.frequency_per_week * v_weeks, v_start_at, v_end_at,
+          v_base, v_discount, v_req.quoted_amount_cents,
+          v_b || jsonb_build_object('request_id', v_req.id, 'payment_id', p_pay.id, 'effective_start_date', v_start, 'requested_start_date', v_req.start_date),
+          v_req.id)
+  RETURNING id INTO v_membership;
+
+  FOR line IN SELECT * FROM jsonb_array_elements(v_b->'lines') LOOP
+    INSERT INTO public.membership_services (membership_id, service_id, vehicle_id, quantity_per_period)
+    VALUES (v_membership, (line->>'service_id')::uuid, v_vehicle.id, (line->>'per_week')::integer * v_weeks);
+  END LOOP;
+
+  INSERT INTO public.membership_schedules (membership_id, schedule_name, timezone_name, schedule_pattern, is_active)
+  VALUES (v_membership, 'default', 'Asia/Kolkata',
+          jsonb_build_object('weekly_pattern', v_req.weekly_pattern, 'time_slot', v_req.time_slot,
+                             'start_date', v_start, 'target_completion_time', v_req.target_completion_time),
+          true)
+  RETURNING id INTO v_schedule;
+
+  -- Lay out exactly v_total washes on the customer's chosen weekdays. A date that already has a live
+  -- wash for this vehicle is skipped (the wash moves to the next pattern day), so the customer always gets
+  -- every wash they paid for.
+  v_date := v_start;
+  WHILE v_created < v_total LOOP
+    IF v_date > (v_end_at AT TIME ZONE 'Asia/Kolkata')::date THEN RAISE EXCEPTION 'schedule_does_not_fit'; END IF;
+    SELECT p->>'kind' INTO v_kind FROM jsonb_array_elements(v_req.weekly_pattern) p
+     WHERE (p->>'weekday')::int = extract(dow FROM v_date)::int;
+    IF v_kind IS NOT NULL THEN
+      IF app_private.vehicle_has_live_booking(v_vehicle.id, v_date) THEN
+        v_skipped := v_skipped + 1;
+      ELSE
+        SELECT service_id INTO v_service FROM public.membership_service_options WHERE vehicle_type = v_vehicle.vehicle_type AND wash_kind = v_kind;
+        INSERT INTO public.membership_schedule_occurrences (membership_schedule_id, original_date, "current_date", time_slot, status)
+        VALUES (v_schedule, v_date, v_date, v_req.time_slot, 'scheduled') RETURNING id INTO v_occ;
+        INSERT INTO public.bookings (customer_profile_id, vehicle_id, service_id, membership_id, membership_schedule_occurrence_id, booking_type,
+                                     scheduled_date, time_slot, status, notes, address_id, parking_location, target_completion_time, source)
+        VALUES (v_req.customer_profile_id, v_vehicle.id, v_service, v_membership, v_occ, 'membership', v_date, v_req.time_slot, 'confirmed',
+                'Membership wash', v_req.address_id, v_req.parking_location, v_req.target_completion_time, 'membership_schedule')
+        RETURNING id INTO v_booking;
+        INSERT INTO public.booking_events (booking_id, event_type, event_metadata)
+        VALUES (v_booking, 'booking_created', jsonb_build_object('booking_type', 'membership', 'source', 'membership_schedule', 'membership_id', v_membership));
+        v_created := v_created + 1;
+      END IF;
+    END IF;
+    v_date := v_date + 1;
+  END LOOP;
+
+  UPDATE public.membership_requests SET status = 'active', membership_id = v_membership, updated_at = now() WHERE id = v_req.id;
+
+  INSERT INTO public.notifications (profile_id, category, title, body, reference_id) VALUES
+    (v_req.customer_profile_id, 'membership_approved', 'Your WASHO membership is active',
+     v_total || ' washes are scheduled, starting ' || to_char(v_start, 'Dy DD Mon') || '.', v_membership),
+    (v_req.customer_profile_id, 'payment_successful', 'Payment received', 'We received your payment. Thank you!', v_membership);
+
+  PERFORM app_private.audit('membership', v_membership, 'membership_activated',
+    jsonb_build_object('request_id', v_req.id, 'payment_id', p_pay.id, 'washes', v_created, 'skipped_dates', v_skipped, 'start', v_start));
+  RETURN v_membership;
+END $$;
+REVOKE ALL ON FUNCTION app_private.fulfil_membership(public.payments) FROM PUBLIC, anon, authenticated;
+
+-- ═════════════ 20261004000018_email_log.sql ═════════════
+-- 20261004000018_email_log.sql
+-- SAFE / additive and re-runnable. Remembers which emails WASHO has sent, so that each goes out ONCE:
+--   * free_wash_confirmation     one per free wash (ref = the booking)
+--   * membership_renewal_reminder one per membership (ref = the membership), a week before it ends
+--
+-- The website server sends the mail (Resend) and uses these functions around it: svc_claim_email() takes the right to send (and says no if it was
+-- already sent, or is being sent right now), svc_finish_email() records the result. A send that failed is tried again later, up to 3 times.
+-- svc_membership_reminders_due() lists the memberships that need a reminder: active, ending within the next days, with an email address, whose
+-- customer has not already renewed (another active membership for the same vehicle that ends later) and has not already been reminded.
+--
+-- Nothing here changes an existing row. The functions can be called by the service role and the website's database role only.
+
+CREATE TABLE IF NOT EXISTS public.email_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind text NOT NULL,
+  ref_id uuid NOT NULL,
+  to_email text NOT NULL,
+  status text NOT NULL DEFAULT 'sending',
+  attempts integer NOT NULL DEFAULT 1,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT email_log_kind_check CHECK (kind ~ '^[a-z_]{3,60}$'),
+  CONSTRAINT email_log_status_check CHECK (status IN ('sending', 'sent', 'failed', 'skipped'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_email_log_kind_ref ON public.email_log (kind, ref_id);
+
+ALTER TABLE public.email_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS email_log_admin_read ON public.email_log;
+CREATE POLICY email_log_admin_read ON public.email_log FOR SELECT TO authenticated USING (public.is_admin());
+REVOKE ALL ON public.email_log FROM anon, authenticated;
+GRANT SELECT ON public.email_log TO authenticated; -- RLS: admins only
+
+-- The right to send one email. Returns the log id, or NULL when it must not be sent (already sent, being sent, or given up after 3 tries).
+CREATE OR REPLACE FUNCTION public.svc_claim_email(p_kind text, p_ref uuid, p_to text) RETURNS uuid
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO public.email_log (kind, ref_id, to_email) VALUES (p_kind, p_ref, lower(btrim(p_to)))
+  ON CONFLICT (kind, ref_id) DO UPDATE
+     SET status = 'sending', attempts = public.email_log.attempts + 1, to_email = EXCLUDED.to_email, error = NULL, updated_at = now()
+   WHERE public.email_log.attempts < 3
+     AND (public.email_log.status = 'failed' OR (public.email_log.status = 'sending' AND public.email_log.updated_at < now() - interval '15 minutes'))
+  RETURNING id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.svc_finish_email(p_id uuid, p_ok boolean, p_error text DEFAULT NULL) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE public.email_log
+     SET status = CASE WHEN p_ok THEN 'sent' ELSE 'failed' END,
+         sent_at = CASE WHEN p_ok THEN now() ELSE sent_at END,
+         error = CASE WHEN p_ok THEN NULL ELSE left(p_error, 300) END,
+         updated_at = now()
+   WHERE id = p_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.svc_membership_reminders_due(p_within_days integer DEFAULT 7, p_limit integer DEFAULT 50)
+RETURNS TABLE (
+  membership_id uuid, customer_profile_id uuid, full_name text, email text,
+  vehicle_model text, vehicle_type text, registration_number text,
+  end_date date, ends_in_days integer, frequency_per_week integer, duration_months integer,
+  washes_total integer, washes_done integer
+) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT m.id, m.customer_profile_id, p.full_name, COALESCE(NULLIF(btrim(p.email), ''), u.email)::text,
+         v.model, v.vehicle_type::text, v.registration_number,
+         (m.end_at AT TIME ZONE 'Asia/Kolkata')::date,
+         ((m.end_at AT TIME ZONE 'Asia/Kolkata')::date - (now() AT TIME ZONE 'Asia/Kolkata')::date)::integer,
+         r.frequency_per_week::integer, m.duration_months::integer,
+         (SELECT count(*) FROM public.bookings b WHERE b.membership_id = m.id AND b.status <> 'cancelled')::integer,
+         (SELECT count(*) FROM public.bookings b WHERE b.membership_id = m.id AND b.status = 'completed')::integer
+    FROM public.memberships m
+    JOIN public.profiles p ON p.id = m.customer_profile_id AND p.role = 'customer' AND p.archived_at IS NULL
+    LEFT JOIN auth.users u ON u.id = p.auth_user_id
+    LEFT JOIN public.membership_requests r ON r.membership_id = m.id
+    LEFT JOIN LATERAL (SELECT ms.vehicle_id FROM public.membership_services ms WHERE ms.membership_id = m.id LIMIT 1) mv ON true
+    LEFT JOIN public.vehicles v ON v.id = mv.vehicle_id
+   WHERE m.status = 'active'
+     AND m.end_at > now() AND m.end_at <= now() + make_interval(days => GREATEST(p_within_days, 1))
+     AND COALESCE(NULLIF(btrim(p.email), ''), u.email) IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM public.email_log l
+                      WHERE l.kind = 'membership_renewal_reminder' AND l.ref_id = m.id
+                        AND (l.status IN ('sent', 'skipped') OR l.attempts >= 3 OR (l.status = 'sending' AND l.updated_at > now() - interval '15 minutes')))
+     -- already renewed: another active membership for the same vehicle that runs past this one
+     AND NOT EXISTS (SELECT 1 FROM public.memberships m2 JOIN public.membership_services ms2 ON ms2.membership_id = m2.id
+                      WHERE m2.id <> m.id AND m2.customer_profile_id = m.customer_profile_id AND m2.status = 'active'
+                        AND ms2.vehicle_id = mv.vehicle_id AND m2.end_at > m.end_at)
+   ORDER BY m.end_at
+   LIMIT LEAST(GREATEST(p_limit, 1), 200);
+$$;
+
+REVOKE ALL ON FUNCTION public.svc_claim_email(text, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.svc_finish_email(uuid, boolean, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.svc_membership_reminders_due(integer, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.svc_claim_email(text, uuid, text) TO service_role, washo_api;
+GRANT EXECUTE ON FUNCTION public.svc_finish_email(uuid, boolean, text) TO service_role, washo_api;
+GRANT EXECUTE ON FUNCTION public.svc_membership_reminders_due(integer, integer) TO service_role, washo_api;
+
+-- ═════════════ 20261004000019_capacity.sql ═════════════
+-- 20261004000019_capacity.sql
+-- SAFE and re-runnable. How many vehicles WASHO can wash on a day, and in each time window, so that nobody is booked into a crowded day.
+--
+-- capacity_rules holds two rows, "weekday" (Mon-Fri) and "weekend" (Sat, Sun), each with
+--   day_busy / day_full    washes on the whole day at which it is flagged busy (a warning) and full (closed)
+--   slot_busy / slot_full  the same for one time window (morning, afternoon, night) of that day
+-- Defaults: weekdays 10 busy / 15 full a day, weekends 15 busy / 20 full a day (per window: 6 / 9 and 9 / 12). Admin -> Capacity changes them.
+--
+-- A wash holds a place from the moment it is booked until it is cancelled, refunded or missed. The load of a day is the number of such washes on it, whoever
+-- booked them (memberships, single washes, free washes, washes WASHO booked).
+--
+--   get_capacity(from, to)   what the booking pages show: for every day its load and state (ok / busy / full), and the same for each window.
+--   require_capacity(d, s)   refuses a booking for a day or window that is full. Used by single-wash checkout and the free-wash claim here,
+--                            and by the membership checkout in migration 20. A wash that is ALREADY paid for is never refused (money is never taken for
+--                            something that then cannot be done): only the moment of choosing is checked. WASHO's own bookings (admin) are never refused.
+
+CREATE TABLE IF NOT EXISTS public.capacity_rules (
+  day_kind text PRIMARY KEY,
+  day_busy integer NOT NULL,
+  day_full integer NOT NULL,
+  slot_busy integer NOT NULL,
+  slot_full integer NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT capacity_rules_kind_check CHECK (day_kind IN ('weekday', 'weekend')),
+  CONSTRAINT capacity_rules_order_check CHECK (day_busy >= 1 AND day_full >= day_busy AND slot_busy >= 1 AND slot_full >= slot_busy AND day_full <= 500 AND slot_full <= 500)
+);
+INSERT INTO public.capacity_rules (day_kind, day_busy, day_full, slot_busy, slot_full) VALUES
+  ('weekday', 10, 15, 6, 9),
+  ('weekend', 15, 20, 9, 12)
+ON CONFLICT (day_kind) DO NOTHING;
+
+ALTER TABLE public.capacity_rules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS capacity_rules_read ON public.capacity_rules;
+CREATE POLICY capacity_rules_read ON public.capacity_rules FOR SELECT TO anon, authenticated USING (true);
+REVOKE ALL ON public.capacity_rules FROM anon, authenticated;
+GRANT SELECT ON public.capacity_rules TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION app_private.capacity_kind(p_date date) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$ SELECT CASE WHEN extract(dow FROM p_date) IN (0, 6) THEN 'weekend' ELSE 'weekday' END; $$;
+
+-- washes holding a place on a date (and, if given, in a time window)
+CREATE OR REPLACE FUNCTION app_private.washes_on(p_date date, p_slot public.time_slot DEFAULT NULL) RETURNS integer
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT count(*)::integer FROM public.bookings
+   WHERE scheduled_date = p_date AND (p_slot IS NULL OR time_slot = p_slot)
+     AND status NOT IN ('cancelled', 'refunded', 'refund_requested', 'no_show', 'rescheduled');
+$$;
+
+CREATE OR REPLACE FUNCTION app_private.level(p_n integer, p_busy integer, p_full integer) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$ SELECT CASE WHEN p_n >= p_full THEN 'full' WHEN p_n >= p_busy THEN 'busy' ELSE 'ok' END; $$;
+
+-- ok / busy / full for a day and window (the window is also full when the whole day is)
+CREATE OR REPLACE FUNCTION app_private.crowd_state(p_date date, p_slot public.time_slot) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE r public.capacity_rules%ROWTYPE; v_day integer; v_slot integer;
+BEGIN
+  SELECT * INTO r FROM public.capacity_rules WHERE day_kind = app_private.capacity_kind(p_date);
+  IF NOT FOUND THEN RETURN 'ok'; END IF;
+  v_day := app_private.washes_on(p_date);
+  v_slot := app_private.washes_on(p_date, p_slot);
+  IF v_day >= r.day_full OR v_slot >= r.slot_full THEN RETURN 'full'; END IF;
+  IF v_day >= r.day_busy OR v_slot >= r.slot_busy THEN RETURN 'busy'; END IF;
+  RETURN 'ok';
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.require_capacity(p_date date, p_slot public.time_slot) RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF app_private.crowd_state(p_date, p_slot) = 'full' THEN
+    RAISE EXCEPTION '% is fully booked in the % window. Please choose another day or time.', to_char(p_date, 'FMDy, FMDD Mon'), p_slot;
+  END IF;
+END $$;
+REVOKE ALL ON FUNCTION app_private.capacity_kind(date), app_private.washes_on(date, public.time_slot), app_private.level(integer, integer, integer),
+  app_private.crowd_state(date, public.time_slot), app_private.require_capacity(date, public.time_slot) FROM PUBLIC, anon, authenticated;
+
+-- what the booking pages need: every day from p_from to p_to with its load and state, and each window's
+CREATE OR REPLACE FUNCTION public.get_capacity(p_from date, p_to date) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF p_from IS NULL OR p_to IS NULL OR p_to < p_from OR p_to - p_from > 400 THEN RAISE EXCEPTION 'Ask for 1 to 401 days at a time'; END IF;
+  RETURN jsonb_build_object('days', COALESCE((
+    WITH load AS (
+      SELECT scheduled_date AS d, time_slot AS s, count(*)::integer AS n FROM public.bookings
+       WHERE scheduled_date BETWEEN p_from AND p_to AND status NOT IN ('cancelled', 'refunded', 'refund_requested', 'no_show', 'rescheduled')
+       GROUP BY 1, 2
+    ), agg AS (
+      SELECT g::date AS d, r.day_kind, r.day_busy, r.day_full, r.slot_busy, r.slot_full,
+             COALESCE(sum(l.n), 0)::integer AS total,
+             COALESCE(sum(l.n) FILTER (WHERE l.s = 'morning'), 0)::integer AS m,
+             COALESCE(sum(l.n) FILTER (WHERE l.s = 'afternoon'), 0)::integer AS a,
+             COALESCE(sum(l.n) FILTER (WHERE l.s = 'night'), 0)::integer AS nt
+        FROM generate_series(p_from, p_to, interval '1 day') g
+        JOIN public.capacity_rules r ON r.day_kind = app_private.capacity_kind(g::date)
+        LEFT JOIN load l ON l.d = g::date
+       GROUP BY g, r.day_kind, r.day_busy, r.day_full, r.slot_busy, r.slot_full
+    ), w AS (   -- a window is closed when its own limit is reached or the whole day is
+      SELECT agg.*,
+             CASE WHEN total >= day_full OR m >= slot_full THEN 'full' WHEN total >= day_busy OR m >= slot_busy THEN 'busy' ELSE 'ok' END AS sm,
+             CASE WHEN total >= day_full OR a >= slot_full THEN 'full' WHEN total >= day_busy OR a >= slot_busy THEN 'busy' ELSE 'ok' END AS sa,
+             CASE WHEN total >= day_full OR nt >= slot_full THEN 'full' WHEN total >= day_busy OR nt >= slot_busy THEN 'busy' ELSE 'ok' END AS sn
+        FROM agg
+    )
+    -- the day is red only when nothing can be booked on it; amber when it is getting crowded or one window is gone
+    SELECT jsonb_agg(jsonb_build_object('date', d, 'kind', day_kind, 'total', total, 'limit', day_full,
+             'state', CASE WHEN sm = 'full' AND sa = 'full' AND sn = 'full' THEN 'full' WHEN 'ok' = ALL (ARRAY[sm, sa, sn]) THEN 'ok' ELSE 'busy' END,
+             'slots', jsonb_build_object(
+               'morning', jsonb_build_object('n', m, 'limit', slot_full, 'state', sm),
+               'afternoon', jsonb_build_object('n', a, 'limit', slot_full, 'state', sa),
+               'night', jsonb_build_object('n', nt, 'limit', slot_full, 'state', sn))) ORDER BY d)
+      FROM w), '[]'::jsonb));
+END $$;
+REVOKE ALL ON FUNCTION public.get_capacity(date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_capacity(date, date) TO authenticated, service_role;
+
+-- Admin: change the limits for weekdays or weekends
+CREATE OR REPLACE FUNCTION public.admin_set_capacity(p_day_kind text, p_day_busy integer, p_day_full integer, p_slot_busy integer, p_slot_full integer) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_admin uuid := app_private.require_admin();
+BEGIN
+  IF p_day_kind NOT IN ('weekday', 'weekend') THEN RAISE EXCEPTION 'Choose weekdays or weekends'; END IF;
+  IF p_day_busy IS NULL OR p_day_full IS NULL OR p_slot_busy IS NULL OR p_slot_full IS NULL OR LEAST(p_day_busy, p_day_full, p_slot_busy, p_slot_full) < 1 THEN
+    RAISE EXCEPTION 'Enter all four numbers (1 or more)';
+  END IF;
+  IF p_day_full < p_day_busy THEN RAISE EXCEPTION 'The "full" number for a day cannot be lower than its "busy" number'; END IF;
+  IF p_slot_full < p_slot_busy THEN RAISE EXCEPTION 'The "full" number for a time window cannot be lower than its "busy" number'; END IF;
+  IF GREATEST(p_day_full, p_slot_full) > 500 THEN RAISE EXCEPTION 'That is more than 500 vehicles'; END IF;
+  INSERT INTO public.capacity_rules (day_kind, day_busy, day_full, slot_busy, slot_full) VALUES (p_day_kind, p_day_busy, p_day_full, p_slot_busy, p_slot_full)
+  ON CONFLICT (day_kind) DO UPDATE SET day_busy = EXCLUDED.day_busy, day_full = EXCLUDED.day_full, slot_busy = EXCLUDED.slot_busy, slot_full = EXCLUDED.slot_full, updated_at = now();
+  PERFORM app_private.audit('capacity', NULL, 'capacity_changed', jsonb_build_object('day_kind', p_day_kind, 'day_busy', p_day_busy, 'day_full', p_day_full, 'slot_busy', p_slot_busy, 'slot_full', p_slot_full));
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.admin_set_capacity(text, integer, integer, integer, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_capacity(text, integer, integer, integer, integer) TO authenticated; -- is_admin() inside
+
+-- ───────────────────────── single washes and free washes honour it ─────────────────────────
+-- (create_booking_payment_intent from migration 5 and claim_campaign_wash from migration 14, each with one extra line: PERFORM app_private.require_capacity(...))
+CREATE OR REPLACE FUNCTION public.create_booking_payment_intent(
+  p_vehicle_id uuid,
+  p_service_id uuid,
+  p_scheduled_date date,
+  p_time_slot public.time_slot,
+  p_address_id uuid DEFAULT NULL,
+  p_parking_location text DEFAULT NULL,
+  p_target_completion_time text DEFAULT NULL,
+  p_source text DEFAULT 'website'
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_vehicle public.vehicles%ROWTYPE;
+  v_service public.services%ROWTYPE;
+  v_addr uuid := p_address_id;
+  v_price integer;
+  v_pay public.payments%ROWTYPE;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+  IF p_source NOT IN ('mobile_app', 'website') THEN RAISE EXCEPTION 'Unknown booking source'; END IF;
+
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = p_vehicle_id AND customer_profile_id = v_profile AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+
+  SELECT * INTO v_service FROM public.services WHERE id = p_service_id AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Service not found'; END IF;
+  IF NOT (v_service.vehicle_type = v_vehicle.vehicle_type OR (v_vehicle.vehicle_type = 'suv' AND v_service.vehicle_type = 'car')) THEN
+    RAISE EXCEPTION 'This service is not available for your vehicle';
+  END IF;
+
+  IF v_addr IS NULL THEN v_addr := v_vehicle.address_id; END IF;
+  IF v_addr IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.customer_addresses WHERE id = v_addr AND customer_profile_id = v_profile) THEN
+    RAISE EXCEPTION 'Address not found';
+  END IF;
+
+  IF p_scheduled_date IS NULL OR app_private.slot_start(p_scheduled_date, p_time_slot)
+       < now() + make_interval(hours => app_private.setting('on_demand_min_lead_hours')) THEN
+    RAISE EXCEPTION 'That slot starts too soon. Please choose a later one.';
+  END IF;
+  IF app_private.vehicle_has_live_booking(p_vehicle_id, p_scheduled_date) THEN
+    RAISE EXCEPTION 'This vehicle already has a wash booked that day';
+  END IF;
+  PERFORM app_private.require_capacity(p_scheduled_date, p_time_slot); -- crowded days and times are closed (Admin -> Capacity)
+
+  v_price := app_private.unit_price_cents(v_service.id, v_vehicle.vehicle_type);
+  IF v_price IS NULL OR v_price < 100 THEN RAISE EXCEPTION 'No price is set for this service'; END IF;
+
+  INSERT INTO public.payments (customer_profile_id, amount_cents, currency, provider, status, payment_kind, receipt, expires_at, fulfilment_status, intent)
+  VALUES (v_profile, v_price, 'INR', 'razorpay', 'pending', 'on_demand', app_private.gen_ref('INT'),
+          now() + make_interval(mins => app_private.setting('payment_intent_minutes')), 'pending',
+          jsonb_build_object('kind', 'on_demand', 'vehicle_id', p_vehicle_id, 'service_id', p_service_id,
+                             'scheduled_date', p_scheduled_date, 'time_slot', p_time_slot, 'address_id', v_addr,
+                             'parking_location', COALESCE(NULLIF(trim(p_parking_location), ''), v_vehicle.parking_location),
+                             'target_completion_time', p_target_completion_time, 'source', p_source, 'unit_price_cents', v_price))
+  RETURNING * INTO v_pay;
+
+  RETURN jsonb_build_object('payment_id', v_pay.id, 'amount_cents', v_pay.amount_cents, 'currency', 'INR',
+                            'receipt', v_pay.receipt, 'expires_at', v_pay.expires_at);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.claim_campaign_wash(
+  p_campaign_id uuid,
+  p_vehicle_id uuid,
+  p_scheduled_date date,
+  p_time_slot public.time_slot,
+  p_address_id uuid DEFAULT NULL,
+  p_parking_location text DEFAULT NULL,
+  p_target_completion_time text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  c public.campaigns%ROWTYPE;
+  v_vehicle public.vehicles%ROWTYPE;
+  v_service public.services%ROWTYPE;
+  v_addr uuid;
+  v_flat text;
+  v_parking text;
+  v_claimed integer;
+  v_day integer;
+  v_booking uuid;
+  v_claim uuid;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer' AND archived_at IS NULL) THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+
+  -- Claims for one campaign go through one at a time, so the caps cannot be beaten by two people claiming together.
+  SELECT * INTO c FROM public.campaigns WHERE id = p_campaign_id FOR UPDATE;
+  IF NOT FOUND OR NOT c.is_active THEN RAISE EXCEPTION 'This offer is not running right now'; END IF;
+  IF v_today < c.claim_opens_on THEN RAISE EXCEPTION 'This offer opens on %', to_char(c.claim_opens_on, 'FMDD Mon'); END IF;
+  IF v_today > c.claim_closes_on THEN RAISE EXCEPTION 'This offer has ended'; END IF;
+
+  SELECT count(*) INTO v_claimed FROM public.campaign_claims WHERE campaign_id = c.id AND status <> 'released';
+  IF v_claimed >= c.total_cap THEN RAISE EXCEPTION 'All the free washes have been claimed. Thank you for your interest!'; END IF;
+
+  IF EXISTS (SELECT 1 FROM public.campaign_claims WHERE campaign_id = c.id AND customer_profile_id = v_profile AND status <> 'released') THEN
+    RAISE EXCEPTION 'You have already claimed your free wash';
+  END IF;
+  IF c.new_customers_only AND NOT app_private.campaign_is_new_customer(v_profile) THEN
+    RAISE EXCEPTION 'This offer is for new WASHO customers';
+  END IF;
+
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = p_vehicle_id AND customer_profile_id = v_profile AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+  IF EXISTS (SELECT 1 FROM public.campaign_claims WHERE campaign_id = c.id AND plate = v_vehicle.registration_normalized AND status <> 'released') THEN
+    RAISE EXCEPTION 'A free wash has already been claimed for this vehicle';
+  END IF;
+  IF c.new_customers_only AND EXISTS (
+       SELECT 1 FROM public.bookings b JOIN public.vehicles v ON v.id = b.vehicle_id
+        WHERE v.registration_normalized = v_vehicle.registration_normalized AND b.status <> 'cancelled') THEN
+    RAISE EXCEPTION 'This vehicle has already been washed by WASHO, so it is not eligible for the free wash';
+  END IF;
+
+  -- The free wash is the body wash for the vehicle (an SUV uses the car body wash, as everywhere else).
+  SELECT s.* INTO v_service
+    FROM public.membership_service_options o JOIN public.services s ON s.id = o.service_id AND s.is_active
+   WHERE o.vehicle_type = v_vehicle.vehicle_type AND o.wash_kind = 'body';
+  IF NOT FOUND THEN RAISE EXCEPTION 'The free body wash is not available for this vehicle'; END IF;
+
+  v_addr := COALESCE(p_address_id, v_vehicle.address_id);
+  IF v_addr IS NULL THEN
+    SELECT id INTO v_addr FROM public.customer_addresses WHERE customer_profile_id = v_profile AND archived_at IS NULL ORDER BY is_default DESC, created_at LIMIT 1;
+  END IF;
+  IF v_addr IS NULL THEN RAISE EXCEPTION 'Add your address first, so our specialist knows where to come'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.customer_addresses WHERE id = v_addr AND customer_profile_id = v_profile AND archived_at IS NULL) THEN
+    RAISE EXCEPTION 'Address not found';
+  END IF;
+  v_flat := app_private.flat_key(v_addr);
+  IF v_flat IS NOT NULL AND EXISTS (SELECT 1 FROM public.campaign_claims WHERE campaign_id = c.id AND flat_key = v_flat AND status <> 'released') THEN
+    RAISE EXCEPTION 'A free wash has already been claimed for this address';
+  END IF;
+
+  IF p_scheduled_date IS NULL OR p_scheduled_date < v_today THEN RAISE EXCEPTION 'Choose today or a later date'; END IF;
+  IF p_scheduled_date > c.use_by_date THEN RAISE EXCEPTION 'The free wash must be on or before %', to_char(c.use_by_date, 'FMDD Mon'); END IF;
+  IF app_private.slot_start(p_scheduled_date, p_time_slot) < now() + make_interval(hours => app_private.setting('on_demand_min_lead_hours')) THEN
+    RAISE EXCEPTION 'That slot starts too soon. Please choose a later one.';
+  END IF;
+  IF app_private.vehicle_has_live_booking(v_vehicle.id, p_scheduled_date) THEN
+    RAISE EXCEPTION 'This vehicle already has a wash booked that day';
+  END IF;
+  IF c.daily_cap IS NOT NULL THEN
+    SELECT count(*) INTO v_day FROM public.campaign_claims cl JOIN public.bookings b ON b.id = cl.booking_id
+     WHERE cl.campaign_id = c.id AND cl.status <> 'released' AND b.scheduled_date = p_scheduled_date;
+    IF v_day >= c.daily_cap THEN RAISE EXCEPTION 'That day is fully booked for free washes. Please choose another day.'; END IF;
+  END IF;
+  PERFORM app_private.require_capacity(p_scheduled_date, p_time_slot); -- crowded days and times are closed (Admin -> Capacity)
+
+  v_parking := COALESCE(NULLIF(trim(COALESCE(p_parking_location, '')), ''), v_vehicle.parking_location,
+                        (SELECT parking_location FROM public.customer_addresses WHERE id = v_addr));
+  BEGIN
+    INSERT INTO public.bookings (customer_profile_id, vehicle_id, service_id, booking_type, scheduled_date, time_slot, status,
+                                 notes, address_id, parking_location, target_completion_time, source, price_cents)
+    VALUES (v_profile, v_vehicle.id, v_service.id, 'on_demand', p_scheduled_date, p_time_slot, 'confirmed',
+            c.name || ' (free wash)' || COALESCE(E'\n' || v_parking, ''), v_addr, v_parking, NULLIF(p_target_completion_time, ''), 'website', 0)
+    RETURNING id INTO v_booking;
+    INSERT INTO public.campaign_claims (campaign_id, customer_profile_id, booking_id, plate, flat_key)
+    VALUES (c.id, v_profile, v_booking, v_vehicle.registration_normalized, v_flat)
+    RETURNING id INTO v_claim;
+  EXCEPTION WHEN unique_violation THEN
+    -- the unique indexes are the last line of defence when two requests slip past the checks above
+    IF SQLERRM LIKE '%ux_campaign_claims_plate%' THEN RAISE EXCEPTION 'A free wash has already been claimed for this vehicle'; END IF;
+    IF SQLERRM LIKE '%ux_campaign_claims_flat%' THEN RAISE EXCEPTION 'A free wash has already been claimed for this address'; END IF;
+    IF SQLERRM LIKE '%ux_campaign_claims_customer%' THEN RAISE EXCEPTION 'You have already claimed your free wash'; END IF;
+    IF SQLERRM LIKE '%ux_bookings_vehicle_day_live%' THEN RAISE EXCEPTION 'This vehicle already has a wash booked that day'; END IF;
+    RAISE;
+  END;
+
+  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
+  VALUES (v_booking, 'booking_created', v_profile, jsonb_build_object('booking_type', 'on_demand', 'source', 'website', 'payment', 'free', 'campaign', c.code));
+  INSERT INTO public.notifications (profile_id, category, title, body, reference_id)
+  VALUES (v_profile, 'booking_confirmed', 'Your free wash is booked',
+          v_service.name || ' on ' || to_char(p_scheduled_date, 'Dy DD Mon') || ' (' || p_time_slot || ')', v_booking);
+  PERFORM app_private.audit('booking', v_booking, 'campaign_wash_claimed', jsonb_build_object('campaign', c.code, 'claim_id', v_claim, 'scheduled_date', p_scheduled_date));
+
+  RETURN jsonb_build_object('booking_id', v_booking, 'claim_id', v_claim, 'campaign_name', c.name, 'service_name', v_service.name);
+END $$;
+
+-- ═════════════ 20261004000020_membership_exact_dates.sql ═════════════
+-- 20261004000020_membership_exact_dates.sql
+-- SAFE and re-runnable. A membership can now be laid out on EXACT DATES the customer picks, and every membership is checked against the crowd limits
+-- (migration 19) before any money is taken.
+--
+--   plan_membership_washes()   the one place that decides which dates a weekday plan lands on: the chosen weekdays from the start date, passing over
+--                              days where this vehicle already has a wash and days that are fully booked in the chosen window, until every wash has a day.
+--   check_custom_dates()       the rules for exact dates, enforced here as well as in the calendar the customer sees:
+--                                - exactly as many Body washes and Deep cleans as the plan has for the whole term
+--                                - one wash a day, none before the earliest allowed start (today plus the notice setting: not today, not tomorrow)
+--                                  and none after the last day of the term
+--                                - no more washes in one week (Monday to Sunday) than the plan's washes per week
+--                                - never on a day this vehicle already has a wash, or a day that is fully booked in the chosen window
+--   create_membership_request / start_membership_checkout   take the exact dates (optional) and run these checks first.
+--   preview_membership_dates() what the booking page shows before paying: the dates a plan lands on (or fails to), and how busy each one is.
+--   fulfil_membership          lays the washes out through the same planner. If the crowd limit would leave no room, the limit gives way: a membership
+--                              that is already paid for is never refused because of it.
+--
+-- Changes the signatures of create_membership_request and start_membership_checkout (one more, optional, argument): the old versions are dropped so a call
+-- cannot be ambiguous. The website sends all arguments.
+
+ALTER TABLE public.membership_requests ADD COLUMN IF NOT EXISTS custom_dates jsonb;
+
+-- the last day of a term that starts on p_start, worked out exactly as fulfil_membership and the table's own rule do
+CREATE OR REPLACE FUNCTION app_private.membership_term_end(p_start date, p_months integer) RETURNS date
+LANGUAGE sql STABLE AS $$
+  SELECT (((p_start::timestamp AT TIME ZONE 'Asia/Kolkata') + make_interval(months => p_months) - interval '1 day') AT TIME ZONE 'Asia/Kolkata')::date;
+$$;
+
+CREATE OR REPLACE FUNCTION app_private.plan_membership_washes(
+  p_vehicle_id uuid, p_start date, p_end date, p_pattern jsonb, p_total integer, p_slot public.time_slot, p_respect_capacity boolean
+) RETURNS TABLE (wash_date date, kind text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE d date := p_start; n integer := 0; k text;
+BEGIN
+  WHILE n < p_total AND d <= p_end LOOP
+    SELECT e->>'kind' INTO k FROM jsonb_array_elements(p_pattern) e WHERE (e->>'weekday')::integer = extract(dow FROM d)::integer;
+    IF k IS NOT NULL
+       AND NOT app_private.vehicle_has_live_booking(p_vehicle_id, d)
+       AND (NOT p_respect_capacity OR app_private.crowd_state(d, p_slot) <> 'full') THEN
+      wash_date := d; kind := k; n := n + 1;
+      RETURN NEXT;
+    END IF;
+    d := d + 1;
+  END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.check_custom_dates(
+  p_vehicle_id uuid, p_start date, p_end date, p_pattern jsonb, p_total integer, p_slot public.time_slot, p_dates jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_min date := GREATEST(p_start, (now() AT TIME ZONE 'Asia/Kolkata')::date + app_private.setting('membership_min_lead_days'));
+  v_per_week integer := jsonb_array_length(p_pattern);
+  v_terms integer := p_total / jsonb_array_length(p_pattern);   -- how many weeks' worth of washes the term holds
+  v_norm jsonb; v_n integer; v_body integer; v_deep integer; v_want_body integer; v_want_deep integer;
+  v_text text; r record;
+BEGIN
+  IF jsonb_typeof(p_dates) <> 'array' THEN RAISE EXCEPTION 'Choose the date of each wash'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_dates) e
+              WHERE jsonb_typeof(e) <> 'object' OR (e->>'date') IS NULL OR (e->>'date') !~ '^\d{4}-\d{2}-\d{2}$' OR (e->>'kind') IS NULL OR (e->>'kind') NOT IN ('body', 'deep')) THEN
+    RAISE EXCEPTION 'Each wash needs a date and a kind (body or deep)';
+  END IF;
+  SELECT jsonb_agg(jsonb_build_object('date', (e->>'date')::date, 'kind', e->>'kind') ORDER BY (e->>'date')::date), count(*),
+         count(*) FILTER (WHERE e->>'kind' = 'body'), count(*) FILTER (WHERE e->>'kind' = 'deep')
+    INTO v_norm, v_n, v_body, v_deep FROM jsonb_array_elements(p_dates) e;
+  SELECT count(*) FILTER (WHERE x->>'kind' = 'body') * v_terms, count(*) FILTER (WHERE x->>'kind' = 'deep') * v_terms INTO v_want_body, v_want_deep FROM jsonb_array_elements(p_pattern) x;
+
+  IF v_body <> v_want_body OR v_deep <> v_want_deep THEN
+    RAISE EXCEPTION 'Choose exactly % Body wash% and % Deep clean% for this plan (you have % and %)', v_want_body, CASE WHEN v_want_body = 1 THEN '' ELSE 'es' END, v_want_deep, CASE WHEN v_want_deep = 1 THEN '' ELSE 's' END, v_body, v_deep;
+  END IF;
+  IF (SELECT count(DISTINCT e->>'date') FROM jsonb_array_elements(v_norm) e) < v_n THEN RAISE EXCEPTION 'Two washes are on the same day: a vehicle is washed once a day'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_norm) e WHERE (e->>'date')::date < v_min OR (e->>'date')::date > p_end) THEN
+    RAISE EXCEPTION 'Every wash must be between % and % (not today or tomorrow)', to_char(v_min, 'FMDy, FMDD Mon YYYY'), to_char(p_end, 'FMDy, FMDD Mon YYYY');
+  END IF;
+  FOR r IN SELECT date_trunc('week', (e->>'date')::date)::date AS wk, count(*)::integer AS n FROM jsonb_array_elements(v_norm) e GROUP BY 1 HAVING count(*) > v_per_week ORDER BY 1 LIMIT 1 LOOP
+    RAISE EXCEPTION 'No more than % wash% in one week: the week of % has %', v_per_week, CASE WHEN v_per_week = 1 THEN '' ELSE 'es' END, to_char(r.wk, 'FMDD Mon'), r.n;
+  END LOOP;
+  FOR r IN SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e ORDER BY 1 LOOP
+    IF app_private.vehicle_has_live_booking(p_vehicle_id, r.d) THEN RAISE EXCEPTION 'This vehicle already has a wash on %', to_char(r.d, 'FMDy, FMDD Mon'); END IF;
+  END LOOP;
+  SELECT string_agg(to_char(x.d, 'FMDy, FMDD Mon'), ', ' ORDER BY x.d) INTO v_text
+    FROM (SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e WHERE app_private.crowd_state((e->>'date')::date, p_slot) = 'full' ORDER BY 1 LIMIT 4) x;
+  IF v_text IS NOT NULL THEN RAISE EXCEPTION 'These days are fully booked in the % window: %. Please pick other days.', p_slot, v_text; END IF;
+  RETURN v_norm;
+END $$;
+
+-- What the booking page shows before paying. Needs a signed-in customer and one of their vehicles.
+CREATE OR REPLACE FUNCTION public.preview_membership_dates(
+  p_vehicle_id uuid, p_weekly_pattern jsonb, p_duration_months integer, p_time_slot public.time_slot, p_start_date date
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_vehicle public.vehicles%ROWTYPE;
+  v_quote jsonb; v_total integer; v_end date; v_pattern jsonb; v_fits boolean; v_dates jsonb;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = p_vehicle_id AND customer_profile_id = v_profile AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+  v_quote := app_private.compute_membership_quote(v_vehicle.vehicle_type, p_weekly_pattern, p_duration_months);   -- also checks the plan itself
+  IF p_start_date IS NULL OR p_start_date < (now() AT TIME ZONE 'Asia/Kolkata')::date + app_private.setting('membership_min_lead_days') THEN
+    RAISE EXCEPTION 'Your membership can start from % at the earliest', (now() AT TIME ZONE 'Asia/Kolkata')::date + app_private.setting('membership_min_lead_days');
+  END IF;
+  SELECT jsonb_agg(jsonb_build_object('weekday', (e->>'weekday')::int, 'kind', e->>'kind') ORDER BY (e->>'weekday')::int) INTO v_pattern FROM jsonb_array_elements(p_weekly_pattern) e;
+  v_total := (v_quote->>'washes_total')::integer;
+  v_end := app_private.membership_term_end(p_start_date, p_duration_months);
+  v_fits := (SELECT count(*) FROM app_private.plan_membership_washes(p_vehicle_id, p_start_date, v_end, v_pattern, v_total, p_time_slot, true)) >= v_total;
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('date', w.wash_date, 'kind', w.kind, 'state', app_private.crowd_state(w.wash_date, p_time_slot)) ORDER BY w.wash_date), '[]'::jsonb)
+    INTO v_dates FROM app_private.plan_membership_washes(p_vehicle_id, p_start_date, v_end, v_pattern, v_total, p_time_slot, v_fits) w;
+  RETURN jsonb_build_object('total', v_total, 'start_date', p_start_date, 'end_date', v_end, 'fits', v_fits, 'dates', v_dates);
+END $$;
+
+DROP FUNCTION IF EXISTS public.create_membership_request(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text);
+DROP FUNCTION IF EXISTS public.start_membership_checkout(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.create_membership_request(
+  p_vehicle_id uuid,
+  p_weekly_pattern jsonb,
+  p_duration_months integer,
+  p_time_slot public.time_slot,
+  p_start_date date,
+  p_address_id uuid DEFAULT NULL,
+  p_parking_location text DEFAULT NULL,
+  p_customer_notes text DEFAULT NULL,
+  p_target_completion_time text DEFAULT NULL,
+  p_custom_dates jsonb DEFAULT NULL
+) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_vehicle public.vehicles%ROWTYPE;
+  v_addr uuid := p_address_id;
+  v_pattern jsonb;
+  v_quote jsonb;
+  v_id uuid;
+  v_total integer;
+  v_end date;
+  v_custom jsonb;
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = p_vehicle_id AND customer_profile_id = v_profile AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+
+  IF v_addr IS NULL THEN v_addr := v_vehicle.address_id; END IF;
+  IF v_addr IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.customer_addresses WHERE id = v_addr AND customer_profile_id = v_profile) THEN
+    RAISE EXCEPTION 'Address not found';
+  END IF;
+
+  IF p_start_date IS NULL OR p_start_date < v_today + app_private.setting('membership_min_lead_days') THEN
+    RAISE EXCEPTION 'Your membership can start from % at the earliest', v_today + app_private.setting('membership_min_lead_days');
+  END IF;
+
+  -- Validates the pattern, duration and vehicle rules; raises a customer-readable message if anything is off.
+  v_quote := app_private.compute_membership_quote(v_vehicle.vehicle_type, p_weekly_pattern, p_duration_months);
+
+  -- Store the pattern in a canonical, weekday-ordered form with integer weekdays.
+  SELECT jsonb_agg(jsonb_build_object('weekday', (e->>'weekday')::int, 'kind', e->>'kind') ORDER BY (e->>'weekday')::int)
+    INTO v_pattern FROM jsonb_array_elements(p_weekly_pattern) e;
+
+  -- Can the plan be laid out? Either on the weekdays chosen (days that are crowded or already have a wash are passed over, as at payment), or on
+  -- the exact dates the customer picked, which must follow every rule. Checked BEFORE any money is taken.
+  v_total := (v_quote->>'washes_total')::integer;
+  v_end := app_private.membership_term_end(p_start_date, p_duration_months);
+  IF p_custom_dates IS NULL THEN
+    IF (SELECT count(*) FROM app_private.plan_membership_washes(p_vehicle_id, p_start_date, v_end, v_pattern, v_total, p_time_slot, true)) < v_total THEN
+      RAISE EXCEPTION 'We cannot fit all % washes on those days: some days are fully booked or already have a wash. Choose other days or another time window, or pick exact dates.', v_total;
+    END IF;
+  ELSE
+    v_custom := app_private.check_custom_dates(p_vehicle_id, p_start_date, v_end, v_pattern, v_total, p_time_slot, p_custom_dates);
+  END IF;
+
+  BEGIN
+    INSERT INTO public.membership_requests (
+      customer_profile_id, vehicle_id, address_id, parking_location, frequency_per_week, duration_months,
+      weekly_pattern, time_slot, target_completion_time, start_date, customer_notes, system_quote, custom_dates
+    ) VALUES (
+      v_profile, p_vehicle_id, v_addr, COALESCE(NULLIF(trim(p_parking_location), ''), v_vehicle.parking_location),
+      jsonb_array_length(v_pattern), p_duration_months, v_pattern, p_time_slot, p_target_completion_time,
+      p_start_date, NULLIF(trim(p_customer_notes), ''), v_quote, v_custom
+    ) RETURNING id INTO v_id;
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'You already have a membership request in progress for this vehicle';
+  END;
+
+  PERFORM app_private.audit('membership_request', v_id, 'membership_requested',
+    jsonb_build_object('frequency_per_week', jsonb_array_length(v_pattern), 'duration_months', p_duration_months));
+  RETURN v_id;
+END $$;
+
+-- ───────────────────────── read (customer): price hidden until WASHO approves ─────────────────────────
+CREATE OR REPLACE FUNCTION public.my_membership_requests()
+RETURNS TABLE (
+  id uuid, reference_code text, status text, vehicle_id uuid, frequency_per_week smallint, duration_months smallint,
+  weekly_pattern jsonb, time_slot public.time_slot, start_date date, customer_notes text,
+  quoted_amount_cents integer, quoted_breakdown jsonb, quote_expires_at timestamptz,
+  rejection_reason text, payment_id uuid, membership_id uuid, created_at timestamptz
+) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT r.id, r.reference_code,
+         CASE WHEN r.status = 'quoted' AND r.quote_expires_at < now() THEN 'expired' ELSE r.status END,
+         r.vehicle_id, r.frequency_per_week, r.duration_months, r.weekly_pattern, r.time_slot, r.start_date, r.customer_notes,
+         -- price fields exist only once WASHO has approved a price
+         CASE WHEN r.status IN ('quoted', 'accepted', 'active') THEN r.quoted_amount_cents END,
+         CASE WHEN r.status IN ('quoted', 'accepted', 'active') THEN r.quoted_breakdown END,
+         CASE WHEN r.status = 'quoted' THEN r.quote_expires_at END,
+         r.rejection_reason, r.payment_id, r.membership_id, r.created_at
+    FROM public.membership_requests r
+   WHERE r.customer_profile_id = public.current_profile_id()
+   ORDER BY r.created_at DESC;
+$$;
+
+-- ───────────────────────── admin: review ─────────────────────────
+CREATE OR REPLACE FUNCTION public.admin_list_membership_requests(p_status text DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.is_admin() THEN RAISE EXCEPTION 'Unauthorized: admin access required' USING ERRCODE = '42501'; END IF;
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', r.id, 'reference_code', r.reference_code, 'status', r.status,
+      'customer', jsonb_build_object('profile_id', p.id, 'name', p.full_name, 'phone', p.phone),
+      'vehicle', jsonb_build_object('id', v.id, 'type', v.vehicle_type, 'model', v.model, 'registration_number', v.registration_number),
+      'address', CASE WHEN a.id IS NULL THEN NULL ELSE jsonb_build_object('society', a.society_name, 'block', a.building_block, 'flat', a.flat_number, 'parking', COALESCE(r.parking_location, a.parking_location)) END,
+      'frequency_per_week', r.frequency_per_week, 'duration_months', r.duration_months, 'weekly_pattern', r.weekly_pattern,
+      'time_slot', r.time_slot, 'start_date', r.start_date, 'customer_notes', r.customer_notes,
+      'system_quote', r.system_quote, 'adjustment_cents', r.adjustment_cents, 'adjustment_reason', r.adjustment_reason,
+      'quoted_amount_cents', r.quoted_amount_cents, 'quote_expires_at', r.quote_expires_at,
+      'rejection_reason', r.rejection_reason, 'created_at', r.created_at
+    ) ORDER BY (r.status = 'submitted') DESC, r.created_at DESC)
+      FROM public.membership_requests r
+      JOIN public.profiles p ON p.id = r.customer_profile_id
+      JOIN public.vehicles v ON v.id = r.vehicle_id
+      LEFT JOIN public.customer_addresses a ON a.id = r.address_id
+     WHERE p_status IS NULL OR r.status = p_status), '[]'::jsonb);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_review_membership_request(
+  p_request_id uuid,
+  p_action text,
+  p_adjustment_cents integer DEFAULT 0,
+  p_adjustment_reason text DEFAULT NULL,
+  p_rejection_reason text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_req public.membership_requests%ROWTYPE;
+  v_vehicle_type public.vehicle_type;
+  v_quote jsonb;
+  v_final bigint;
+  v_breakdown jsonb;
+  v_expires timestamptz;
+  v_admin uuid := public.current_profile_id();
+BEGIN
+  IF NOT public.is_admin() THEN RAISE EXCEPTION 'Unauthorized: admin access required' USING ERRCODE = '42501'; END IF;
+
+  SELECT * INTO v_req FROM public.membership_requests WHERE id = p_request_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Request not found'; END IF;
+
+  IF p_action = 'reject' THEN
+    IF v_req.status NOT IN ('submitted', 'quoted') THEN RAISE EXCEPTION 'This request can no longer be rejected (%).', v_req.status; END IF;
+    IF p_rejection_reason IS NULL OR char_length(trim(p_rejection_reason)) < 3 THEN RAISE EXCEPTION 'Please give the customer a reason'; END IF;
+    UPDATE public.membership_requests
+       SET status = 'rejected', rejection_reason = trim(p_rejection_reason), reviewed_by_profile_id = v_admin, reviewed_at = now(), updated_at = now()
+     WHERE id = p_request_id;
+    PERFORM app_private.audit('membership_request', p_request_id, 'membership_rejected', jsonb_build_object('reason', p_rejection_reason));
+    RETURN jsonb_build_object('request_id', p_request_id, 'status', 'rejected');
+  END IF;
+
+  IF p_action <> 'quote' THEN RAISE EXCEPTION 'Action must be quote or reject'; END IF;
+  IF v_req.status NOT IN ('submitted', 'quoted') THEN RAISE EXCEPTION 'This request can no longer be quoted (%).', v_req.status; END IF;
+
+  IF COALESCE(p_adjustment_cents, 0) <> 0 AND (p_adjustment_reason IS NULL OR char_length(trim(p_adjustment_reason)) < 5) THEN
+    RAISE EXCEPTION 'An adjustment needs a reason the customer will see';
+  END IF;
+
+  -- Re-price from today's rate card (rates or discounts may have changed since the customer asked).
+  SELECT vehicle_type INTO v_vehicle_type FROM public.vehicles WHERE id = v_req.vehicle_id;
+  v_quote := app_private.compute_membership_quote(v_vehicle_type, v_req.weekly_pattern, v_req.duration_months);
+
+  v_final := (v_quote->>'final_cents')::bigint + COALESCE(p_adjustment_cents, 0);
+  IF v_final < 100 THEN RAISE EXCEPTION 'The final price must be at least ₹1'; END IF;
+
+  v_breakdown := v_quote || jsonb_build_object(
+    'adjustment', jsonb_build_object('cents', COALESCE(p_adjustment_cents, 0), 'reason', NULLIF(trim(p_adjustment_reason), '')),
+    'final_cents', v_final);
+  v_expires := now() + make_interval(days => app_private.setting('quote_validity_days'));
+
+  UPDATE public.membership_requests
+     SET status = 'quoted', system_quote = v_quote, adjustment_cents = COALESCE(p_adjustment_cents, 0),
+         adjustment_reason = NULLIF(trim(p_adjustment_reason), ''), quoted_amount_cents = v_final::int,
+         quoted_breakdown = v_breakdown, quote_expires_at = v_expires, reviewed_by_profile_id = v_admin, reviewed_at = now(), updated_at = now()
+   WHERE id = p_request_id;
+
+  PERFORM app_private.audit('membership_request', p_request_id, 'membership_quoted',
+    jsonb_build_object('system_final_cents', (v_quote->>'final_cents')::bigint, 'adjustment_cents', COALESCE(p_adjustment_cents, 0),
+                       'reason', p_adjustment_reason, 'quoted_amount_cents', v_final, 'expires_at', v_expires));
+  RETURN jsonb_build_object('request_id', p_request_id, 'status', 'quoted', 'quoted_amount_cents', v_final, 'quote_expires_at', v_expires);
+END $$;
+
+-- ───────────────────────── customer: accept / decline ─────────────────────────
+-- Accepting creates a PENDING payment and nothing else. The Razorpay order is created by the server for
+-- exactly this amount and attached afterwards. No membership exists until settle_payment() verifies the money.
+CREATE OR REPLACE FUNCTION public.accept_membership_quote(p_request_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_req public.membership_requests%ROWTYPE;
+  v_pay public.payments%ROWTYPE;
+  v_minutes integer := app_private.setting('payment_intent_minutes');
+BEGIN
+  SELECT * INTO v_req FROM public.membership_requests WHERE id = p_request_id AND customer_profile_id = v_profile FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Request not found'; END IF;
+
+  IF v_req.status = 'quoted' AND v_req.quote_expires_at < now() THEN
+    UPDATE public.membership_requests SET status = 'expired', updated_at = now() WHERE id = p_request_id;
+    RAISE EXCEPTION 'This quote has expired. Please ask WASHO for a new one.';
+  END IF;
+  IF v_req.status NOT IN ('quoted', 'accepted') THEN
+    RAISE EXCEPTION 'This request is not waiting for your approval (%).', v_req.status;
+  END IF;
+
+  -- Retrying payment: reuse the open payment while it is fresh.
+  IF v_req.status = 'accepted' AND v_req.payment_id IS NOT NULL THEN
+    SELECT * INTO v_pay FROM public.payments WHERE id = v_req.payment_id FOR UPDATE;
+    IF v_pay.status = 'pending' AND v_pay.expires_at > now() AND v_pay.amount_cents = v_req.quoted_amount_cents THEN
+      RETURN jsonb_build_object('payment_id', v_pay.id, 'amount_cents', v_pay.amount_cents, 'currency', 'INR',
+                                'receipt', v_pay.receipt, 'provider_order_id', v_pay.provider_order_id, 'expires_at', v_pay.expires_at);
+    END IF;
+    IF v_pay.status = 'pending' THEN
+      UPDATE public.payments SET status = 'failed', updated_at = now() WHERE id = v_pay.id; -- superseded
+    END IF;
+  END IF;
+
+  INSERT INTO public.payments (customer_profile_id, amount_cents, currency, provider, status, payment_kind,
+                               membership_request_id, receipt, expires_at, fulfilment_status, intent)
+  VALUES (v_profile, v_req.quoted_amount_cents, 'INR', 'razorpay', 'pending', 'membership',
+          p_request_id, v_req.reference_code, now() + make_interval(mins => v_minutes), 'pending',
+          jsonb_build_object('kind', 'membership_request', 'request_id', p_request_id))
+  RETURNING * INTO v_pay;
+
+  UPDATE public.membership_requests
+     SET status = 'accepted', accepted_at = COALESCE(accepted_at, now()), payment_id = v_pay.id, updated_at = now()
+   WHERE id = p_request_id;
+
+  PERFORM app_private.audit('membership_request', p_request_id, 'membership_accepted',
+    jsonb_build_object('payment_id', v_pay.id, 'amount_cents', v_pay.amount_cents));
+  RETURN jsonb_build_object('payment_id', v_pay.id, 'amount_cents', v_pay.amount_cents, 'currency', 'INR',
+                            'receipt', v_pay.receipt, 'provider_order_id', NULL, 'expires_at', v_pay.expires_at);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.decline_membership_quote(p_request_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_profile uuid := public.current_profile_id();
+BEGIN
+  UPDATE public.membership_requests SET status = 'declined', updated_at = now()
+   WHERE id = p_request_id AND customer_profile_id = v_profile AND status = 'quoted';
+  IF NOT FOUND THEN RAISE EXCEPTION 'This quote can no longer be declined'; END IF;
+  PERFORM app_private.audit('membership_request', p_request_id, 'membership_declined');
+END $$;
+
+-- Housekeeping, run by a scheduled job (pg_cron) or the API: quotes nobody accepted in time.
+CREATE OR REPLACE FUNCTION app_private.expire_membership_quotes() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE n integer;
+BEGIN
+  UPDATE public.membership_requests SET status = 'expired', updated_at = now()
+   WHERE status = 'quoted' AND quote_expires_at < now();
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+
+-- ───────────────────────── grants ─────────────────────────
+
+CREATE OR REPLACE FUNCTION public.start_membership_checkout(
+  p_vehicle_id uuid,
+  p_weekly_pattern jsonb,
+  p_duration_months integer,
+  p_time_slot public.time_slot,
+  p_start_date date,
+  p_address_id uuid DEFAULT NULL,
+  p_parking_location text DEFAULT NULL,
+  p_customer_notes text DEFAULT NULL,
+  p_target_completion_time text DEFAULT NULL,
+  p_custom_dates jsonb DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_pattern jsonb;
+  v_custom jsonb;
+  v_same uuid;
+  v_id uuid;
+  v_req public.membership_requests%ROWTYPE;
+  v_final bigint;
+  v_pay jsonb;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+
+  -- Retrying the very same plan while its payment is still open: hand back that payment instead of making another.
+  IF jsonb_typeof(p_weekly_pattern) = 'array' AND jsonb_array_length(p_weekly_pattern) > 0 THEN
+    BEGIN
+      SELECT jsonb_agg(jsonb_build_object('weekday', (e->>'weekday')::int, 'kind', e->>'kind') ORDER BY (e->>'weekday')::int)
+        INTO v_pattern FROM jsonb_array_elements(p_weekly_pattern) e;
+      IF p_custom_dates IS NOT NULL THEN
+        SELECT jsonb_agg(jsonb_build_object('date', (e->>'date')::date, 'kind', e->>'kind') ORDER BY (e->>'date')::date)
+          INTO v_custom FROM jsonb_array_elements(p_custom_dates) e;
+      END IF;
+      SELECT r.id INTO v_same
+        FROM public.membership_requests r JOIN public.payments pay ON pay.id = r.payment_id
+        JOIN public.vehicles v ON v.id = r.vehicle_id
+       WHERE r.customer_profile_id = v_profile AND r.vehicle_id = p_vehicle_id AND r.status = 'accepted'
+         AND pay.status = 'pending' AND pay.expires_at > now()
+         AND r.weekly_pattern = v_pattern AND r.duration_months = p_duration_months AND r.time_slot = p_time_slot AND r.start_date = p_start_date
+         AND r.custom_dates IS NOT DISTINCT FROM v_custom
+         AND r.address_id IS NOT DISTINCT FROM COALESCE(p_address_id, v.address_id)
+       LIMIT 1;
+    EXCEPTION WHEN OTHERS THEN
+      v_same := NULL; -- malformed input is reported by the validation below
+    END;
+    IF v_same IS NOT NULL THEN
+      v_pay := public.accept_membership_quote(v_same);
+      RETURN v_pay || jsonb_build_object('request_id', v_same);
+    END IF;
+  END IF;
+
+  -- A different plan for the same vehicle replaces this customer's unfinished checkout (it must not block a fresh one).
+  UPDATE public.payments SET status = 'failed', updated_at = now()
+   WHERE status = 'pending' AND id IN (SELECT payment_id FROM public.membership_requests
+                                        WHERE customer_profile_id = v_profile AND vehicle_id = p_vehicle_id
+                                          AND status IN ('quoted', 'accepted') AND payment_id IS NOT NULL);
+  UPDATE public.membership_requests SET status = 'cancelled', updated_at = now()
+   WHERE customer_profile_id = v_profile AND vehicle_id = p_vehicle_id AND status IN ('submitted', 'quoted', 'accepted');
+
+  -- Validates everything (vehicle ownership, address, start date, the mix, the length) and stores the rate-card price.
+  v_id := public.create_membership_request(p_vehicle_id, p_weekly_pattern, p_duration_months, p_time_slot, p_start_date,
+                                           p_address_id, p_parking_location, p_customer_notes, p_target_completion_time, p_custom_dates);
+
+  SELECT * INTO v_req FROM public.membership_requests WHERE id = v_id FOR UPDATE;
+  v_final := (v_req.system_quote->>'final_cents')::bigint;
+  UPDATE public.membership_requests
+     SET status = 'quoted', adjustment_cents = 0, adjustment_reason = NULL, quoted_amount_cents = v_final::int,
+         quoted_breakdown = v_req.system_quote || jsonb_build_object('adjustment', jsonb_build_object('cents', 0, 'reason', NULL), 'final_cents', v_final),
+         quote_expires_at = now() + make_interval(mins => app_private.setting('payment_intent_minutes') + 5),
+         reviewed_at = now(), updated_at = now()
+   WHERE id = v_id;
+
+  PERFORM app_private.audit('membership_request', v_id, 'membership_checkout_started',
+    jsonb_build_object('quoted_amount_cents', v_final, 'frequency_per_week', v_req.frequency_per_week, 'duration_months', v_req.duration_months));
+
+  -- Opens the pending payment for exactly the stored price.
+  v_pay := public.accept_membership_quote(v_id);
+  RETURN v_pay || jsonb_build_object('request_id', v_id);
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.fulfil_membership(p_pay public.payments) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_req public.membership_requests%ROWTYPE;
+  v_vehicle public.vehicles%ROWTYPE;
+  v_b jsonb;
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_start date;
+  v_start_at timestamptz;
+  v_end_at timestamptz;
+  v_weeks integer := app_private.setting('weeks_per_month');
+  v_total integer;
+  v_subtotal integer;
+  v_total_discount integer;
+  v_adj integer;
+  v_base integer;
+  v_discount integer;
+  v_membership uuid;
+  v_schedule uuid;
+  v_occ uuid;
+  v_booking uuid;
+  v_created integer := 0;
+  v_end_date date;
+  v_respect boolean := true;
+  w record;
+  v_kind text;
+  v_service uuid;
+  line jsonb;
+BEGIN
+  SELECT * INTO v_req FROM public.membership_requests
+   WHERE id = (p_pay.intent->>'request_id')::uuid AND payment_id = p_pay.id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'request_not_found'; END IF;
+  IF v_req.status <> 'accepted' THEN RAISE EXCEPTION 'request_not_accepted'; END IF;
+  IF v_req.customer_profile_id <> p_pay.customer_profile_id THEN RAISE EXCEPTION 'request_owner_mismatch'; END IF;
+  IF v_req.quoted_amount_cents IS DISTINCT FROM p_pay.amount_cents THEN RAISE EXCEPTION 'request_amount_mismatch'; END IF;
+
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = v_req.vehicle_id AND customer_profile_id = v_req.customer_profile_id AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'vehicle_unavailable'; END IF;
+
+  v_b := v_req.quoted_breakdown;
+  v_subtotal := (v_b->>'subtotal_cents')::integer;
+  v_total_discount := (v_b->>'total_discount_cents')::integer;
+  v_adj := COALESCE((v_b->'adjustment'->>'cents')::integer, 0);
+  v_base := v_subtotal + GREATEST(v_adj, 0);          -- a surcharge is part of the base
+  v_discount := v_total_discount + GREATEST(-v_adj, 0); -- an extra WASHO discount is part of the discount
+  IF v_base - v_discount <> v_req.quoted_amount_cents THEN RAISE EXCEPTION 'breakdown_does_not_add_up'; END IF;
+
+  -- Never start in the past if the customer paid late.
+  v_start := GREATEST(v_req.start_date, v_today + app_private.setting('membership_min_lead_days'));
+  v_start_at := (v_start::timestamp AT TIME ZONE 'Asia/Kolkata');
+  v_end_at := v_start_at + make_interval(months => v_req.duration_months) - interval '1 day'; -- same formula the table trigger enforces
+  v_total := v_req.frequency_per_week * v_weeks * v_req.duration_months;
+
+  INSERT INTO public.memberships (customer_profile_id, status, duration_months, quantity_per_period, start_at, end_at,
+                                  base_amount_cents, discount_amount_cents, final_amount_cents, pricing_snapshot, membership_request_id)
+  VALUES (v_req.customer_profile_id, 'active', v_req.duration_months, v_req.frequency_per_week * v_weeks, v_start_at, v_end_at,
+          v_base, v_discount, v_req.quoted_amount_cents,
+          v_b || jsonb_build_object('request_id', v_req.id, 'payment_id', p_pay.id, 'effective_start_date', v_start, 'requested_start_date', v_req.start_date),
+          v_req.id)
+  RETURNING id INTO v_membership;
+
+  FOR line IN SELECT * FROM jsonb_array_elements(v_b->'lines') LOOP
+    INSERT INTO public.membership_services (membership_id, service_id, vehicle_id, quantity_per_period)
+    VALUES (v_membership, (line->>'service_id')::uuid, v_vehicle.id, (line->>'per_week')::integer * v_weeks);
+  END LOOP;
+
+  INSERT INTO public.membership_schedules (membership_id, schedule_name, timezone_name, schedule_pattern, is_active)
+  VALUES (v_membership, 'default', 'Asia/Kolkata',
+          jsonb_build_object('weekly_pattern', v_req.weekly_pattern, 'time_slot', v_req.time_slot,
+                             'start_date', v_start, 'target_completion_time', v_req.target_completion_time, 'custom', v_req.custom_dates IS NOT NULL),
+          true)
+  RETURNING id INTO v_schedule;
+
+  -- Lay out exactly v_total washes: on the exact dates the customer picked, or on their chosen weekdays. On weekdays, a date that already has a live wash for this
+  -- vehicle, or that is fully booked (Admin -> Capacity), is passed over and the wash goes to the next chosen day, so the customer always gets every wash they
+  -- paid for. If the crowded days leave no room, the crowd limit gives way: a paid membership is never refused for it.
+  v_end_date := (v_end_at AT TIME ZONE 'Asia/Kolkata')::date;
+  IF v_req.custom_dates IS NULL AND (SELECT count(*) FROM app_private.plan_membership_washes(v_vehicle.id, v_start, v_end_date, v_req.weekly_pattern, v_total, v_req.time_slot, true)) < v_total THEN
+    v_respect := false;
+  END IF;
+  FOR w IN
+    SELECT x.wash_date, x.kind FROM (
+      SELECT (e->>'date')::date AS wash_date, e->>'kind' AS kind FROM jsonb_array_elements(COALESCE(v_req.custom_dates, '[]'::jsonb)) e
+      UNION ALL
+      SELECT p.wash_date, p.kind FROM app_private.plan_membership_washes(v_vehicle.id, v_start, v_end_date, v_req.weekly_pattern, v_total, v_req.time_slot, v_respect) p
+       WHERE v_req.custom_dates IS NULL
+    ) x ORDER BY x.wash_date
+  LOOP
+    IF w.wash_date < v_start OR w.wash_date > v_end_date OR app_private.vehicle_has_live_booking(v_vehicle.id, w.wash_date) THEN RAISE EXCEPTION 'schedule_does_not_fit'; END IF;
+    v_kind := w.kind;
+    SELECT service_id INTO v_service FROM public.membership_service_options WHERE vehicle_type = v_vehicle.vehicle_type AND wash_kind = v_kind;
+    INSERT INTO public.membership_schedule_occurrences (membership_schedule_id, original_date, "current_date", time_slot, status)
+    VALUES (v_schedule, w.wash_date, w.wash_date, v_req.time_slot, 'scheduled') RETURNING id INTO v_occ;
+    INSERT INTO public.bookings (customer_profile_id, vehicle_id, service_id, membership_id, membership_schedule_occurrence_id, booking_type,
+                                 scheduled_date, time_slot, status, notes, address_id, parking_location, target_completion_time, source)
+    VALUES (v_req.customer_profile_id, v_vehicle.id, v_service, v_membership, v_occ, 'membership', w.wash_date, v_req.time_slot, 'confirmed',
+            'Membership wash', v_req.address_id, v_req.parking_location, v_req.target_completion_time, 'membership_schedule')
+    RETURNING id INTO v_booking;
+    INSERT INTO public.booking_events (booking_id, event_type, event_metadata)
+    VALUES (v_booking, 'booking_created', jsonb_build_object('booking_type', 'membership', 'source', 'membership_schedule', 'membership_id', v_membership));
+    v_created := v_created + 1;
+  END LOOP;
+  IF v_created <> v_total THEN RAISE EXCEPTION 'schedule_does_not_fit'; END IF;
+
+  UPDATE public.membership_requests SET status = 'active', membership_id = v_membership, updated_at = now() WHERE id = v_req.id;
+
+  INSERT INTO public.notifications (profile_id, category, title, body, reference_id) VALUES
+    (v_req.customer_profile_id, 'membership_approved', 'Your WASHO membership is active',
+     v_total || ' washes are scheduled, starting ' || to_char(v_start, 'Dy DD Mon') || '.', v_membership),
+    (v_req.customer_profile_id, 'payment_successful', 'Payment received', 'We received your payment. Thank you!', v_membership);
+
+  PERFORM app_private.audit('membership', v_membership, 'membership_activated',
+    jsonb_build_object('request_id', v_req.id, 'payment_id', p_pay.id, 'washes', v_created, 'custom_dates', v_req.custom_dates IS NOT NULL, 'start', v_start));
+  RETURN v_membership;
+END $$;
+
+REVOKE ALL ON FUNCTION app_private.membership_term_end(date, integer), app_private.plan_membership_washes(uuid, date, date, jsonb, integer, public.time_slot, boolean),
+  app_private.check_custom_dates(uuid, date, date, jsonb, integer, public.time_slot, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.preview_membership_dates(uuid, jsonb, integer, public.time_slot, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.preview_membership_dates(uuid, jsonb, integer, public.time_slot, date) TO authenticated;
+REVOKE ALL ON FUNCTION public.create_membership_request(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_membership_request(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text, jsonb) TO authenticated;
+REVOKE ALL ON FUNCTION public.start_membership_checkout(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.start_membership_checkout(uuid, jsonb, integer, public.time_slot, date, uuid, text, text, text, jsonb) TO authenticated;
+REVOKE ALL ON FUNCTION app_private.fulfil_membership(public.payments) FROM PUBLIC, anon, authenticated;
+
+-- ═════════════ 20261004000021_worker_reschedule_and_remove_plans.sql ═════════════
+-- 20261004000021_worker_reschedule_and_remove_plans.sql
+-- SAFE / additive and re-runnable. Two small things:
+--
+-- 1. A SPECIALIST can move a membership wash when the customer's vehicle is not available that day.
+--    worker_reschedule_wash(booking, new_date, new_slot?, reason?) uses the same core as the customer's and the admin's reschedule
+--    (app_private.reschedule_wash), so the same rules hold: the membership must be active, the wash not started, the new day inside the term,
+--    no other wash for that vehicle that day. What differs: a specialist may choose any day from today on (a customer needs 2 days' notice),
+--    only for a wash they hold, and the wash stays with them on its new date unless the membership has a different regular specialist.
+--    The booking's timeline says it was the specialist who moved it and why (the customer sees it).
+--
+-- 2. A CUSTOMER can remove a plan from their own pages: a plan they started but never paid for, or a membership / request that has ended.
+--    Nothing is deleted: customer_hidden_plans remembers what they cleared (admins still see everything), and an unpaid plan's checkout is
+--    stopped (its open payment is marked failed, the request cancelled), the same way starting a different plan already does.
+--    An active membership and a payment that has come in are never touched.
+
+-- ───────────────────────── 1. the shared reschedule core also names the specialist ─────────────────────────
+-- Same function as migration 06; the only change is the 'by' value in the booking event: customer | worker | admin.
+CREATE OR REPLACE FUNCTION app_private.reschedule_wash(
+  p_occurrence_id uuid, p_new_date date, p_new_slot public.time_slot,
+  p_actor uuid,            -- profile making the change
+  p_customer uuid,         -- non-null: the caller must own the membership (customer path); null: staff path
+  p_min_date date,         -- earliest date allowed for this caller
+  p_reason text DEFAULT NULL
+) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  o public.membership_schedule_occurrences%ROWTYPE;
+  v_membership public.memberships%ROWTYPE;
+  v_booking public.bookings%ROWTYPE;
+  v_worker uuid;
+BEGIN
+  SELECT * INTO o FROM public.membership_schedule_occurrences WHERE id = p_occurrence_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wash not found'; END IF;
+
+  SELECT m.* INTO v_membership
+    FROM public.membership_schedules ms JOIN public.memberships m ON m.id = ms.membership_id
+   WHERE ms.id = o.membership_schedule_id;
+  IF p_customer IS NOT NULL AND v_membership.customer_profile_id <> p_customer THEN RAISE EXCEPTION 'Wash not found'; END IF;
+  IF v_membership.status <> 'active' THEN RAISE EXCEPTION 'This membership is not active'; END IF;
+
+  SELECT * INTO v_booking FROM public.bookings WHERE membership_schedule_occurrence_id = p_occurrence_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wash not found'; END IF;
+  IF v_booking.status NOT IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'rescheduled') THEN
+    RAISE EXCEPTION 'This wash is % and cannot be rescheduled', v_booking.status;
+  END IF;
+
+  IF p_new_date IS NULL OR p_new_date < p_min_date THEN
+    RAISE EXCEPTION 'Washes need at least 1 day of preparation. The earliest date is %', p_min_date;
+  END IF;
+  IF p_new_date < o.original_date THEN
+    RAISE EXCEPTION 'A wash cannot be moved earlier than its original date (%)', o.original_date;
+  END IF;
+  IF p_new_date > (v_membership.end_at AT TIME ZONE 'Asia/Kolkata')::date THEN
+    RAISE EXCEPTION 'Please choose a date within your membership, which ends on %', (v_membership.end_at AT TIME ZONE 'Asia/Kolkata')::date;
+  END IF;
+  IF p_new_date = o."current_date" AND p_new_slot = o.time_slot THEN
+    RAISE EXCEPTION 'That is already the date and time of this wash';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.bookings
+              WHERE vehicle_id = v_booking.vehicle_id AND scheduled_date = p_new_date AND id <> v_booking.id
+                AND status IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'in_progress')) THEN
+    RAISE EXCEPTION 'This vehicle already has a wash on that date';
+  END IF;
+
+  -- The two validation triggers require booking and occurrence to agree at every step, so move them in an
+  -- order where they always do: (1) the date (the occurrence trigger carries the booking along), then
+  -- (2) the slot on the occurrence, then (3) the same slot on the booking.
+  IF p_new_date <> o."current_date" THEN
+    UPDATE public.membership_schedule_occurrences
+       SET "current_date" = p_new_date, status = 'rescheduled', updated_at = now() WHERE id = p_occurrence_id;
+  END IF;
+  IF p_new_slot <> o.time_slot THEN
+    UPDATE public.membership_schedule_occurrences
+       SET time_slot = p_new_slot, status = 'rescheduled', updated_at = now() WHERE id = p_occurrence_id;
+  END IF;
+
+  UPDATE public.bookings
+     SET time_slot = p_new_slot, status = 'confirmed', customer_confirmed_at = NULL, updated_at = now(),
+         notes = COALESCE(notes, '') || E'\nRescheduled from ' || v_booking.scheduled_date::text || ' to ' || p_new_date::text
+   WHERE id = v_booking.id;
+
+  -- Whoever held the old date no longer does.
+  UPDATE public.worker_assignments SET is_active = false, unassigned_at = now() WHERE booking_id = v_booking.id AND is_active;
+
+  -- A membership with a regular specialist keeps that specialist on its washes.
+  SELECT p.id INTO v_worker FROM public.profiles p WHERE p.id = v_membership.assigned_worker_profile_id AND p.role = 'worker';
+  IF v_worker IS NOT NULL THEN
+    INSERT INTO public.worker_assignments (booking_id, worker_profile_id, is_active, assigned_at) VALUES (v_booking.id, v_worker, true, now());
+    UPDATE public.bookings SET status = 'worker_assigned' WHERE id = v_booking.id;
+  END IF;
+
+  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
+  VALUES (v_booking.id, 'rescheduled', p_actor,
+          jsonb_build_object('old_date', v_booking.scheduled_date, 'old_slot', v_booking.time_slot,
+                             'new_date', p_new_date, 'new_slot', p_new_slot,
+                             'by', CASE WHEN p_customer IS NOT NULL THEN 'customer'
+                                        WHEN EXISTS (SELECT 1 FROM public.profiles a WHERE a.id = p_actor AND a.role = 'worker') THEN 'worker'
+                                        ELSE 'admin' END,
+                             'reason', NULLIF(trim(p_reason), ''),
+                             'worker_profile_id', v_worker));
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION app_private.reschedule_wash(uuid, date, public.time_slot, uuid, uuid, date, text) FROM PUBLIC, anon, authenticated;
+
+-- A specialist moves a membership wash they hold (the vehicle is not available that day, or another reason).
+CREATE OR REPLACE FUNCTION public.worker_reschedule_wash(p_booking_id uuid, p_new_date date, p_new_slot public.time_slot DEFAULT NULL, p_reason text DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_worker uuid := public.current_profile_id();
+  v_b public.bookings%ROWTYPE;
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_slot public.time_slot;
+  v_reason text := COALESCE(NULLIF(btrim(COALESCE(p_reason, '')), ''), 'Vehicle was not available');
+BEGIN
+  IF NOT public.is_worker() OR NOT public.is_current_worker_assignment(p_booking_id) THEN
+    RAISE EXCEPTION 'Not authorized for this wash assignment';
+  END IF;
+  IF char_length(v_reason) > 300 THEN RAISE EXCEPTION 'Please keep the reason under 300 characters'; END IF;
+
+  SELECT * INTO v_b FROM public.bookings WHERE id = p_booking_id FOR UPDATE;
+  IF v_b.membership_schedule_occurrence_id IS NULL THEN
+    RAISE EXCEPTION 'Only a membership wash can be moved here. For a single wash, report the problem and WASHO will sort it out';
+  END IF;
+  IF v_b.status = 'in_progress' THEN RAISE EXCEPTION 'The wash has already started'; END IF;
+  IF p_new_date IS NULL THEN RAISE EXCEPTION 'Choose the new date'; END IF;
+  IF p_new_date < v_today THEN RAISE EXCEPTION 'Choose today or a later date'; END IF;
+  v_slot := COALESCE(p_new_slot, v_b.time_slot);
+
+  PERFORM app_private.reschedule_wash(v_b.membership_schedule_occurrence_id, p_new_date, v_slot, v_worker, NULL, v_today, v_reason);
+
+  -- The wash stays with this specialist on its new date, unless the membership has its own regular specialist (the core already gave it to them).
+  IF NOT EXISTS (SELECT 1 FROM public.worker_assignments WHERE booking_id = p_booking_id AND is_active) THEN
+    INSERT INTO public.worker_assignments (booking_id, worker_profile_id, is_active, assigned_at) VALUES (p_booking_id, v_worker, true, now());
+    UPDATE public.bookings SET status = 'worker_assigned', updated_at = now() WHERE id = p_booking_id;
+  END IF;
+
+  PERFORM app_private.audit('booking', p_booking_id, 'worker_rescheduled_wash',
+    jsonb_build_object('from_date', v_b.scheduled_date, 'to_date', p_new_date, 'slot', v_slot, 'reason', v_reason));
+  RETURN jsonb_build_object('booking_id', p_booking_id, 'old_date', v_b.scheduled_date, 'new_date', p_new_date, 'new_slot', v_slot);
+END $$;
+REVOKE ALL ON FUNCTION public.worker_reschedule_wash(uuid, date, public.time_slot, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.worker_reschedule_wash(uuid, date, public.time_slot, text) TO authenticated; -- is_worker() inside
+
+-- ───────────────────────── 2. a customer clears a plan from their own pages ─────────────────────────
+CREATE TABLE IF NOT EXISTS public.customer_hidden_plans (
+  customer_profile_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  ref_id uuid NOT NULL,
+  hidden_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (customer_profile_id, kind, ref_id),
+  CONSTRAINT customer_hidden_plans_kind_check CHECK (kind IN ('membership', 'membership_request'))
+);
+ALTER TABLE public.customer_hidden_plans ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS customer_hidden_plans_own_read ON public.customer_hidden_plans;
+CREATE POLICY customer_hidden_plans_own_read ON public.customer_hidden_plans FOR SELECT TO authenticated
+  USING (customer_profile_id = public.current_profile_id());
+REVOKE ALL ON public.customer_hidden_plans FROM anon, authenticated;
+GRANT SELECT ON public.customer_hidden_plans TO authenticated; -- RLS: their own rows only
+
+-- kind 'membership_request': a plan started but not paid, or an earlier request that has ended.  kind 'membership': one that has ended.
+-- Returns what happened: { removed, stopped_checkout }.
+CREATE OR REPLACE FUNCTION public.remove_my_plan(p_kind text, p_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_status text;
+  v_stopped boolean := false;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_kind = 'membership_request' THEN
+    SELECT status::text INTO v_status FROM public.membership_requests WHERE id = p_id AND customer_profile_id = v_profile FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Plan not found'; END IF;
+    IF v_status = 'active' THEN RAISE EXCEPTION 'This plan has been paid for and is now a membership'; END IF;
+    IF v_status IN ('submitted', 'quoted', 'accepted') THEN
+      -- Unpaid: stop its checkout. A payment that has already come in is never thrown away.
+      IF EXISTS (SELECT 1 FROM public.payments WHERE membership_request_id = p_id AND status::text NOT IN ('pending', 'failed', 'cancelled', 'expired')) THEN
+        RAISE EXCEPTION 'A payment for this plan has been received. It will show up as a membership shortly';
+      END IF;
+      UPDATE public.payments SET status = 'failed', updated_at = now() WHERE membership_request_id = p_id AND status = 'pending';
+      UPDATE public.membership_requests SET status = 'cancelled', updated_at = now() WHERE id = p_id;
+      PERFORM app_private.audit('membership_request', p_id, 'membership_plan_removed_by_customer', jsonb_build_object('was', v_status));
+      v_stopped := true;
+    END IF;
+  ELSIF p_kind = 'membership' THEN
+    SELECT status::text INTO v_status FROM public.memberships WHERE id = p_id AND customer_profile_id = v_profile;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Plan not found'; END IF;
+    IF v_status = 'active' THEN RAISE EXCEPTION 'An active membership cannot be removed. Contact WASHO to pause or end it'; END IF;
+  ELSE
+    RAISE EXCEPTION 'Unknown kind of plan';
+  END IF;
+
+  INSERT INTO public.customer_hidden_plans (customer_profile_id, kind, ref_id) VALUES (v_profile, p_kind, p_id) ON CONFLICT DO NOTHING;
+  RETURN jsonb_build_object('removed', true, 'stopped_checkout', v_stopped);
+END $$;
+REVOKE ALL ON FUNCTION public.remove_my_plan(text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.remove_my_plan(text, uuid) TO authenticated;
+
 COMMIT;

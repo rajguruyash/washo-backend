@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 import './index.css';
 import { Atmosphere } from './components/brand/Atmosphere';
+import { SiteLoader } from './components/SiteLoader';
 import { ToastProvider } from './components/ui/Toast';
 import { ApiError } from './lib/http';
 import { captureSource } from './lib/source';
@@ -32,6 +33,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
           <ToastProvider>
             <Atmosphere />
             <RouterProvider router={router} />
+            <SiteLoader />
           </ToastProvider>
         </AuthProvider>
       </MotionConfig>

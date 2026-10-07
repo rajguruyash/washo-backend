@@ -1,7 +1,9 @@
-import { ArrowRight, BadgeCheck, CalendarDays, Car, Clock, Gift, Plus } from 'lucide-react';
+import { ArrowRight, BadgeCheck, CalendarDays, Camera, Car, Clock, Gift, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
+import { CampaignGlare } from '../../components/CampaignGlare';
 import { PackOfferCard } from '../../components/PackOfferCard';
+import { RemovePlan } from '../../components/RemovePlan';
 import { EmptyState, PageHeader } from '../../components/EmptyState';
 import { BookingCard } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
@@ -38,35 +40,41 @@ export default function Dashboard() {
       ) : (
         <div className="space-y-8">
           {view === 'eligible' && c && (
-            <Link to="/app/claim" className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
+            <CampaignGlare><Link to="/app/claim" className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
               <div className="min-w-0 flex-1">
                 <p className="font-bold">{c.name}: claim your free wash</p>
                 <p className="text-sm text-fog">A free body wash {audience(c).short}. Claim by {dayOf(c.claim_closes_on)}{c.spots_left <= 30 ? ` · only ${c.spots_left} left` : ''}.</p>
               </div>
               <ArrowRight className="h-5 w-5 text-fog" />
-            </Link>
+            </Link></CampaignGlare>
           )}
           {view === 'booked' && me && 'booking_id' in me && (
-            <Link to={`/app/bookings/${me.booking_id}`} className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
+            <CampaignGlare><Link to={`/app/bookings/${me.booking_id}`} className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
               <div className="min-w-0 flex-1">
                 <p className="font-bold">Your free wash is booked</p>
                 <p className="text-sm text-fog">{me.scheduled_date ? `${prettyDate(me.scheduled_date)}${me.time_slot ? `, ${slotLabel(me.time_slot)}` : ''}` : 'See the details'}</p>
               </div>
               <ArrowRight className="h-5 w-5 text-fog" />
-            </Link>
+            </Link></CampaignGlare>
           )}
           {campaign?.offer && <PackOfferCard offer={campaign.offer} />}
           {open.map((r) => (
-            <Link key={r.id} to={`/app/membership/requests/${r.id}`} className="glass flex items-center gap-4 border-washo-400/30 p-5 transition-colors hover:border-washo-400/60">
-              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Clock className="h-6 w-6" /></span>
-              <div className="min-w-0 flex-1">
-                <p className="font-bold">{r.status === 'quoted' ? 'Your price is ready' : r.status === 'accepted' ? 'Finish your payment' : 'WASHO is reviewing your request'}</p>
-                <p className="text-sm text-fog">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} · {r.vehicle_model}</p>
+            <div key={r.id} className="glass border-washo-400/30 p-5 transition-colors hover:border-washo-400/60">
+              <Link to={`/app/membership/requests/${r.id}`} className="flex items-center gap-4">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Clock className="h-6 w-6" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold">{r.status === 'quoted' ? 'Your price is ready' : r.status === 'accepted' ? 'Finish your payment' : 'WASHO is reviewing your request'}</p>
+                  <p className="text-sm text-fog">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} · {r.vehicle_model}</p>
+                </div>
+                <ArrowRight className="h-5 w-5 text-fog" />
+              </Link>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-4">
+                <p className="text-xs text-fog">Changed your mind? Nothing has been charged.</p>
+                <RemovePlan kind="request" id={r.id} unpaid />
               </div>
-              <ArrowRight className="h-5 w-5 text-fog" />
-            </Link>
+            </div>
           ))}
 
           {(active.length > 0 || !open.length) && <section aria-labelledby="mem">
@@ -74,7 +82,8 @@ export default function Dashboard() {
             {active.length ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {active.map((m) => (
-                  <Link key={m.id} to={`/app/membership/${m.id}`} className="glass block p-5 transition-colors hover:border-washo-400/40">
+                  <div key={m.id} className="glass p-5 transition-colors hover:border-washo-400/40">
+                  <Link to={`/app/membership/${m.id}`} className="block">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="eyebrow">{m.reference_code}</p>
@@ -86,10 +95,12 @@ export default function Dashboard() {
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-washo-500 to-washo-300" style={{ width: `${m.washes_total ? (m.washes_completed / m.washes_total) * 100 : 0}%` }} /></div>
                     <p className="mt-2 text-xs text-fog">{m.washes_completed} of {m.washes_total} washes done{m.next_wash ? ` · next ${prettyDate(m.next_wash.scheduled_date)}, ${slotLabel(m.next_wash.time_slot)}` : ''}</p>
                   </Link>
+                  {m.washes_completed > 0 && <Link to={`/app/membership/${m.id}?tab=completed`} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-washo-300 hover:text-white"><Camera className="h-3.5 w-3.5" /> See the {m.washes_completed} wash{m.washes_completed > 1 ? 'es' : ''} done, with photos</Link>}
+                  </div>
                 ))}
               </div>
             ) : !open.length ? (
-              <EmptyState title="Start your WASHO membership" text="Choose 1 to 7 washes per week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="Start your WASHO membership" text="Choose how many Body washes and Deep cleans you want each week, pick your days, and pay once. Every wash of your plan is scheduled for you." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             ) : null}
           </section>}
 

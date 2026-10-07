@@ -95,6 +95,10 @@ export const vehiclePlural: Record<VehicleType, string> = { bike: 'bikes', car: 
 
 export const percent = (bp: number): string => `${bp / 100}%`;
 
+/** The Pune calendar date (YYYY-MM-DD) of a timestamp. A term that starts at midnight in Pune is the evening before in UTC, so never cut the date off the ISO text. */
+export const istDay = (iso: string): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+
 /** Stored discount labels read "3 washes a week"; the site says "per week". */
 export const perWeekLabel = (label: string | null | undefined): string | undefined => label?.replace(/\ba week\b/, 'per week') ?? undefined;
 

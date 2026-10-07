@@ -193,6 +193,8 @@ const membershipCheckoutSchema = z.object({
   address_id: z.string().uuid().nullish(),
   parking_location: z.string().trim().max(160).optional(),
   customer_notes: z.string().trim().max(500).optional(),
+  // Exact dates, instead of letting the plan land on its weekdays. The database checks every rule again.
+  custom_dates: z.array(z.object({ date: isoDate, kind: z.enum(['body', 'deep']) })).min(1).max(400).optional(),
 });
 
 // Pay for a custom membership straight away. The database validates the plan, prices it from the rate card (every discount explicit)
@@ -206,9 +208,13 @@ bookingsRouter.post(
     const m = parse(membershipCheckoutSchema, req.body);
     const intent = await req.db(async (c) =>
       (
-        await c.query('SELECT public.start_membership_checkout($1, $2::jsonb, $3, $4::public.time_slot, $5::date, $6, $7, $8) AS r', [
-          m.vehicle_id, JSON.stringify(m.weekly_pattern), m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null,
-        ])
+        await (m.custom_dates
+          ? c.query('SELECT public.start_membership_checkout($1, $2::jsonb, $3, $4::public.time_slot, $5::date, $6, $7, $8, NULL, $9::jsonb) AS r', [
+              m.vehicle_id, JSON.stringify(m.weekly_pattern), m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null, JSON.stringify(m.custom_dates),
+            ])
+          : c.query('SELECT public.start_membership_checkout($1, $2::jsonb, $3, $4::public.time_slot, $5::date, $6, $7, $8) AS r', [
+              m.vehicle_id, JSON.stringify(m.weekly_pattern), m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null,
+            ]))
       ).rows[0].r
     );
     res.json({ success: true, order: await openOrder(req.session!.profile, intent) });

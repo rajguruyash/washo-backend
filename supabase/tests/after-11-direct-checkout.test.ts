@@ -101,14 +101,13 @@ describe('start_membership_checkout', () => {
       expect(r.request_id).not.toBe(old);
     }));
 
-  it('enforces the same rules as a request: ownership, the mix, 1 to 7 a week, start notice', async () =>
+  it('enforces the same rules as a request: ownership, one wash per day, 1 to 7 a week, start notice', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const other = await setup(s);
       const err = async (o: any) => { await s.as('authenticated', c.u.authId); return s.err(`select public.start_membership_checkout('${o.veh ?? c.veh}','${JSON.stringify(o.pattern ?? PATTERN_3)}'::jsonb,${o.months ?? 1},'morning','${o.start ?? c.start}'::date,'${c.addr}')`); };
       expect(await err({ veh: other.veh })).toMatch(/Vehicle not found/);
-      expect(await err({ pattern: [{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }] })).toMatch(/1 body wash \+ 1 deep/);
-      expect(await err({ pattern: [1, 2, 3, 4].map((d) => ({ weekday: d, kind: 'body' })) })).toMatch(/mixes body washes and deep cleanings/);
+      expect(await err({ pattern: [{ weekday: 1, kind: 'deep' }, { weekday: 1, kind: 'body' }] })).toMatch(/different day/);
       expect(await err({ months: 2 })).toMatch(/1, 3, 6 or 12 months/);
       expect(await err({ start: await istDate(s, 0) })).toMatch(/can start from/);
       await s.as('postgres');

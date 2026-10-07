@@ -1,12 +1,13 @@
-import { BadgeCheck, ChevronRight, Plus } from 'lucide-react';
+import { BadgeCheck, Camera, ChevronRight, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { EmptyState, ErrorState, PageHeader } from '../../components/EmptyState';
+import { RemovePlan } from '../../components/RemovePlan';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
 import { ButtonLink } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { fullDate, prettyDate } from '../../lib/format';
+import { fullDate, istDay, prettyDate } from '../../lib/format';
 import { useMemberships, useRequests } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 
@@ -41,13 +42,19 @@ export default function Membership() {
               <h2 id="reqs" className="mb-3 text-lg font-bold">Earlier requests</h2>
               <div className="space-y-3">
                 {reqs.map((r) => (
-                  <Link key={r.id} to={`/app/membership/requests/${r.id}`} className="glass group flex items-center gap-4 p-4 transition-colors hover:border-washo-400/40">
-                    <div className="min-w-0 flex-1">
-                      <p className="flex flex-wrap items-center gap-2 font-bold">{r.frequency_per_week} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} <Badge tone={reqLabel[r.status].tone}>{reqLabel[r.status].label}</Badge></p>
-                      <p className="mt-1 text-xs text-fog">{r.reference_code} · {r.vehicle_model} · {patternLabel(r.weekly_pattern)}</p>
+                  <div key={r.id} className="glass p-4 transition-colors hover:border-washo-400/40">
+                    <Link to={`/app/membership/requests/${r.id}`} className="group flex items-center gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-2 font-bold">{r.frequency_per_week} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} <Badge tone={reqLabel[r.status].tone}>{reqLabel[r.status].label}</Badge></p>
+                        <p className="mt-1 text-xs text-fog">{r.reference_code} · {r.vehicle_model} · {patternLabel(r.weekly_pattern)}</p>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-fog transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
+                      <p className="text-xs text-fog">{['submitted', 'quoted', 'accepted'].includes(r.status) ? 'Not paid for. Nothing has been charged.' : 'Closed.'}</p>
+                      <RemovePlan kind="request" id={r.id} unpaid={['submitted', 'quoted', 'accepted'].includes(r.status)} />
                     </div>
-                    <ChevronRight className="h-5 w-5 text-fog transition-transform group-hover:translate-x-0.5" />
-                  </Link>
+                  </div>
                 ))}
               </div>
             </section>
@@ -58,7 +65,8 @@ export default function Membership() {
             {memberships.data?.length ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {memberships.data.map((m) => (
-                  <Link key={m.id} to={`/app/membership/${m.id}`} className="glass block p-5 transition-colors hover:border-washo-400/40">
+                  <div key={m.id} className="glass p-5 transition-colors hover:border-washo-400/40">
+                  <Link to={`/app/membership/${m.id}`} className="block">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="eyebrow">{m.reference_code}</p>
@@ -69,12 +77,20 @@ export default function Membership() {
                     </div>
                     {m.registration_number && <Plate reg={m.registration_number} className="mt-3" />}
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-washo-500 to-washo-300" style={{ width: `${m.washes_total ? (m.washes_completed / m.washes_total) * 100 : 0}%` }} /></div>
-                    <p className="mt-2 text-xs text-fog">{m.washes_completed} of {m.washes_total} done · until {fullDate(m.end_at.slice(0, 10))}{m.next_wash ? ` · next ${prettyDate(m.next_wash.scheduled_date)}` : ''}</p>
+                    <p className="mt-2 text-xs text-fog">{m.washes_completed} of {m.washes_total} done · until {fullDate(istDay(m.end_at))}{m.next_wash ? ` · next ${prettyDate(m.next_wash.scheduled_date)}` : ''}</p>
                   </Link>
+                  {m.washes_completed > 0 && <Link to={`/app/membership/${m.id}?tab=completed`} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-washo-300 hover:text-white"><Camera className="h-3.5 w-3.5" /> See the {m.washes_completed} wash{m.washes_completed > 1 ? 'es' : ''} done, with photos</Link>}
+                  {m.status !== 'active' && (
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
+                      <p className="text-xs text-fog">This plan has ended.</p>
+                      <RemovePlan kind="membership" id={m.id} />
+                    </div>
+                  )}
+                  </div>
                 ))}
               </div>
             ) : (
-              <EmptyState title="No membership yet" text="Choose 1 to 7 washes per week. WASHO reviews your request and sends you a price. You only pay once you accept it." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="No membership yet" text="Choose how many Body washes and Deep cleans you want each week, pick your days, and pay once. Every wash of your plan is scheduled for you." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             )}
           </section>
         </div>

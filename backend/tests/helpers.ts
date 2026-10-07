@@ -29,7 +29,10 @@ export async function boot() {
   process.env.RAZORPAY_API_BASE = fake.razorpayBase;
   process.env.GEOCODE_URL = `${fake.url}/geo`;
   process.env.GEOCODE_MIN_INTERVAL_MS = '0';
+  process.env.CRON_SECRET = 'test-cron-secret-0123456789';
   process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
+  // The suite books far more washes on the same few days than a real day could take: lift the crowd limits for it (capacity tests set their own).
+  await fake.admin.query(`DO $$ BEGIN IF to_regclass('public.capacity_rules') IS NOT NULL THEN UPDATE public.capacity_rules SET day_busy = 400, day_full = 500, slot_busy = 400, slot_full = 500; END IF; END $$`);
   const { createApp } = await import('../src/app');
   server = createApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

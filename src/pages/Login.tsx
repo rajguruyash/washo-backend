@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, Loader2, Mail, MessageSquareText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, Mail, MessageSquareText } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { AvatarFull } from '../components/brand/Avatar';
 import { Logo } from '../components/brand/Logo';
+import { LoginCelebration } from '../components/LoginCelebration';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Field';
 import { cn } from '../lib/cn';
@@ -13,6 +14,7 @@ import type { Role } from '../lib/types';
 import { useAuth } from '../state/auth';
 
 type Step = 'phone' | 'otp' | 'done';
+const CELEBRATE_MS = 1900; // how long the "you're in" pop-up stays before the page moves on
 type OtpProblem = null | { kind: 'invalid' | 'throttled' | 'network'; message: string };
 
 const prettyPhone = (p: string) => `+91 ${p.slice(0, 5)} ${p.slice(5)}`;
@@ -61,6 +63,7 @@ export default function Login() {
   }, [params]);
 
   const [step, setStep] = useState<Step>('phone');
+  const [welcomeName, setWelcomeName] = useState<string | null>(null);
   const [phone, setPhone] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [sending, setSending] = useState(false);
@@ -128,8 +131,9 @@ export default function Login() {
       await post('/auth/otp/verify', { phone: digits, code: value, source: getSource() });
       // Signed in at the server. Load the profile before saying so: if that fails, show why instead of going quiet.
       const me = await refresh();
+      setWelcomeName(me.full_name ?? null);
       setStep('done');
-      setTimeout(() => navigate(next && next.startsWith(homeFor(me.role)) ? next : homeFor(me.role), { replace: true }), 800);
+      setTimeout(() => navigate(next && next.startsWith(homeFor(me.role)) ? next : homeFor(me.role), { replace: true }), CELEBRATE_MS);
     } catch (err) {
       setVerifying(false);
       setCode('');
@@ -327,18 +331,11 @@ export default function Login() {
                       </motion.div>
                     )}
 
-                    {step === 'done' && (
-                      <motion.div key="done" initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} className="py-8 text-center">
-                        <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 16 }} className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-ok/15 text-ok ring-8 ring-ok/10">
-                          <Check className="h-10 w-10" strokeWidth={3} />
-                        </motion.span>
-                        <h1 className="mt-6 text-3xl font-extrabold">You're in</h1>
-                        <p className="mt-2 text-fog">Taking you to WASHO…</p>
-                      </motion.div>
-                    )}
                   </>
                 )}
               </AnimatePresence>
+              {/* outside the AnimatePresence above, whose initial={false} would skip the pop-up's own opening animation */}
+              {step === 'done' && <LoginCelebration name={welcomeName} ms={CELEBRATE_MS} />}
             </motion.div>
           </div>
         </div>

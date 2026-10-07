@@ -42,7 +42,8 @@ describe('creating a request', () => {
       const q = (v: string, pattern: any, start: string) =>
         s.err(`select public.create_membership_request('${v}','${JSON.stringify(pattern)}'::jsonb,3,'morning','${start}'::date)`);
       expect(await q(veh, PATTERN_3, ok)).toMatch(/Vehicle not found/);
-      expect(await q(mine, [{ weekday: 1, kind: 'body' }, { weekday: 2, kind: 'body' }], ok)).toMatch(/1 body wash \+ 1 deep/);
+      expect(await q(mine, [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }], ok)).toMatch(/different day/);
+      expect(await q(mine, [], ok)).toMatch(/1 to 7 washes|Choose your washes/);
       expect(await q(mine, PATTERN_3, tooSoon)).toMatch(/can start from/);
     }));
 

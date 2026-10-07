@@ -2,6 +2,7 @@ import { animate, useReducedMotion } from 'framer-motion';
 import { ArrowRight, CalendarCheck, Check, Gift, MapPin, ShieldCheck, Smartphone, Sparkles, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CampaignGlare } from '../components/CampaignGlare';
 import { ErrorState } from '../components/EmptyState';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
@@ -94,11 +95,13 @@ export default function Offer() {
           <div className="mt-8"><ClaimButton campaign={c} /></div>
         </div>
         <Reveal>
+          <CampaignGlare>
           <div className="glass-strong relative overflow-hidden p-8 text-center">
             <p className="eyebrow">Body wash for bike, car or SUV</p>
             <div className="mt-4"><FreeCountdown from={carBody ? Math.round(carBody / 100) : 150} /></div>
             <p className="mt-4 text-sm text-fog">{carBody ? `A car body wash is ${rupees(carBody)}. ` : ''}{audience(c).costs}</p>
           </div>
+          </CampaignGlare>
         </Reveal>
       </section>
 
@@ -129,7 +132,7 @@ export default function Offer() {
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Cancel it and the claim comes back, while the offer is still open.</li>
           </ul>
         </div>
-        <div className="glass border-offer/25 p-6">
+        <CampaignGlare><div className="glass h-full border-offer/25 p-6">
           <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="h-5 w-5 text-offer" aria-hidden /> Then, a welcome offer</h2>
           <p className="mt-2 text-sm text-fog">Loved it? For {c.pack_offer.days} days after your free wash, a membership costs less:</p>
           <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
@@ -145,7 +148,7 @@ export default function Offer() {
             ))}
           </dl>
           <p className="mt-3 text-xs text-fog">{offerRates(c.pack_offer)}. Applied for you at checkout.</p>
-        </div>
+        </div></CampaignGlare>
       </section>
 
       <section className="mt-16 rounded-3xl border border-white/[0.09] bg-gradient-to-br from-washo-600/25 to-transparent p-8 text-center">

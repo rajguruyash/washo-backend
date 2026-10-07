@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
 import { QuoteBreakdownView } from '../../components/Quote';
+import { RemovePlan } from '../../components/RemovePlan';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
 import { SlideToPay } from '../../components/SlideToPay';
@@ -112,6 +113,10 @@ export default function RequestDetail() {
               {r.status === 'quoted' && <Button size="lg" variant="glass" onClick={() => setConfirmDecline(true)}>Decline</Button>}
             </div>
             <p className="mt-3 text-center text-xs text-fog">Your membership and washes are created only after your payment is verified.</p>
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-4">
+              <p className="text-xs text-fog">Changed your mind? Nothing has been charged.</p>
+              <RemovePlan kind="request" id={r.id} unpaid onRemoved={() => navigate('/app/membership', { replace: true })} />
+            </div>
           </div>
         )}
 
@@ -136,6 +141,7 @@ export default function RequestDetail() {
           <div className="glass p-6 text-center">
             <p className="font-semibold">{r.status === 'expired' ? 'This quote has expired.' : 'This request is closed.'}</p>
             <ButtonLink to="/app/membership/new" className="mt-4">Start a new request</ButtonLink>
+            <div className="mt-5 flex justify-center border-t border-white/[0.07] pt-4"><RemovePlan kind="request" id={r.id} onRemoved={() => navigate('/app/membership', { replace: true })} /></div>
           </div>
         )}
       </div>

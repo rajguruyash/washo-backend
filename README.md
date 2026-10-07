@@ -9,17 +9,18 @@ Razorpay edge functions. The mobile app is not touched by anything in this repo.
 
 ## What the website does
 
-- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → 1 to 7 washes a week (a toggle, with the price updating) → Body/Deep
-  combination and days → 1/3/6/12 months → start date and time slot → review and **pay**. The price is the rate card with every discount
-  as its own line; there is no approval step. Only after the Razorpay payment is **verified** does the membership activate and every wash get scheduled. Also: dashboard, membership detail with rescheduling
-  (washes can be rescheduled, not cancelled), single washes, booking details with before/after photos, vehicles, addresses.
+- **Customer** (`/app`): the **custom membership wizard** is the main product: vehicle → how many **Body washes** and how many **Deep cleans** a week (+ / − counters, up to 7 in total, an (i) on each explains what the wash includes, and the per-wash price follows the vehicle, so an SUV's Deep clean costs more) →
+  the days: "just add your preferred days and we will manage your whole month" (ONE row of the seven weekdays: tap a day for a Body wash, switch the brush to Deep cleans and tap the days for those, in another colour; a weekday has one wash) →  1/3/6/12 months → start date and time slot → review and **pay**. The price is the rate card with every discount
+  as its own line; there is no approval step. Only after the Razorpay payment is **verified** does the membership activate and every wash get scheduled. Any mix is allowed (even all Body, or all Deep; a bike only has the Body wash). Also: dashboard, membership detail with rescheduling
+  (washes can be rescheduled, not cancelled), single washes, booking details with before/after photos, vehicles, addresses. A hidden "Want to pick exact dates?" option on the start step opens a calendar for the whole term (nothing before today + 2 days, none after the term ends, one wash a day, at most the weekly number in any Monday to Sunday week, crowded days in amber and full ones in red). A reminder email a week before a membership ends opens the wizard with the old plan filled in (`/app/membership/new?renew=<id>`). Every wizard shows its progress as a React Bits Stepper (numbered circles that fill as you go; tap a finished step to go back). **Washes done**: a plan's page (and a link on the dashboard) lists the finished washes; tapping one opens what was done and its before and after photos, big on the same page. **Hold to remove**: a plan started but not paid for (on the dashboard and the Membership page), or one that has ended, is cleared with a press-and-hold button (React Bits Hold Button). Nothing is deleted: the unpaid plan's checkout is stopped, WASHO keeps its records, and an active membership or a payment that has come in is never touched.
 - **Specialist** (`/worker`, email + password): Today / In progress / Upcoming / Completed / Cancelled-moved queues, only the
   washes assigned to them; call customer → customer confirmed or call not picked up (wash stays scheduled) → start → before photos
-  → after photos → complete; issues and notes.
+  → after photos → complete; issues and notes. **Car not available?** On a membership wash the specialist can move it to the next day, the day after, or any day they choose (and another time window); it stays in their queue, the customer's timeline says the specialist moved it and why, and the usual rules hold (inside the membership, not on a day that vehicle already has a wash).
 - **Admin** (`/admin`, email + password, role from `profiles.role`): washes (book one for a customer, edit, assign, reschedule, cancel, history, photos),
   **History** (every past wash, newest first: filter by date, status, specialist, search; totals for what is shown), memberships (regular specialist), customers and specialists (add, edit, archive), services, prices and discounts, and payments or refunds that need a human.
-  See "Admin: create, edit, archive" below. **Campaigns**: free-wash offers for new customers (see "Free-wash campaigns").
-- **Free-wash campaign** (`/navratri`, banner on every public page while one is on): a new customer signs in by phone, adds a vehicle and address, picks a day and a time and slides to claim. No payment.
+  See "Admin: create, edit, archive" below. **Campaigns**: free-wash offers (see "Free-wash campaigns"). **Capacity**: how many vehicles a day and a time window can take (see "Crowd limits").
+- **Opening the site**: a loading screen (React Bits Drift Wall: a tilted, drifting wall of WASHO's own photos behind the logo) shows until the page and the sign-in check are ready (at least 1.5 s the first time in a tab, 0.6 s after a reload, never more than 7 s), then the home page's picture pixel-swaps from a dusty car to the WASHO crew (React Bits Pixel Swap). After sign-in a pop-up greets the customer by name (a tick that draws itself, ripples and droplets) before the app opens.
+- **Free-wash campaign** (`/navratri`, banner on every public page while one is on; the campaign blocks catch a gold glare of light, React Bits Glare Hover): a new customer signs in by phone, adds a vehicle and address, picks a day and a time and slides to claim. No payment.
 - No credit system anywhere.
 
 ## Run it locally (no Supabase project needed)
@@ -74,6 +75,22 @@ Nothing is refunded until an **admin approves it** (Admin → Needs attention �
 *Paid it by hand* is still there for a refund done in the Razorpay dashboard (it needs the Razorpay refund id). Membership washes cannot be cancelled by customers; they reschedule.
 There is no Razorpay webhook: refund status is whatever Razorpay answered when it was created.
 
+## Crowd limits (capacity)
+
+Every wash booked for a day counts toward that day and toward its time window (morning, afternoon, night): memberships, single washes and free washes. Cancelled, refunded, refund-requested, no-show and moved washes do not count.
+Two limits per kind of day, editable by an admin in **Admin → Capacity** (`admin_set_capacity`; it also lists the days ahead with how full each is):
+
+| | Whole day busy / full | Each window busy / full |
+|---|---|---|
+| Monday to Friday | 10 / 15 | 6 / 9 |
+| Saturday and Sunday | 15 / 20 | 9 / 12 |
+
+*Busy* shows an amber warning on the booking pages; *full* shows red and cannot be picked. A day is red when its total reaches the full number, or when every window is full. The window numbers are a starting guess: change them to fit your team.
+The database refuses a full day or window when a single wash or a free wash is started (`require_capacity`). Washes an admin books are never blocked, and a membership that is already paid for is never refused: the checkout checks capacity first, and if the days filled up
+in the meantime the schedule skips the crowded days. A membership whose chosen days cannot fit all its washes before the term ends is refused at checkout with a message to pick other days.
+
+**Exact dates.** The membership wizard has a hidden option to pick every wash date yourself (`custom_dates` on `POST /api/payments/membership-checkout`; `POST /api/membership-preview` shows where an automatic plan lands and what does not fit). The database checks the same rules the calendar shows.
+
 ## Admin: create, edit, archive
 
 The Admin page manages the working data. **Nothing is ever deleted: "delete" means archive** (hidden from the working lists, restorable, history always kept).
@@ -111,7 +128,7 @@ needs the migrations. They are additive and re-runnable.
 fails, nothing is applied). Run `supabase/bundles/preflight-check.sql` first (read-only), try the bundle on a Supabase branch or after a backup, paste it into
 the Supabase SQL editor, then run the preflight again: every line should read `true`.
 
-1. The safe migrations `supabase/migrations/20261004000001` … `…0015` (`…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns; `…0015` lets a campaign be open to anyone) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
+1. The safe migrations `supabase/migrations/20261004000001` … `…0021` (`…0016` lets a membership be any mix of Body and Deep washes; `…0017` reads a membership's last day in Pune time; `…0018` remembers sent emails; `…0019` adds crowd limits; `…0020` lets a membership use exact dates; `…0021` lets a specialist move a membership wash and a customer clear a plan; `…0012` adds the refund workflow: a refund request on cancel, and admin approval; `…0013` adds admin management with archive; `…0014` adds free-wash campaigns; `…0015` lets a campaign be open to anyone) (`…0003` adds `profiles.email` with `ADD COLUMN IF NOT EXISTS`; it cannot run alone because it needs the `app_private` schema from `…0001`)
 2. `supabase/cutover/20261005000001` only when the website is the live customer app and the mobile release no longer needs the retired functions
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.

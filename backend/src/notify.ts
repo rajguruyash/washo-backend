@@ -3,6 +3,24 @@ import { config } from './config';
 
 const resend = config.email.resendKey ? new Resend(config.email.resendKey) : null;
 
+export interface Mail { to: string; subject: string; html: string }
+type Transport = (mail: Mail) => Promise<void>;
+
+// Resend is the only transport that exists in production (RESEND_API_KEY and EMAIL_FROM on the server). Tests swap in their own.
+let transport: Transport | null = resend
+  ? async (m) => {
+      const { error } = await resend.emails.send({ from: config.email.from, to: [m.to], replyTo: config.email.adminEmail, subject: m.subject, html: m.html });
+      if (error) throw new Error(error.message);
+    }
+  : null;
+export const setMailTransport = (t: Transport | null) => void (transport = t);
+export const mailConfigured = () => transport !== null;
+/** Sends one email. Throws if mail is not set up or Resend refuses it (the caller records that and may try again). */
+export async function sendMail(m: Mail): Promise<void> {
+  if (!transport) throw new Error('Email is not set up (RESEND_API_KEY)');
+  await transport(m);
+}
+
 const esc = (value: unknown): string =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 

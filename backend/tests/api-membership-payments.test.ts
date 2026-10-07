@@ -27,9 +27,9 @@ describe('estimate and up to 7 washes a week', () => {
     expect(car5.lines.map((l: any) => `${l.name}:${l.quantity}x${l.unit_cents}`).sort()).toEqual(['Car Body Wash:12x15000', 'Car Deep Cleaning:8x22000']);
     expect(car5.frequency_discount.bp).toBe(1000);
     expect(car5.final_cents).toBe(Math.round((12 * 15000 + 8 * 22000) * 0.9));
-    const bad = await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'body', 'body']), duration_months: 1 });
-    expect(bad.status).toBe(422);
-    expect(bad.body.message).toMatch(/mixes body washes and deep cleanings/);
+    // any mix is the customer's choice: three Body washes a week and no Deep cleans is fine (4 x 3 x 150, 10% off for 3 a week)
+    const bodies = expectOk(await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'body', 'body']), duration_months: 1 })).body.estimate;
+    expect(bodies).toMatchObject({ subtotal_cents: 180000, final_cents: 162000 });
     expect((await anon.post('/api/membership-estimate', { vehicle_type: 'car', weekly_pattern: days(['body', 'deep']), duration_months: 2 })).status).toBe(400);
   });
 
@@ -62,13 +62,10 @@ describe('membership request', () => {
     expect(early.body.message).toMatch(/not waiting for your approval/);
   });
 
-  it('enforces 1 to 7 washes a week and the Body + Deep rules in the database', async () => {
+  it('enforces 1 to 7 washes a week, one wash per day and bikes having only the Body wash, in the database', async () => {
     const car = await customerWithVehicle('car');
     const mk = async (pattern: unknown[], vehicleId = car.vehicle.id) => request(car.c, { vehicle_id: vehicleId, address_id: car.addr.id, weekly_pattern: pattern });
 
-    expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 4, kind: 'body' }])).body.message).toMatch(/1 body wash \+ 1 deep cleaning/); // 2/week must be Body + Deep
-    expect((await mk([{ weekday: 1, kind: 'deep' }, { weekday: 4, kind: 'deep' }])).body.message).toMatch(/1 body wash \+ 1 deep cleaning/);
-    expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }, { weekday: 5, kind: 'body' }])).body.message).toMatch(/mixes body washes and deep cleanings/);
     expect((await mk([{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }])).body.message).toMatch(/different day/);
     expect((await mk([0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ weekday: d % 7, kind: d % 2 ? 'deep' : 'body' })))).status).toBe(400); // 8 a week does not exist
     expect((await mk([])).status).toBe(400);

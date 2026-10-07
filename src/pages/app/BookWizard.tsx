@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -6,14 +7,18 @@ import { ErrorState } from '../../components/EmptyState';
 import { ServicePhoto } from '../../components/ServicePhoto';
 import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
+import { WizardStepper } from '../../components/WizardStepper';
+import { stepMotion, useStepDirection } from '../../lib/stepMotion';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { cn } from '../../lib/cn';
 import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
-import { useAddresses, useCatalog, useStartOnDemandPayment, useVehicles } from '../../lib/queries';
+import { useAddresses, useCapacity, useCatalog, useStartOnDemandPayment, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle } from '../../lib/types';
 import { usePay } from '../../lib/usePay';
+
+const STEPS = ['Vehicle', 'Service', 'Day & time', 'Review & pay'] as const;
 
 /** One-off wash. Priced by the database from the rate card; the membership is the main WASHO product. */
 export default function BookWizard() {
@@ -21,6 +26,7 @@ export default function BookWizard() {
   const [params] = useSearchParams();
   const { data: catalog, isLoading: catalogLoading, isError: catalogError, error: catalogErr, refetch: refetchCatalog } = useCatalog();
   const { data: vehicles } = useVehicles();
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22));
   const { data: addresses } = useAddresses();
   const start = useStartOnDemandPayment();
   const { pay, paying } = usePay();
@@ -46,6 +52,8 @@ export default function BookWizard() {
   const service = options.find((s) => s.id === serviceId);
   const address = addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
   const ok = [Boolean(vehicle), Boolean(service), Boolean(date && slot), true][step];
+  const dir = useStepDirection(step);
+  const slide = stepMotion(dir);
 
   // Slide to pay: resolves only when the payment is verified; throws if it was not, so the handle springs back.
   const paidBooking = useRef<string | null>(null);
@@ -64,12 +72,15 @@ export default function BookWizard() {
 
   return (
     <div className="mx-auto max-w-3xl pb-28">
-      <div className="mb-6 flex items-center justify-between"><Link to="/app/bookings" className="inline-flex items-center gap-1.5 text-sm text-fog hover:text-white"><ArrowLeft className="h-4 w-4" /> Cancel</Link><p className="text-sm font-semibold text-mist">Step {step + 1} of 4</p></div>
+      <div className="mb-6 flex items-center justify-between"><Link to="/app/bookings" className="inline-flex items-center gap-1.5 text-sm text-fog hover:text-white"><ArrowLeft className="h-4 w-4" /> Cancel</Link></div>
+      <WizardStepper steps={STEPS} step={step} onStep={setStep} />
 
-      {step === 0 && <section><h1 className="text-3xl font-extrabold">Which vehicle?</h1><p className="mb-6 mt-1.5 text-fog">A single wash. For regular washing a membership is better value.</p><VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); setServiceId(null); }} /></section>}
+      <AnimatePresence mode="wait" initial={false} custom={dir}>
+
+      {step === 0 && <motion.section key="s0" {...slide}><h1 className="text-3xl font-extrabold">Which vehicle?</h1><p className="mb-6 mt-1.5 text-fog">A single wash. For regular washing a membership is better value.</p><VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); setServiceId(null); }} /></motion.section>}
 
       {step === 1 && (
-        <section>
+        <motion.section key="s1" {...slide}>
           <h1 className="text-3xl font-extrabold">Choose a service</h1>
           {catalogError && <div className="mt-6"><ErrorState message={(catalogErr as Error)?.message ?? 'We could not load the services and prices.'} onRetry={() => void refetchCatalog()} /></div>}
           {catalogLoading && <div className="mt-6 space-y-3">{[0, 1].map((i) => <Skeleton key={i} className="h-24 rounded-3xl" />)}</div>}
@@ -83,13 +94,13 @@ export default function BookWizard() {
               </button>
             ))}
           </div>
-        </section>
+        </motion.section>
       )}
 
-      {step === 2 && <section><h1 className="mb-6 text-3xl font-extrabold">Pick a date and time</h1><DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={addDays(todayIST(), 21)} days={22} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} /></section>}
+      {step === 2 && <motion.section key="s2" {...slide}><h1 className="mb-6 text-3xl font-extrabold">Pick a date and time</h1><DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={addDays(todayIST(), 21)} days={22} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} crowd={crowd} /></motion.section>}
 
       {step === 3 && vehicle && service && date && slot && (
-        <section>
+        <motion.section key="s3" {...slide}>
           <h1 className="mb-6 text-3xl font-extrabold">Review and pay</h1>
           <div className="glass divide-y divide-white/[0.07] text-sm">
             <div className="flex justify-between p-5"><span className="text-fog">Service</span><span className="font-semibold">{service.name}</span></div>
@@ -98,8 +109,9 @@ export default function BookWizard() {
             <div className="flex justify-between p-5"><span className="text-fog">Total</span><span className="font-display text-xl font-extrabold">{rupees(service.price!)}</span></div>
           </div>
           <p className="mt-4 text-xs text-fog">Your wash is booked once the payment is verified. The price is set by WASHO's rate card, not by this page.</p>
-        </section>
+        </motion.section>
       )}
+      </AnimatePresence>
 
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t lg:left-[17rem] border-white/[0.08] bg-ink-900/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">

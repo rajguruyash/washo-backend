@@ -1,8 +1,9 @@
-import { AlertTriangle, ArrowLeft, Check, MapPin, MessageSquarePlus, Phone, PhoneMissed, PlayCircle, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CalendarClock, Check, MapPin, MessageSquarePlus, Phone, PhoneMissed, PlayCircle, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ErrorState } from '../../components/EmptyState';
 import { PhotoUploader } from '../../components/PhotoUploader';
+import { WorkerMoveSheet } from '../../components/WorkerMoveSheet';
 import { Plate } from '../../components/brand/Plate';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -11,6 +12,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { friendlyDay, prettyPhone } from '../../lib/format';
+import type { SlotId } from '../../lib/types';
 import { ApiError } from '../../lib/http';
 import { useWorkerQueue, useWorkerStep, type WorkerStep } from '../../lib/queries';
 import { slotLabel, slotWindow } from '../../lib/slots';
@@ -33,6 +35,8 @@ export default function WorkerWash() {
   const { data, isLoading, isError, refetch } = useWorkerQueue();
   const step = useWorkerStep();
   const toast = useToast();
+  const navigate = useNavigate();
+  const [moving, setMoving] = useState(false);
   const [sheet, setSheet] = useState<'issue' | 'note' | 'unreached' | null>(null);
   const [kind, setKind] = useState<(typeof ISSUES)[number]['id']>('other');
   const [text, setText] = useState('');
@@ -70,6 +74,17 @@ export default function WorkerWash() {
     w.status === 'in_progress' ? 'work' :
     w.status === 'call_not_picked_up' ? (dialed ? 'respond' : 'retry') :
     w.status === 'worker_called' ? (confirmed ? 'start' : 'respond') : dialed ? 'respond' : 'call';
+
+  // The vehicle is not available that day: move this membership wash. The specialist keeps it, on its new day.
+  const canMove = w.booking_type === 'membership' && ['call', 'retry', 'respond', 'start'].includes(phase);
+  const moveWash = async (date: string, time_slot: SlotId, reason: string) => {
+    const ok = await run('reschedule', { date, time_slot, reason });
+    if (ok) {
+      toast.success(`Moved to ${friendlyDay(date)}. The customer has been told, and it stays in your queue.`);
+      navigate('/worker');
+    }
+    return ok;
+  };
 
   const submitSheet = async () => {
     const ok =
@@ -146,6 +161,13 @@ export default function WorkerWash() {
 
       {phase === 'done' && <div className="glass p-6 text-center"><Check className="mx-auto h-8 w-8 text-ok" strokeWidth={3} /><p className="mt-2 text-lg font-bold">Wash completed</p><p className="mt-1 text-sm text-fog">{w.membership_id ? 'The next wash in this membership is already in your queue.' : 'Thanks!'}</p><Link to="/worker" className="mt-4 inline-block text-sm font-semibold text-washo-300">Back to your washes</Link></div>}
 
+      {canMove && (
+        <button type="button" onClick={() => setMoving(true)} className="mt-5 flex w-full items-center gap-4 rounded-3xl border border-warn/30 bg-warn/10 p-4 text-left transition-colors hover:border-warn/60">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-warn/15 text-warn"><CalendarClock className="h-5 w-5" /></span>
+          <span><span className="block font-bold">Car not available?</span><span className="block text-sm text-fog">Move this wash to the next day, or any day you choose. The customer is told.</span></span>
+        </button>
+      )}
+
       {holds && phase !== 'done' && phase !== 'closed' && (
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Button variant="glass" icon={<AlertTriangle className="h-4 w-4" />} onClick={() => { setKind('other'); setSheet('issue'); }}>Report an issue</Button>
@@ -153,6 +175,7 @@ export default function WorkerWash() {
         </div>
       )}
 
+      <WorkerMoveSheet wash={moving ? w : null} onClose={() => setMoving(false)} onMove={moveWash} />
       <Sheet open={Boolean(sheet)} onClose={() => setSheet(null)} size="sm" title={sheet === 'issue' ? 'Report an issue' : sheet === 'note' ? 'Add a note' : 'Call not picked up'}
         description={sheet === 'unreached' ? 'The wash stays scheduled. Nothing is charged or completed.' : 'WASHO sees this straight away.'}
         footer={<Button full size="lg" loading={busy} disabled={sheet === 'note' && text.trim().length < 2 || sheet === 'issue' && kind !== 'customer_unavailable' && text.trim().length < 3} onClick={() => void submitSheet()}>{sheet === 'issue' ? 'Send to WASHO' : sheet === 'note' ? 'Save note' : 'Confirm not picked up'}</Button>}>

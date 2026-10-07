@@ -65,7 +65,7 @@ describe('membership: pay directly', () => {
   it('validates the plan and rejects other people\'s vehicles', async () => {
     const a = await customerWithVehicle('car');
     const b = await customerWithVehicle('car');
-    expect((await a.c.post('/api/payments/membership-checkout', plan(a, { weekly_pattern: [{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }] }))).body.message).toMatch(/1 body wash \+ 1 deep/);
+    expect((await a.c.post('/api/payments/membership-checkout', plan(a, { weekly_pattern: [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }] }))).body.message).toMatch(/different day/);
     expect((await a.c.post('/api/payments/membership-checkout', plan(a, { duration_months: 2 }))).status).toBe(400);
     expect((await a.c.post('/api/payments/membership-checkout', plan(a, { start_date: istDate(0) }))).body.message).toMatch(/can start from/);
     expect((await b.c.post('/api/payments/membership-checkout', plan(b, { vehicle_id: a.vehicle.id }))).status).toBe(404);

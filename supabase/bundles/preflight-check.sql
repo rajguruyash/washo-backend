@@ -12,6 +12,15 @@ UNION ALL SELECT 'profiles.archived_at exists', EXISTS (SELECT 1 FROM informatio
 UNION ALL SELECT 'admin_create_booking() exists', to_regprocedure('public.admin_create_booking(uuid, uuid, uuid, date, public.time_slot, uuid, text, text, text, text, integer)') IS NOT NULL
 UNION ALL SELECT 'claim_campaign_wash() exists (migration 14)', to_regprocedure('public.claim_campaign_wash(uuid, uuid, date, public.time_slot, uuid, text, text)') IS NOT NULL
 UNION ALL SELECT 'admin_save_campaign() takes the audience switch (migration 15)', to_regprocedure('public.admin_save_campaign(uuid, text, text, text, date, date, date, integer, integer, integer, integer, integer, integer, boolean, boolean)') IS NOT NULL
+UNION ALL SELECT 'email_log table exists (migration 18)', to_regclass('public.email_log') IS NOT NULL
+UNION ALL SELECT 'svc_membership_reminders_due() exists (migration 18)', to_regprocedure('public.svc_membership_reminders_due(integer, integer)') IS NOT NULL
+UNION ALL SELECT 'capacity_rules table exists (migration 19)', to_regclass('public.capacity_rules') IS NOT NULL
+UNION ALL SELECT 'get_capacity() exists (migration 19)', to_regprocedure('public.get_capacity(date, date)') IS NOT NULL
+UNION ALL SELECT 'membership_requests.custom_dates exists (migration 20)', EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='membership_requests' AND column_name='custom_dates')
+UNION ALL SELECT 'preview_membership_dates() exists (migration 20)', to_regprocedure('public.preview_membership_dates(uuid, jsonb, integer, public.time_slot, date)') IS NOT NULL
+UNION ALL SELECT 'worker_reschedule_wash() exists (migration 21)', to_regprocedure('public.worker_reschedule_wash(uuid, date, public.time_slot, text)') IS NOT NULL
+UNION ALL SELECT 'remove_my_plan() exists (migration 21)', to_regprocedure('public.remove_my_plan(text, uuid)') IS NOT NULL
+UNION ALL SELECT 'customer_hidden_plans table exists (migration 21)', to_regclass('public.customer_hidden_plans') IS NOT NULL
 UNION ALL SELECT 'washo_api role exists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname='washo_api');
 
 -- What the bundle will not touch, for your information (row counts of the data it leaves alone):

@@ -4,18 +4,21 @@ import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { Plate } from '../../components/brand/Plate';
+import { WizardStepper } from '../../components/WizardStepper';
+import { stepMotion, useStepDirection } from '../../lib/stepMotion';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { PackOfferCard } from '../../components/PackOfferCard';
 import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { Button, ButtonLink } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Field';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { claimView, dayOf } from '../../lib/campaign';
 import { cn } from '../../lib/cn';
 import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useCampaign, useCatalog, useClaimFreeWash, useVehicles } from '../../lib/queries';
+import { useAddresses, useCampaign, useCapacity, useCatalog, useClaimFreeWash, useSaveProfile, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import type { Campaign, SlotId, Vehicle } from '../../lib/types';
 import { useAuth } from '../../state/auth';
@@ -42,8 +45,13 @@ export default function ClaimWizard() {
   const { data: vehicles } = useVehicles();
   const { data: addresses } = useAddresses();
   const { data: catalog } = useCatalog();
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22));
   const claim = useClaimFreeWash();
+  const saveProfile = useSaveProfile();
+  // A customer who signed in by phone may have no email yet: ask for one, so the confirmation can be mailed. Optional.
+  const [email, setEmail] = useState('');
   const [step, setStep] = useState(0);
+  const dir = useStepDirection(step);
   const [picked, setVehicle] = useState<Vehicle | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
@@ -96,6 +104,11 @@ export default function ClaimWizard() {
   const submit = async () => {
     if (!vehicle || !date || !slot || !address) throw new Error('incomplete');
     setError('');
+    const mail = email.trim();
+    if (!user?.email && mail) {
+      if (!/^\S+@\S+\.\S+$/.test(mail)) { setError('That email address does not look right. Fix it, or leave it empty.'); throw new Error('email'); }
+      try { await saveProfile.mutateAsync({ full_name: user?.full_name ?? '', email: mail }); } catch (err) { setError(err instanceof ApiError ? err.message : 'We could not save that email. Try again, or leave it empty.'); throw err; }
+    }
     setClaiming(true);
     try {
       const r = await claim.mutateAsync({ campaign_id: c.id, vehicle_id: vehicle.id, date, time_slot: slot, address_id: address.id, parking_location: address.parking_location });
@@ -107,19 +120,16 @@ export default function ClaimWizard() {
     }
   };
   const afterClaim = () => setTimeout(() => navigate(`/app/bookings/${booked.current}`, { replace: true }), 900);
-  const slide = { initial: { opacity: 0, x: 24 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -24 }, transition: { duration: 0.2 } };
+  const slide = stepMotion(dir);
 
   return (
     <div className="mx-auto max-w-3xl pb-28">
       <div className="mb-6 flex items-center justify-between gap-4">
         <Link to="/app" className="inline-flex items-center gap-1.5 text-sm text-fog hover:text-white"><ArrowLeft className="h-4 w-4" /> Cancel</Link>
-        <p className="text-sm font-semibold text-mist">Step {step + 1} of {STEPS.length} · {STEPS[step]}</p>
       </div>
-      <div className="mb-8 flex gap-1.5" aria-hidden>
-        {STEPS.map((s, i) => <span key={s} className={cn('h-1.5 flex-1 rounded-full transition-colors duration-500', i <= step ? 'bg-offer' : 'bg-white/10')} />)}
-      </div>
+      <WizardStepper steps={STEPS} step={step} onStep={(i) => { setError(''); setStep(i); }} theme="offer" />
 
-      <AnimatePresence mode="wait" initial={false}>
+      <AnimatePresence mode="wait" initial={false} custom={dir}>
         {step === 0 && (
           <motion.section key="s0" {...slide}>
             <p className="eyebrow text-offer">{c.name}</p>
@@ -133,7 +143,7 @@ export default function ClaimWizard() {
           <motion.section key="s1" {...slide}>
             <h1 className="text-3xl font-extrabold">Pick a day and a time</h1>
             <p className="mb-6 mt-1.5 text-fog">The free wash must be on or before {dayOf(c.use_by_date)}. A day shown as Full has no free washes left.</p>
-            <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={lastDay} days={22} disabledDates={c.full_dates} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} />
+            <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} max={lastDay} days={22} disabledDates={c.full_dates} leadHours={catalog?.booking_rules?.on_demand_min_lead_hours} crowd={crowd} />
           </motion.section>
         )}
 
@@ -164,6 +174,7 @@ export default function ClaimWizard() {
                 <Button variant="glass" size="sm" className="mt-3" icon={<Plus className="h-4 w-4" />} onClick={() => setAddrOpen(true)}>Add an address</Button>
               </div>
             </div>
+            {!user?.email && <div className="mt-5"><Input label="Email" type="email" optional value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" hint="We will email your booking confirmation. You can leave this empty." /></div>}
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-offer/25 bg-offer/10 p-4 text-sm text-mist">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-offer" />
               <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open (until {dayOf(c.claim_closes_on)}). A specialist calls ahead on the day.</p>

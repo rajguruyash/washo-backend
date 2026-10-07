@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
-  Address, AdminAddress, AdminBooking, AdminCampaign, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  Address, AdminAddress, AdminBooking, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -33,6 +33,21 @@ export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () =
 
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
 export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
+
+/** How crowded each day and time window is, by date. Marks crowded days amber and full ones red on the booking pages. */
+export const useCapacity = (from: string, to: string, enabled = true) =>
+  useQuery({
+    queryKey: ['capacity', from, to],
+    queryFn: async () => Object.fromEntries((await get<{ days: CapacityDay[] }>(`/capacity?from=${from}&to=${to}`)).days.map((d) => [d.date, d])) as Record<string, CapacityDay>,
+    staleTime: 30_000,
+    enabled,
+    retry: false,
+  });
+
+export interface PreviewInput { vehicle_id: string; weekly_pattern: PatternItem[]; duration_months: number; time_slot: SlotId; start_date: string }
+/** Where a plan lands on the calendar before paying (the database lays it out the way the payment will). */
+export const usePlanPreview = (input: PreviewInput | null) =>
+  useQuery({ queryKey: ['plan-preview', input], queryFn: () => post<PlanPreview & { success: boolean }>('/membership-preview', input), enabled: Boolean(input), staleTime: 30_000, retry: false, placeholderData: keepPreviousData });
 
 export interface EstimateInput {
   vehicle_type: VehicleType;
@@ -119,7 +134,7 @@ export function useRefreshAll() {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate'].map((k) =>
+      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate', 'capacity', 'plan-preview'].map((k) =>
         qc.invalidateQueries({ queryKey: [k] })
       )
     );
@@ -178,6 +193,8 @@ export interface MembershipRequestInput {
   address_id?: string | null;
   parking_location?: string;
   customer_notes?: string;
+  /** Exact dates for every wash, instead of letting the plan land on its weekdays. */
+  custom_dates?: ExactDate[];
 }
 
 /** Pay for a custom membership straight away: the server prices it from the rate card and opens the Razorpay order. */
@@ -226,6 +243,16 @@ export const useRescheduleWash = () => {
   });
 };
 
+/** Clears a plan from the customer's own pages: one started but not paid for, or one that has ended. Nothing is deleted. */
+export const useRemovePlan = () => {
+  const refresh = useRefreshAll();
+  return useMutation({
+    mutationFn: ({ kind, id }: { kind: 'membership' | 'request'; id: string }) =>
+      post<{ removed: boolean; stopped_checkout: boolean }>(kind === 'membership' ? `/memberships/${id}/remove` : `/membership-requests/${id}/remove`, {}),
+    onSuccess: () => refresh(),
+  });
+};
+
 // ───────── worker ─────────
 export const useWorkerQueue = () =>
   useQuery({
@@ -238,7 +265,7 @@ export const useWorkerQueue = () =>
 export const useWorkerPool = (enabled = true) =>
   useQuery({ queryKey: keys.workerPool, queryFn: async () => (await get<{ pool: PoolWash[] }>('/worker/pool')).pool, enabled });
 
-export type WorkerStep = 'claim' | 'call' | 'confirm' | 'not-picked-up' | 'start' | 'complete' | 'issue' | 'note';
+export type WorkerStep = 'claim' | 'call' | 'confirm' | 'not-picked-up' | 'reschedule' | 'start' | 'complete' | 'issue' | 'note';
 
 export const useWorkerStep = () => {
   const qc = useQueryClient();
@@ -368,6 +395,8 @@ export const useAdminCampaignClaims = (id: string | undefined, status: string, q
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
   });
+export const useAdminCapacity = (from: string, to: string) =>
+  useQuery({ queryKey: keys.admin('capacity', from, to), queryFn: () => get<{ rules: CapacityRule[]; days: CapacityDay[] }>(`/admin/capacity?from=${from}&to=${to}`) });
 export const useAdminServices = () => useQuery({ queryKey: keys.admin('services'), queryFn: async () => (await get<{ services: AdminService[] }>('/admin/services')).services });
 export const useAdminPricing = () => useQuery({ queryKey: keys.admin('pricing'), queryFn: () => get<AdminPricing>('/admin/pricing') });
 export type { AdminAddress };

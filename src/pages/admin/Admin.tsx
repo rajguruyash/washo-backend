@@ -10,7 +10,7 @@ import { Input, Select, TextArea } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
-import { addDays, fullDate, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
+import { addDays, fullDate, istDay, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
 import {
   useAdminAction, useAdminAttention, useAdminBookings, useAdminMemberships, useAdminOverview, useAdminRequests, useAdminWorkers, useReviewRequest, useRefreshAll,
 } from '../../lib/queries';
@@ -20,13 +20,14 @@ import type { AdminBooking, AdminMembership, AdminRequest, Attention as Attentio
 import { StaffLayout } from '../../layouts/StaffLayout';
 import { AddWashSheet } from './AddWash';
 import { BookingSheet } from './BookingSheet';
+import Capacity from './Capacity';
 import Campaigns from './Campaigns';
 import History from './History';
 import People from './People';
 import ServicesAdmin from './ServicesAdmin';
 import { Loading, errText } from './shared';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'attention';
+type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'capacity' | 'attention';
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'requests', label: 'Requests' },
@@ -36,6 +37,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'people', label: 'People' },
   { value: 'services', label: 'Services & prices' },
   { value: 'campaigns', label: 'Campaigns' },
+  { value: 'capacity', label: 'Capacity' },
   { value: 'attention', label: 'Needs attention' },
 ];
 
@@ -197,10 +199,23 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
     if (!open) return;
     try { await act.mutateAsync({ path: `memberships/${open.id}/assign-worker`, body: { worker_profile_id: worker || null } }); toast.success(worker ? 'Specialist assigned to every remaining wash' : 'Washes released to the pool'); setOpen(null); } catch (e) { toast.error(errText(e)); }
   };
+  // Renewal reminders (an email a week before a membership ends) go out by themselves every hour. These two buttons are for checking and for sending at once.
+  const reminders = async (dry: boolean) => {
+    try {
+      const r = (await act.mutateAsync({ path: `reminders/run${dry ? '?dry=1' : ''}`, body: {} })) as { ready: boolean; due: number; sent: number; already: number; failed: number };
+      if (!r.ready) toast.error('Reminder emails are not set up yet: the email key or the latest database update is missing.');
+      else if (dry) toast.success(r.due ? `${r.due} membership${r.due > 1 ? 's end' : ' ends'} within a week and ${r.due > 1 ? 'have' : 'has'} not been reminded yet.` : 'Nobody needs a reminder right now.');
+      else toast.success(r.due ? `Reminders: ${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''}${r.already ? `, ${r.already} already sent` : ''}.` : 'Nobody needs a reminder right now.');
+    } catch (e) { toast.error(errText(e)); }
+  };
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading) return <Loading />;
   return (
     <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-xl text-sm text-fog">Customers get a renewal email a week before their membership ends, with their plan filled in. It goes out by itself; these buttons check or send it now.</p>
+        <div className="flex gap-2"><Button size="sm" variant="glass" loading={act.isPending} onClick={() => void reminders(true)}>Who needs one?</Button><Button size="sm" loading={act.isPending} onClick={() => void reminders(false)}>Send reminders now</Button></div>
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {data?.map((m) => (
           <div key={m.id} className="glass p-5">
@@ -208,7 +223,7 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
             <p className="mt-2 text-sm font-semibold">{m.customer_name} <span className="font-normal text-fog">{prettyPhone(m.customer_phone)}</span></p>
             <p className="text-sm text-fog">{m.vehicle_type?.toUpperCase()} · {m.vehicle_model} · {m.registration_number}</p>
             {m.weekly_pattern && <p className="mt-1 text-sm text-mist">{patternLabel(m.weekly_pattern)}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}
-            <p className="mt-1 text-xs text-fog">{m.washes_completed}/{m.washes_total} done · {fullDate(m.start_at.slice(0, 10))} to {fullDate(m.end_at.slice(0, 10))}{m.next_wash_date ? ` · next ${prettyDate(m.next_wash_date)}` : ''}</p>
+            <p className="mt-1 text-xs text-fog">{m.washes_completed}/{m.washes_total} done · {fullDate(istDay(m.start_at))} to {fullDate(istDay(m.end_at))}{m.next_wash_date ? ` · next ${prettyDate(m.next_wash_date)}` : ''}</p>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm">Specialist: <span className="font-semibold">{m.worker_name ?? <span className="text-warn">none</span>}</span></p>
               <div className="flex gap-2"><Button size="sm" variant="glass" onClick={() => showWashes(m.id)}>Washes</Button>{m.status === 'active' && <Button size="sm" onClick={() => setOpen(m)}>Assign</Button>}</div>
@@ -326,6 +341,7 @@ export default function Admin() {
       {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
       {tab === 'services' && <ServicesAdmin />}
       {tab === 'campaigns' && <Campaigns />}
+      {tab === 'capacity' && <Capacity />}
       {tab === 'attention' && <Attention />}
       <AddWashSheet open={Boolean(adding)} customerId={adding?.customerId} onClose={() => setAdding(null)} onCreated={() => go('bookings')} />
     </StaffLayout>

@@ -162,10 +162,6 @@ describe('weekly pattern validation', () => {
     ['0 washes', 'car', [], 1, /1 to 7 washes/],
     ['4 washes a week', 'car', [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ weekday: d, kind: 'body' })), 1, /1 to 7 washes/],
     ['the same weekday twice', 'car', [{ weekday: 1, kind: 'body' }, { weekday: 1, kind: 'deep' }], 1, /different day/],
-    ['2/week with two body washes', 'car', [{ weekday: 1, kind: 'body' }, { weekday: 3, kind: 'body' }], 1, /1 body wash \+ 1 deep/],
-    ['2/week with two deep cleanings', 'car', [{ weekday: 1, kind: 'deep' }, { weekday: 3, kind: 'deep' }], 1, /1 body wash \+ 1 deep/],
-    ['3/week with only body washes', 'car', days('body', 'body', 'body'), 1, /mixes body washes and deep/],
-    ['3/week with only deep cleanings', 'suv', days('deep', 'deep', 'deep'), 1, /mixes body washes and deep/],
     ['a deep cleaning for a bike', 'bike', days('deep').slice(0, 1), 1, /Bikes have one wash type/],
     ['a 2-month membership', 'car', days('body').slice(0, 1), 2, /1, 3, 6 or 12 months/],
     ['a bad weekday', 'car', [{ weekday: 9, kind: 'body' }], 1, /weekday/],
@@ -179,6 +175,14 @@ describe('weekly pattern validation', () => {
     inTx(async (s) => {
       expect((await quote(s, 'bike', days('body', 'body'), 1)).subtotal_cents).toBe(8 * 6500);
       expect((await quote(s, 'bike', days('body', 'body', 'body'), 1)).frequency_discount.bp).toBe(1000);
+    }));
+
+  it('allows any mix: 2 a week as two Body washes or two Deep cleanings, 3 as all one kind', async () =>
+    inTx(async (s) => {
+      expect((await quote(s, 'car', days('body', 'body'), 1)).subtotal_cents).toBe(8 * 15000);
+      expect((await quote(s, 'car', days('deep', 'deep'), 1)).subtotal_cents).toBe(8 * 22000);
+      expect((await quote(s, 'suv', days('deep', 'deep', 'deep'), 1)).subtotal_cents).toBe(12 * 25000);
+      expect((await quote(s, 'car', days('body', 'body', 'body'), 1)).frequency_discount.bp).toBe(1000);
     }));
 
   it('allows 3/week as 1 body + 2 deep', async () =>

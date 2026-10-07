@@ -21,7 +21,7 @@ export function ChangeNote({ w }: { w: WorkerWash }) {
   const c = w.change;
   if (!c) return null;
   const text =
-    c.kind === 'rescheduled' ? `Moved${c.from_date ? ` from ${friendlyDay(c.from_date)}${c.from_slot ? `, ${slotLabel(c.from_slot)}` : ''}` : ''}${c.by === 'admin' ? ' by WASHO' : ' by the customer'}` :
+    c.kind === 'rescheduled' ? `Moved${c.from_date ? ` from ${friendlyDay(c.from_date)}${c.from_slot ? `, ${slotLabel(c.from_slot)}` : ''}` : ''}${c.by === 'admin' ? ' by WASHO' : c.by === 'worker' ? '' : ' by the customer'}` :
     c.kind === 'cancelled' ? `Cancelled${c.reason ? `: ${c.reason}` : ''}` : 'Reassigned. No longer yours.';
   return <Badge tone={c.kind === 'cancelled' ? 'red' : 'amber'}>{text}</Badge>;
 }

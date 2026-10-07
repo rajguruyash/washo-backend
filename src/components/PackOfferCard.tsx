@@ -2,13 +2,14 @@ import { Sparkles } from 'lucide-react';
 import { shortDayIST } from '../lib/campaign';
 import { percent } from '../lib/format';
 import type { CampaignOffer } from '../lib/types';
-import { cn } from '../lib/cn';
+import { CampaignGlare } from './CampaignGlare';
 import { ButtonLink } from './ui/Button';
 
 /** After the free wash: the welcome offer on a membership. The price at checkout already includes it. */
 export function PackOfferCard({ offer, className }: { offer: CampaignOffer; className?: string }) {
   return (
-    <div className={cn('glass border-offer/30 p-5', className)}>
+    <CampaignGlare className={className}>
+    <div className="glass border-offer/30 p-5">
       <div className="flex items-start gap-4">
         <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Sparkles className="h-6 w-6" aria-hidden /></span>
         <div className="min-w-0 flex-1">
@@ -20,5 +21,6 @@ export function PackOfferCard({ offer, className }: { offer: CampaignOffer; clas
       </div>
       <ButtonLink to="/app/membership/new" className="mt-4" full>Build my membership</ButtonLink>
     </div>
+    </CampaignGlare>
   );
 }

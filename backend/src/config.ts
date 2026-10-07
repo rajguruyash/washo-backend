@@ -70,6 +70,10 @@ export const config = {
     minIntervalMs: process.env.GEOCODE_MIN_INTERVAL_MS !== undefined ? Number(process.env.GEOCODE_MIN_INTERVAL_MS) : 1100,
   },
 
+  // Optional. When set, an outside scheduler (Render Cron Job, cron-job.org, GitHub Actions) can call POST /api/cron/reminders with
+  // `Authorization: Bearer <this>`. The site also runs the reminders itself every hour while it is awake, so this is only a safety net.
+  cronSecret: process.env.CRON_SECRET || '',
+
   photos: {
     maxBytes: 8 * 1024 * 1024,
     signedUrlSeconds: 15 * 60,
