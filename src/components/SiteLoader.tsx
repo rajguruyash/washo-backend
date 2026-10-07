@@ -55,11 +55,9 @@ export function SiteLoader() {
   }, []);
 
   const ready = (pageLoaded && minPassed && !loading) || gaveUp;
-  useEffect(() => {
-    if (ready) markLoaderDone();
-  }, [ready]);
   return (
-    <AnimatePresence>
+    // things that play "when the page opens" wait until the screen has completely gone
+    <AnimatePresence onExitComplete={markLoaderDone}>
       {!ready && (
         <motion.div
           key="site-loader"
