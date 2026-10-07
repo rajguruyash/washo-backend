@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { markLoaderDone } from '../lib/loaderState';
 import { SERVICE_PHOTOS } from '../lib/serviceImages';
 import { useAuth } from '../state/auth';
 import { Logo } from './brand/Logo';
@@ -56,8 +55,7 @@ export function SiteLoader() {
 
   const ready = (pageLoaded && minPassed && !loading) || gaveUp;
   return (
-    // things that play "when the page opens" wait until the screen has completely gone
-    <AnimatePresence onExitComplete={markLoaderDone}>
+    <AnimatePresence>
       {!ready && (
         <motion.div
           key="site-loader"

@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarCheck, Camera, Droplets, Gift, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
-import { HeroSwap } from '../components/HeroSwap';
+import { AvatarFull } from '../components/brand/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import BlurText from '../components/reactbits/BlurText';
@@ -63,7 +63,7 @@ export default function Landing() {
               <ButtonLink to="/services" size="lg" variant="glass">See services</ButtonLink>
             </div>
           </div>
-          <HeroSwap />
+          <div className="mx-auto w-full max-w-sm"><AvatarFull priority /></div>
         </div>
         {/* React Bits Split Flap Text: the WASHO tagline, clacking round like a departure board, across the full width */}
         <div aria-hidden className="mx-auto mt-12 max-w-7xl px-4 sm:px-6 lg:px-8">
