@@ -1,9 +1,10 @@
 /**
- * Customers sign in with an emailed code: they ask for it, it arrives by email (Resend is replaced by a recorder; Supabase Auth is a local
- * stand-in; the database rules are real), they paste it in. No mobile number is asked for until they pay.
+ * Email sign-in. A customer signs up or in with an email and a password: no verification email and no emailed code. An ADMIN's password is only the first
+ * step: a code is emailed to them (Resend is replaced by a recorder; Supabase Auth is a local stand-in; the database rules are real) and the session only starts
+ * when it comes back. Customers who sign in with an email still give a mobile number (typed, not confirmed) before they pay.
  */
 import crypto from 'crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FAKE } from './fakeSupabase';
 import { Client, boot, customerWithVehicle, expectOk, fake, istDate, shutdown, staffClient, PATTERN_3 } from './helpers';
 
@@ -17,185 +18,361 @@ afterAll(shutdown);
 beforeEach(() => { sent = []; setMailTransport(async (m) => { sent.push(m); }); });
 
 const mail = () => `e-${crypto.randomBytes(5).toString('hex')}@example.com`;
-const ask = (c: Client, email: string) => c.post('/api/auth/email/otp/request', { email });
-const enter = (c: Client, email: string, code: string) => c.post('/api/auth/email/otp/verify', { email, code });
+const PASS = 'Sunny-day-42';
+const signup = (c: Client, email: string, password = PASS, extra: Record<string, unknown> = {}) => c.post('/api/auth/email/signup', { email, password, ...extra });
+const login = (c: Client, email: string, password = PASS) => c.post('/api/auth/email/login', { email, password });
+const sessionCookies = (r: { setCookies: string[] }) => r.setCookies.filter((s) => /^washo_(at|rt)=/.test(s));
 const codeIn = (m: { html: string }) => m.html.match(/>(\d{4,10})<\/span>/)![1];
 
-describe('asking for the code', () => {
-  it('emails a code to the address, and never sends it to the browser', async () => {
-    const c = new Client();
-    const email = mail();
-    const r = expectOk(await ask(c, email));
-    expect(r.body).toEqual({ success: true, resend_in_seconds: 30 });
-    expect(JSON.stringify(r.body)).not.toContain(FAKE.otpCode);
-    expect(r.setCookies.filter((s) => /^washo_(at|rt)=/.test(s))).toHaveLength(0); // asking signs nobody in
-    expect(sent).toHaveLength(1);
-    expect(sent[0].to).toBe(email);
-    expect(sent[0].subject).toMatch(/is your WASHO sign-in code$/);
-    expect(codeIn(sent[0])).toBe(FAKE.otpCode);
-    expect(sent[0].html).toContain('Copy it');
-  });
-
-  it('turns the address into a customer account the first time, and the same account the second time', async () => {
-    const email = mail();
-    const count = async () => (await fake.admin.query(`select count(*)::int n from auth.users where lower(email) = $1`, [email])).rows[0].n;
-    expectOk(await ask(new Client(), email.toUpperCase())); // case does not matter
-    expect(await count()).toBe(1);
-    expect(sent[0].to).toBe(email);
-    const c = new Client();
-    expectOk(await enter(c, email.toUpperCase(), FAKE.otpCode));
-    expect(expectOk(await c.get('/api/me')).body.user.email).toBe(email);
-    // the same person later: the same account, not a second one (the cooldown between codes is per address)
-    expect((await ask(new Client(), email)).status).toBe(429);
-    expect(await count()).toBe(1);
-  });
-
-  it('refuses a bad address, waits between codes, and caps them per hour', async () => {
-    const c = new Client();
-    expect((await ask(c, 'not-an-email')).status).toBe(400);
-    const email = mail();
-    expectOk(await ask(c, email));
-    const again = await ask(c, email);
-    expect(again.status).toBe(429);
-    expect(again.body.message).toMatch(/wait a little/);
-    expect(sent).toHaveLength(1);
-  });
-
-  it('says plainly when email is not set up, or Resend refuses', async () => {
-    setMailTransport(null);
-    const down = await ask(new Client(), mail());
-    expect(down.status).toBe(503);
-    expect(down.body.message).toMatch(/cannot email codes/);
-    setMailTransport(async () => { throw new Error('domain not verified'); });
-    const refused = await ask(new Client(), mail());
-    expect(refused.status).toBe(503);
-    expect(refused.body.message).toMatch(/could not email that code/);
-    expect(JSON.stringify(refused.body)).not.toContain('domain not verified');
-  });
-});
-
-/** A login made before profiles were created automatically: it exists, and has no profile. (One transaction, so no other test ever sees the trigger switched off.) */
-async function orphanLogin(o: { email?: string; phone?: string }) {
-  const c = await fake.admin.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query('ALTER TABLE auth.users DISABLE TRIGGER on_auth_user_created_create_customer_profile');
-    const { rows } = await c.query(
-      `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-       VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1::text, CASE WHEN $1::text IS NOT NULL THEN now() END, $2::text, CASE WHEN $2::text IS NOT NULL THEN now() END, '{"provider":"email"}'::jsonb, '{}'::jsonb, now(), now()) RETURNING id`,
-      [o.email ?? null, o.phone ?? null]
-    );
-    await c.query('ALTER TABLE auth.users ENABLE TRIGGER on_auth_user_created_create_customer_profile');
-    await c.query('COMMIT');
-    return rows[0].id as string;
-  } catch (err) {
-    await c.query('ROLLBACK');
-    throw err;
-  } finally {
-    c.release();
-  }
-}
-const profileCount = async (authId: string) => (await fake.admin.query('select count(*)::int n from public.profiles where auth_user_id = $1', [authId])).rows[0].n;
-
-describe('an older login that has no profile', () => {
-  it('an email that signed up long ago, with no profile, is set up at sign-in instead of being turned away', async () => {
-    const email = mail();
-    const authId = await orphanLogin({ email });
-    expect(await profileCount(authId)).toBe(0);
-    const c = new Client();
-    expectOk(await ask(c, email));
-    const r = expectOk(await enter(c, email, FAKE.otpCode));
-    expect(r.body).toMatchObject({ role: 'customer', needs_profile: true }); // it only needs a name now
-    expect(await profileCount(authId)).toBe(1);
-    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'customer', email, phone: null });
-    expectOk(await c.put('/api/me', { full_name: 'Yash Raj', email }));
-  });
-
-  it('a mobile number with no profile is set up at sign-in too', async () => {
-    const phone = String(9_100_000_000 + crypto.randomInt(0, 99_999_999));
-    const authId = await orphanLogin({ phone: `+91${phone}` });
-    expect(await profileCount(authId)).toBe(0);
-    const c = new Client();
-    expectOk(await c.post('/api/auth/otp/request', { phone }));
-    expectOk(await c.post('/api/auth/otp/verify', { phone, code: FAKE.otpCode }));
-    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'customer', phone: `+91${phone}` });
-    expect(await profileCount(authId)).toBe(1);
-  });
-});
-
-describe('the code in the email', () => {
-  it('is read out in groups, whatever length Supabase makes it (8 digits today)', async () => {
-    const { signInCodeEmail } = await import('../src/emails');
-    expect(signInCodeEmail('08760394').subject).toBe('0876 0394 is your WASHO sign-in code');
-    expect(signInCodeEmail('123456').subject).toBe('123 456 is your WASHO sign-in code');
-    expect(signInCodeEmail('08760394').html).toContain('>08760394<');
-    expect(signInCodeEmail('08760394').html).not.toMatch(/6-digit/);
-  });
-});
-
-describe('pasting the code', () => {
-  it('signs the customer in with httpOnly cookies, and a new one has no mobile number yet', async () => {
+describe('signing up with an email and a password', () => {
+  it('makes a customer account and signs them in at once: httpOnly cookies, no email sent, no code', async () => {
     const email = mail();
     const c = new Client();
-    expectOk(await ask(c, email));
-    const r = expectOk(await enter(c, email, codeIn(sent[0])));
-    expect(r.body).toMatchObject({ success: true, role: 'customer', needs_profile: true }); // a new customer still has to give a name
-    expect(r.setCookies.filter((s) => /^washo_(at|rt)=/.test(s))).toHaveLength(2);
+    const r = await signup(c, email.toUpperCase());
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ success: true, role: 'customer', needs_profile: true }); // they still have to give a name
+    expect(sessionCookies(r)).toHaveLength(2);
     for (const sc of r.setCookies) expect(sc).toMatch(/HttpOnly/i);
-    expect(JSON.stringify(r.body)).not.toMatch(/access_token|refresh_token|eyJ/);
+    expect(JSON.stringify(r.body)).not.toMatch(/access_token|refresh_token|eyJ|password/);
+    expect(sent).toHaveLength(0); // nothing is emailed to a customer, ever
     const me = expectOk(await c.get('/api/me')).body.user;
-    expect(me).toMatchObject({ role: 'customer', phone: null, needs_profile: true });
-    expect(me.email).toBe(email);
+    expect(me).toMatchObject({ role: 'customer', phone: null, needs_profile: true, email });
+    expect(me.admin).toBeUndefined();
     // naming themselves is all setup needs
     expect(expectOk(await c.put('/api/me', { full_name: 'Ira Deshmukh', email })).body.user).toMatchObject({ needs_profile: false, phone: null });
+    // and the same email + password signs in again, to the same account
+    const again = new Client();
+    const back = expectOk(await login(again, email));
+    expect(back.body).toMatchObject({ role: 'customer', needs_profile: false });
+    expect(expectOk(await again.get('/api/me')).body.user.id).toBe(me.id);
   });
 
-  it('a wrong code, a used code, and another address\'s code are refused', async () => {
+  it('has a password rule a person can follow: 8 or more characters with a letter and a number', async () => {
+    for (const [password, field] of [['short1', /at least 8/], ['allletters', /number/], ['12345678', /letters/], ['x'.repeat(73) + '1', /at most 72/]] as const) {
+      const r = await signup(new Client(), mail(), password);
+      expect(r.status, password).toBe(400);
+      expect(r.body.details.fields.password).toMatch(field);
+    }
+    expect((await signup(new Client(), 'not-an-email')).status).toBe(400);
+    expect((await signup(new Client(), mail(), null as unknown as string)).status).toBe(400);
+  });
+
+  it('refuses an address that already has an account (customer or staff), without giving anything away', async () => {
     const email = mail();
-    const c = new Client();
-    expectOk(await ask(c, email));
-    const wrong = await enter(c, email, '000000');
-    expect(wrong.status).toBe(400);
-    expect(wrong.body.message).toMatch(/isn't right/);
-    expect((await enter(c, mail(), FAKE.otpCode)).status).toBe(400); // that address was never asked
-    expect((await enter(c, email, 'abc')).status).toBe(400);
-    expectOk(await enter(c, email, FAKE.otpCode));
-    expect((await enter(new Client(), email, FAKE.otpCode)).status).toBe(400); // one use
-  });
-
-  it('a returning customer comes back to the same account (their bookings and details are there)', async () => {
-    const c0 = await customerWithVehicle('car');
-    const email = mail();
-    expectOk(await c0.c.put('/api/me', { full_name: 'Asha Kulkarni', email }));
-    // the same person later signs in by email instead: a separate login, but only after the number is verified do accounts merge (not here)
-    const c = new Client();
-    expectOk(await ask(c, email));
-    expectOk(await enter(c, email, FAKE.otpCode));
-    expect(expectOk(await c.get('/api/me')).body.user.role).toBe('customer');
-  });
-
-  it('specialists and admins cannot sign in with a code: they use their password', async () => {
+    expect((await signup(new Client(), email)).status).toBe(201);
+    const again = await signup(new Client(), email, 'Another-pass-9');
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('email_taken');
+    expect(again.body.message).toMatch(/Sign in instead/);
+    expect(sessionCookies(again)).toHaveLength(0);
+    // the original password still works, the second attempt changed nothing
+    expectOk(await login(new Client(), email));
+    expect((await login(new Client(), email, 'Another-pass-9')).status).toBe(401);
     const w = await fake.createStaff('worker');
+    expect((await signup(new Client(), w.email)).status).toBe(409);
+  });
+
+  it('a new account is a customer even if the sign-up asks for more', async () => {
     const c = new Client();
-    expectOk(await ask(c, w.email));
-    const r = await enter(c, w.email, FAKE.otpCode);
-    expect(r.status).toBe(403);
-    expect(r.body.code).toBe('staff_use_password');
-    expect(r.setCookies.filter((s) => /^washo_(at|rt)=/.test(s))).toHaveLength(0);
-    expect((await c.get('/api/me')).status).toBe(401);
-    // and the password still works
-    expectOk(await new Client().post('/api/auth/email/login', { email: w.email, password: w.password }));
+    const r = await signup(c, mail(), PASS, { role: 'admin', access: 'super_admin', full_name: 'Mallory' });
+    expect(r.status).toBe(201);
+    expect(expectOk(await c.get('/api/me')).body.user.role).toBe('customer');
+    expect((await c.get('/api/admin/overview')).status).toBe(403);
+  });
+});
+
+describe('signing in with an email and a password', () => {
+  it('a customer or a specialist is signed in at once, with no code; a wrong password is a plain 401 for every case', async () => {
+    const email = mail();
+    expect((await signup(new Client(), email)).status).toBe(201);
+    const w = await fake.createStaff('worker');
+    for (const [e, p] of [[email, PASS], [w.email, w.password]] as const) {
+      const c = new Client();
+      const ok = expectOk(await login(c, e, p));
+      expect(sessionCookies(ok)).toHaveLength(2);
+      expect(ok.body.step).toBeUndefined();
+    }
+    expect(sent).toHaveLength(0);
+    for (const [e, p] of [[email, 'wrong-pass-1'], [mail(), PASS], [w.email, 'wrong-pass-1']] as const) {
+      const bad = await login(new Client(), e, p);
+      expect(bad.status).toBe(401);
+      expect(bad.body.code).toBe('bad_credentials'); // the same answer whether the address exists or not
+      expect(sessionCookies(bad)).toHaveLength(0);
+    }
+  });
+
+  it('waits after 8 wrong passwords for the same address, even for the right one', async () => {
+    const email = mail();
+    expect((await signup(new Client(), email)).status).toBe(201);
+    for (let i = 0; i < 8; i++) expect((await login(new Client(), email, 'wrong-pass-1')).status).toBe(401);
+    const locked = await login(new Client(), email);
+    expect(locked.status).toBe(429);
+    expect(locked.body.code).toBe('login_limit');
+    // another address is unaffected
+    expectOk(await login(new Client(), (await fake.createStaff('worker')).email, 'Str0ng-pass!'));
+  });
+
+  it('an older login with no profile (made before profiles were automatic) is set up at sign-in', async () => {
+    const email = mail();
+    const c0 = await fake.admin.connect();
+    let authId: string;
+    try {
+      await c0.query('BEGIN');
+      await c0.query('ALTER TABLE auth.users DISABLE TRIGGER on_auth_user_created_create_customer_profile');
+      authId = (await c0.query(
+        `INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+         VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1::text, crypt($2, gen_salt('bf')), now(), '{"provider":"email"}'::jsonb, '{}'::jsonb, now(), now()) RETURNING id`,
+        [email, PASS]
+      )).rows[0].id;
+      await c0.query('ALTER TABLE auth.users ENABLE TRIGGER on_auth_user_created_create_customer_profile');
+      await c0.query('COMMIT');
+    } catch (err) {
+      await c0.query('ROLLBACK');
+      throw err;
+    } finally {
+      c0.release();
+    }
+    const count = async () => (await fake.admin.query('select count(*)::int n from public.profiles where auth_user_id = $1', [authId])).rows[0].n;
+    expect(await count()).toBe(0);
+    const c = new Client();
+    expect(expectOk(await login(c, email)).body).toMatchObject({ role: 'customer', needs_profile: true });
+    expect(await count()).toBe(1);
+    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'customer', email });
   });
 
   it('a locked (archived) account is told so', async () => {
     const email = mail();
-    expectOk(await ask(new Client(), email));
+    expect((await signup(new Client(), email)).status).toBe(201);
     const id = (await fake.admin.query(`select id from auth.users where lower(email) = $1`, [email])).rows[0].id;
     await fetch(`${fake.url}/auth/v1/admin/users/${id}`, { method: 'PUT', headers: { apikey: FAKE.serviceKey, Authorization: `Bearer ${FAKE.serviceKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ban_duration: '876000h' }) });
     expect(fake.isBanned(id)).toBe(true);
-    const r = await enter(new Client(), email, FAKE.otpCode);
+    const r = await login(new Client(), email);
     expect(r.status).toBe(403);
     expect(r.body.code).toBe('account_archived');
+  });
+
+  it('the old emailed-code sign-in for customers is gone', async () => {
+    const c = new Client();
+    expect((await c.post('/api/auth/email/otp/request', { email: mail() })).status).toBe(404);
+    expect((await c.post('/api/auth/email/otp/verify', { email: mail(), code: FAKE.otpCode })).status).toBe(404);
+    expect((await c.post('/api/auth/staff/login', { email: mail(), password: PASS })).status).toBe(404);
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe('an admin signs in in two steps', () => {
+  const admin = (o: { access?: 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support' | null } = {}) => fake.createStaff('admin', { email: `admin-${crypto.randomBytes(4).toString('hex')}@example.com`, password: 'Admin-Secret-77', ...o });
+  const rawToken = async (email: string, password: string) =>
+    (await (await fetch(`${fake.url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: FAKE.anonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })).json()) as { access_token: string; refresh_token: string };
+
+  it('the password alone signs nobody in: a code is emailed through Resend and nothing opens until it comes back', async () => {
+    const a = await admin();
+    const c = new Client();
+    const first = expectOk(await login(c, a.email, a.password));
+    expect(first.body).toMatchObject({ success: true, step: 'code', resend_in_seconds: 30 });
+    expect(first.body.email_hint).toMatch(/^a\*\*\*[a-f0-9]@example\.com$/); // enough to know which inbox, not the address
+    expect(first.body.role).toBeUndefined();
+    expect(sessionCookies(first)).toHaveLength(0); // no session yet
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe(a.email);
+    expect(sent[0].subject).toMatch(/is your WASHO admin sign-in code$/);
+    expect(codeIn(sent[0])).toBe(FAKE.otpCode);
+    expect(JSON.stringify(first.body)).not.toContain(FAKE.otpCode); // the code goes to the inbox, never to the browser
+    expect((await c.get('/api/me')).status).toBe(401);
+    expect((await c.get('/api/admin/overview')).status).toBe(401);
+
+    const done = expectOk(await c.post('/api/auth/admin/code/verify', { code: FAKE.otpCode }));
+    expect(done.body).toEqual({ success: true, role: 'admin' });
+    expect(sessionCookies(done)).toHaveLength(2);
+    for (const sc of done.setCookies) expect(sc).toMatch(/HttpOnly/i);
+    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'admin', admin: { access: 'super_admin' } });
+    expectOk(await c.get('/api/admin/overview'));
+    // the sign-in is in the activity log
+    const logged = await fake.admin.query(`select count(*)::int n from public.audit_events where event_type = 'admin_signed_in' and actor_profile_id = $1`, [a.profileId]);
+    expect(logged.rows[0].n).toBe(1);
+    // the same code cannot be used again
+    expect((await new Client().post('/api/auth/admin/code/verify', { code: FAKE.otpCode })).status).toBe(401); // (no step in progress there)
+  });
+
+  it('a wrong code counts down, five wrong ones cancel the step, and a code without the password step first is refused', async () => {
+    const a = await admin();
+    const c = new Client();
+    expectOk(await login(c, a.email, a.password));
+    const w1 = await c.post('/api/auth/admin/code/verify', { code: '000000' });
+    expect(w1.status).toBe(400);
+    expect(w1.body.message).toMatch(/isn't right.*4 tries left/);
+    expect((await c.post('/api/auth/admin/code/verify', { code: 'abc' })).status).toBe(400);
+    for (let i = 0; i < 3; i++) expect((await c.post('/api/auth/admin/code/verify', { code: '111111' })).status).toBe(400);
+    const last = await c.post('/api/auth/admin/code/verify', { code: '222222' });
+    expect(last.status).toBe(429);
+    expect(last.body.code).toBe('too_many_codes');
+    // the step is gone: even the right code does nothing now; they must start from the password
+    const after = await c.post('/api/auth/admin/code/verify', { code: FAKE.otpCode });
+    expect(after.status).toBe(401);
+    expect(after.body.code).toBe('step_expired');
+    expect((await c.get('/api/me')).status).toBe(401);
+    // nobody who skipped the password step can use a code
+    const stranger = new Client();
+    expect((await stranger.post('/api/auth/admin/code/verify', { code: FAKE.otpCode })).status).toBe(401);
+    // a forged "password was right" cookie is worthless
+    stranger.cookies.set('washo_2fa_pending', Buffer.from(JSON.stringify({ sub: a.authId, email: a.email, jti: 'x', exp: Date.now() + 60_000 })).toString('base64url') + '.AAAA');
+    expect((await stranger.post('/api/auth/admin/code/verify', { code: FAKE.otpCode })).status).toBe(401);
+    // and the page asking "am I signed in?" in the middle of the step does not throw the step away
+    const mid = new Client();
+    const b = await admin();
+    expectOk(await login(mid, b.email, b.password));
+    expect((await mid.get('/api/me')).status).toBe(401);
+    expectOk(await mid.post('/api/auth/admin/code/verify', { code: FAKE.otpCode }));
+  });
+
+  it('a stolen password cannot become a session: a login token from Supabase without the second step is not accepted, and neither is a forged or borrowed second step', async () => {
+    const a = await admin();
+    const b = await admin();
+    const tok = await rawToken(a.email, a.password); // what someone with only the password can get by talking to Supabase directly
+    const thief = new Client();
+    thief.cookies.set('washo_at', tok.access_token);
+    thief.cookies.set('washo_rt', tok.refresh_token);
+    for (const p of ['/api/me', '/api/admin/overview', '/api/admin/customers', '/api/admin/settings']) expect((await thief.get(p)).status, p).toBe(401);
+    expect((await thief.post('/api/admin/campaigns', {})).status).toBe(401);
+    thief.cookies.set('washo_2fa', 'forged.value');
+    expect((await thief.get('/api/admin/overview')).status).toBe(401);
+
+    // admin B's genuine second step cannot be lent to admin A's token
+    const bClient = new Client();
+    expectOk(await bClient.loginStaff(b.email, b.password));
+    const lent = new Client();
+    lent.cookies.set('washo_at', tok.access_token);
+    lent.cookies.set('washo_rt', tok.refresh_token);
+    lent.cookies.set('washo_2fa', bClient.cookies.get('washo_2fa')!);
+    expect((await lent.get('/api/admin/overview')).status).toBe(401);
+    // a worker or customer is not asked for any of this (it is only for admins)
+    const w = await fake.createStaff('worker');
+    const wt = await rawToken(w.email, w.password);
+    const wc = new Client();
+    wc.cookies.set('washo_at', wt.access_token);
+    wc.cookies.set('washo_rt', wt.refresh_token);
+    expect((await wc.get('/api/me')).status).toBe(200);
+  });
+
+  it('the second step runs out after 30 minutes without a request, slides while they are busy, and logging out ends it', async () => {
+    const a = await admin();
+    const c = new Client();
+    expectOk(await c.loginStaff(a.email, a.password));
+    const realNow = Date.now();
+    const at = (minutes: number) => vi.spyOn(Date, 'now').mockReturnValue(realNow + minutes * 60_000);
+    try {
+      at(20);
+      expectOk(await c.get('/api/admin/overview')); // busy: the clock slides
+      at(40);
+      expectOk(await c.get('/api/admin/overview')); // 40 minutes in, but only 20 since the last request
+      at(72);
+      const idle = await c.get('/api/admin/overview'); // 32 minutes since the last request
+      expect(idle.status).toBe(401);
+      expect(idle.body.code).toBe('unauthenticated');
+      expect(idle.body.message).toMatch(/signed out after a while/);
+      expect(c.cookies.has('washo_at')).toBe(false);
+      expect(c.cookies.has('washo_2fa')).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+    const b = await admin(); // (one code every 30 seconds per admin, so a second sign-in is a second admin here)
+    const again = new Client();
+    expectOk(await again.loginStaff(b.email, b.password));
+    expect((await again.post('/api/auth/logout')).status).toBe(200);
+    expect(again.cookies.has('washo_2fa')).toBe(false);
+    expect((await again.get('/api/admin/overview')).status).toBe(401);
+  });
+
+  it('a code can be sent again (after a wait), and only by someone who has the password step', async () => {
+    const a = await admin();
+    const c = new Client();
+    expect((await c.post('/api/auth/admin/code/resend', {})).status).toBe(401);
+    expectOk(await login(c, a.email, a.password));
+    const soon = await c.post('/api/auth/admin/code/resend', {});
+    expect(soon.status).toBe(429); // the 30-second wait between codes
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is refused (not let in on the password alone) when the code cannot be emailed', async () => {
+    const a = await admin();
+    setMailTransport(null);
+    const noMail = await login(new Client(), a.email, a.password);
+    expect(noMail.status).toBe(503);
+    expect(noMail.body.code).toBe('two_step_unavailable');
+    expect(sessionCookies(noMail)).toHaveLength(0);
+    const b = await admin();
+    setMailTransport(async () => { throw new Error('domain not verified'); });
+    const c = new Client();
+    const refused = await login(c, b.email, b.password);
+    expect(refused.status).toBe(503);
+    expect(refused.body.message).toMatch(/could not email the code/);
+    expect(JSON.stringify(refused.body)).not.toContain('domain not verified');
+    expect(sessionCookies(refused)).toHaveLength(0);
+    expect(c.cookies.has('washo_2fa_pending')).toBe(false);
+  });
+
+  it('ADMIN_CODE_TO (a temporary escape hatch for an unverified sender domain) sends the code to that inbox instead, and the step still works', async () => {
+    const { config } = await import('../src/config');
+    const a = await admin();
+    (config.admin as { codeTo: string }).codeTo = 'owner.inbox@example.com';
+    try {
+      const c = new Client();
+      const first = expectOk(await login(c, a.email, a.password));
+      expect(first.body.email_hint).toBe('o***x@example.com'); // the hint is about where it went
+      expect(sent.at(-1)!.to).toBe('owner.inbox@example.com');
+      expectOk(await c.post('/api/auth/admin/code/verify', { code: FAKE.otpCode }));
+      expect(expectOk(await c.get('/api/me')).body.user.role).toBe('admin');
+    } finally {
+      (config.admin as { codeTo: string }).codeTo = '';
+    }
+  });
+
+  it('an admin cannot sign in with a text message alone, and not with Google either', async () => {
+    const a = await admin();
+    const phone = String(9_200_000_000 + crypto.randomInt(0, 99_999_999));
+    await fake.admin.query(`update auth.users set phone = $1, phone_confirmed_at = now() where id = $2`, [`+91${phone}`, a.authId]);
+    const c = new Client();
+    expectOk(await c.post('/api/auth/otp/request', { phone }));
+    const r = await c.post('/api/auth/otp/verify', { phone, code: FAKE.otpCode });
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('admin_use_email');
+    expect(sessionCookies(r)).toHaveLength(0);
+    expect((await c.get('/api/me')).status).toBe(401);
+  });
+
+  it('wrong password is the same 401 as for anyone, and sends no email', async () => {
+    const a = await admin();
+    const bad = await login(new Client(), a.email, 'Wrong-Secret-77');
+    expect(bad.status).toBe(401);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('changing the password: the current one is checked, and an admin or specialist needs a strong one', async () => {
+    const c = await staffClient('worker', { email: `chg-${crypto.randomBytes(4).toString('hex')}@example.com`, password: 'Worker-Secret-77' });
+    const weak = await c.c.post('/api/auth/password', { current_password: 'Worker-Secret-77', new_password: 'short1A' });
+    expect(weak.status).toBe(400);
+    expect(weak.body.details.fields.new_password).toMatch(/at least 12/);
+    expect((await c.c.post('/api/auth/password', { current_password: 'Worker-Secret-77', new_password: 'lowercase-only-1234' })).body.details.fields.new_password).toMatch(/upper and lower/);
+    expect((await c.c.post('/api/auth/password', { current_password: 'Worker-Secret-77', new_password: 'Washo-Crew-Pass-2026' })).body.details.fields.new_password).toMatch(/too easy to guess/);
+    const wrong = await c.c.post('/api/auth/password', { current_password: 'Nope-Nope-123', new_password: 'Brand-New-Secret-9' });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.details.fields.current_password).toMatch(/not your current password/);
+    expect((await c.c.post('/api/auth/password', { current_password: 'Worker-Secret-77', new_password: 'Worker-Secret-77' })).status).toBe(400);
+    expectOk(await c.c.post('/api/auth/password', { current_password: 'Worker-Secret-77', new_password: 'Brand-New-Secret-9' }));
+    expect((await login(new Client(), c.email, 'Worker-Secret-77')).status).toBe(401);
+    expectOk(await login(new Client(), c.email, 'Brand-New-Secret-9'));
+    expect((await new Client().post('/api/auth/password', { current_password: 'a', new_password: 'b' })).status).toBe(401);
+  });
+
+  it('a customer changes theirs under the customer rule; one who signs in by phone has no password to change', async () => {
+    const email = mail();
+    const c = new Client();
+    expect((await signup(c, email)).status).toBe(201);
+    expect((await c.post('/api/auth/password', { current_password: PASS, new_password: 'short1' })).status).toBe(400);
+    expectOk(await c.post('/api/auth/password', { current_password: PASS, new_password: 'Rainy-night-7' }));
+    expectOk(await login(new Client(), email, 'Rainy-night-7'));
+    const byPhone = await customerWithVehicle('car');
+    expect((await byPhone.c.post('/api/auth/password', { current_password: 'x', new_password: 'Rainy-night-7' })).status).toBe(409);
   });
 });
 
@@ -203,8 +380,7 @@ describe('the mobile number is asked for when they pay, not before: typed, not c
   async function emailCustomer() {
     const email = mail();
     const c = new Client();
-    expectOk(await ask(c, email));
-    expectOk(await enter(c, email, FAKE.otpCode));
+    expect((await signup(c, email)).status).toBe(201);
     expectOk(await c.put('/api/me', { full_name: 'Ira Deshmukh', email }));
     const addr = expectOk(await c.post('/api/addresses', { society_name: 'Yashwin Orizzonte', building_block: 'B', flat_number: `B-${crypto.randomInt(100, 999)}`, parking_location: 'P1' })).body.address;
     const vehicle = expectOk(await c.post('/api/vehicles', { vehicle_type: 'car', make: 'Hyundai', model: 'Creta', registration_number: `MH12${crypto.randomBytes(2).toString('hex').toUpperCase()}${crypto.randomInt(1000, 9999)}`, color: 'White', address_id: addr.id })).body.vehicle;
@@ -243,8 +419,7 @@ describe('the mobile number is asked for when they pay, not before: typed, not c
     expect(me.full_name).toBe('Ira Deshmukh');
     expect((await authPhone(n.email)).confirmed).toBe(true);
     // and the email login still works (it was not orphaned)
-    const again = new Client();
-    expect((await ask(again, n.email)).status).toBe(429); // (the cooldown applies to the same address)
+    expectOk(await login(new Client(), n.email));
     expect(await fake.admin.query(`select count(*)::int n from public.profiles where auth_user_id = (select id from auth.users where lower(email) = $1)`, [n.email]).then((r) => r.rows[0].n)).toBe(1);
   });
 
@@ -254,8 +429,7 @@ describe('the mobile number is asked for when they pay, not before: typed, not c
     expect((await new Client().put('/api/me/phone', { phone: freshPhone() })).status).toBe(401);
 
     const other = await customerWithVehicle('car'); // signs in by phone: that number is theirs
-    const theirs = `${other.phone}`;
-    const clash = await n.c.put('/api/me/phone', { phone: theirs });
+    const clash = await n.c.put('/api/me/phone', { phone: `${other.phone}` });
     expect(clash.status).toBe(422);
     expect(clash.body.message).toMatch(/already registered with WASHO/);
     expect(expectOk(await n.c.get('/api/me')).body.user.phone).toBeNull();

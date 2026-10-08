@@ -208,8 +208,13 @@ describe('sign in with email', () => {
     expect(JSON.stringify(rw.body)).not.toMatch(/access_token|refresh_token|eyJ/);
     expect(rw.setCookies.length).toBe(2);
     expect(expectOk(await cw.get('/api/me')).body.user.role).toBe('worker');
+    // an admin's password is only the first step: a code is emailed, and the session starts when it comes back
     const ca = new Client();
-    expect(expectOk(await ca.post('/api/auth/email/login', { email: a.email, password: a.password })).body.role).toBe('admin');
+    const first = expectOk(await ca.post('/api/auth/email/login', { email: a.email, password: a.password }));
+    expect(first.body).toMatchObject({ step: 'code' });
+    expect(first.setCookies.filter((s) => /^washo_(at|rt)=/.test(s))).toHaveLength(0);
+    expect(expectOk(await ca.post('/api/auth/admin/code/verify', { code: FAKE.otpCode })).body.role).toBe('admin');
+    expect(expectOk(await ca.get('/api/me')).body.user.role).toBe('admin');
   });
 
   it('refuses a wrong password plainly, without a session', async () => {

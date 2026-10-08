@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
-  Address, AdminAddress, AdminBooking, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  ActivityEvent, Address, AdminAddress, AdminBooking, AdminDashboard, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -409,5 +409,43 @@ export const useAdminAction = () => {
     mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: Record<string, unknown>; method?: 'POST' | 'PUT' }) =>
       method === 'PUT' ? put<Record<string, any>>(`/admin/${path}`, body ?? {}) : post<Record<string, any>>(`/admin/${path}`, body ?? {}),
     onSuccess: () => refresh(),
+  });
+};
+
+
+// ───────── back-office ─────────
+export const useAdminDashboard = () => useQuery({ queryKey: keys.admin('dashboard'), queryFn: async () => (await get<{ dashboard: AdminDashboard }>('/admin/dashboard')).dashboard, refetchInterval: 60_000 });
+
+export const useAdminActivity = (q: string, limit: number) =>
+  useQuery({ queryKey: keys.admin('activity', q, limit), queryFn: async () => (await get<{ events: ActivityEvent[] }>(`/admin/activity?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`)).events, placeholderData: keepPreviousData });
+
+export const useAdminSupport = (status: TicketStatus | 'all') =>
+  useQuery({ queryKey: keys.admin('support', status), queryFn: async () => (await get<{ tickets: AdminSupportTicket[] }>(`/admin/support?status=${status}`)).tickets, refetchInterval: 60_000 });
+export const useAdminSupportTicket = (id: string | null) =>
+  useQuery({ queryKey: keys.admin('support-ticket', id), queryFn: () => get<SupportThread & { success: boolean }>(`/admin/support/${id}`), enabled: Boolean(id) });
+
+export const useAdminSettings = () => useQuery({ queryKey: keys.admin('settings'), queryFn: () => get<{ settings: AdminSettings; security: AdminSecurity }>('/admin/settings') });
+export const useAdminTeam = () => useQuery({ queryKey: keys.admin('team'), queryFn: async () => (await get<{ team: TeamMember[] }>('/admin/team')).team });
+
+/** Is the site paused for maintenance? Anyone may ask. */
+export const usePublicSettings = () =>
+  useQuery({ queryKey: ['public-settings'], queryFn: async () => { const { maintenance_mode, maintenance_message } = await get<PublicSettings & { success: boolean }>('/settings'); return { maintenance_mode, maintenance_message } as PublicSettings; }, staleTime: 30_000, retry: false, refetchOnWindowFocus: true });
+
+// ───────── a customer's complaints ─────────
+export const keysSupport = { list: ['support'] as const, one: (id: string) => ['support', id] as const };
+export const useMySupport = () => useQuery({ queryKey: keysSupport.list, queryFn: async () => (await get<{ tickets: SupportTicket[] }>('/support')).tickets });
+export const useMySupportTicket = (id: string | undefined) => useQuery({ queryKey: keysSupport.one(id ?? ''), queryFn: () => get<SupportThread & { success: boolean }>(`/support/${id}`), enabled: Boolean(id) });
+export const useCreateTicket = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { category: string; subject: string; message: string; booking_id?: string | null }) => post<{ ticket: { id: string; reference_code: string } }>('/support', b),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keysSupport.list }),
+  });
+};
+export const useReplyTicket = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (message: string) => post(`/support/${id}/reply`, { message }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: keysSupport.one(id) }); void qc.invalidateQueries({ queryKey: keysSupport.list }); },
   });
 };

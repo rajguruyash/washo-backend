@@ -146,8 +146,8 @@ describe('membership renewal reminders', () => {
   });
 
   it('says plainly that it is not ready when email is not set up', async () => {
+    const admin = await staffClient('admin'); // (an admin's sign-in is itself emailed, so email is switched off after they are in)
     setMailTransport(null);
-    const admin = await staffClient('admin');
     expect(expectOk(await admin.c.post('/api/admin/reminders/run')).body).toMatchObject({ ready: false, sent: 0 });
   });
 

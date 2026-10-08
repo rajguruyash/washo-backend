@@ -13,6 +13,8 @@ export interface Resp<T = any> {
 export let fake: FakeSupabase;
 let server: Server;
 let base = '';
+/** The address the website under test listens on (for the few tests that need the raw bytes of a response). */
+export const siteUrl = () => base;
 
 /** Boots the fake Supabase (real local database behind it) and the website API pointed at it. */
 export async function boot() {
@@ -33,6 +35,9 @@ export async function boot() {
   process.env.DATABASE_URL = process.env.SB_API_DB_URL || `postgresql://washo_api:washo_api_test@localhost:5432/${db}`;
   // The suite books far more washes on the same few days than a real day could take: lift the crowd limits for it (capacity tests set their own).
   await fake.admin.query(`DO $$ BEGIN IF to_regclass('public.capacity_rules') IS NOT NULL THEN UPDATE public.capacity_rules SET day_busy = 400, day_full = 500, slot_busy = 400, slot_full = 500; END IF; END $$`);
+  // Email goes nowhere in tests unless a test records it: an admin's second-step code is emailed, so admins could not sign in without a transport.
+  const { setMailTransport } = await import('../src/notify');
+  setMailTransport(async () => undefined);
   const { createApp } = await import('../src/app');
   server = createApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -97,8 +102,11 @@ export class Client {
     return { phone, ...v.body };
   }
 
+  /** Email + password. An ADMIN's password is only step one: the code Supabase made is always FAKE.otpCode here, so step two follows straight away. */
   async loginStaff(email: string, password: string) {
-    return this.post('/api/auth/staff/login', { email, password });
+    const first = await this.post('/api/auth/email/login', { email, password });
+    if (first.status === 200 && first.body.step === 'code') return this.post('/api/auth/admin/code/verify', { code: FAKE.otpCode });
+    return first;
   }
 }
 
@@ -139,7 +147,7 @@ export const PATTERN_3 = [
 export const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0]), crypto.randomBytes(64)]);
 export const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), crypto.randomBytes(32)]);
 
-export async function staffClient(role: 'worker' | 'admin', o: { name?: string; phone?: string } = {}) {
+export async function staffClient(role: 'worker' | 'admin', o: { name?: string; phone?: string; email?: string; password?: string; access?: 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support' | null } = {}) {
   const s = await fake.createStaff(role, o);
   const c = new Client();
   expectOk(await c.loginStaff(s.email, s.password));

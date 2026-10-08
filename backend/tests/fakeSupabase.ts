@@ -71,7 +71,7 @@ export interface FakeSupabase {
   /** Make the next /auth/v1/otp call fail the way Supabase does when it throttles. */
   throttleNextOtp(): void;
   /** Create an email+password staff account (what admin_create_worker does) with the given role. */
-  createStaff(role: 'worker' | 'admin', o?: { email?: string; password?: string; name?: string; phone?: string }): Promise<{ authId: string; profileId: string; email: string; password: string }>;
+  createStaff(role: 'worker' | 'admin', o?: { email?: string; password?: string; name?: string; phone?: string; access?: 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support' | null }): Promise<{ authId: string; profileId: string; email: string; password: string }>;
 }
 
 const readBody = (req: http.IncomingMessage): Promise<Buffer> =>
@@ -197,10 +197,11 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
             const email = String(b.email).toLowerCase();
             const dup = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
             if (dup.rows.length) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
+            if (b.password !== undefined && String(b.password).length < 8) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 8 characters.' });
             const { rows } = await admin.query(
-              `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, $2, '{"provider":"email","providers":["email"]}'::jsonb, $3::jsonb, now(), now()) RETURNING id`,
-              [email, b.email_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {})]
+              `INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, CASE WHEN $4::text IS NULL THEN '' ELSE crypt($4, gen_salt('bf')) END, $2, '{"provider":"email","providers":["email"]}'::jsonb, $3::jsonb, now(), now()) RETURNING id`,
+              [email, b.email_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {}), b.password ?? null]
             );
             return send(res, 200, { id: rows[0].id, email });
           }
@@ -253,7 +254,12 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
       if (path === '/auth/v1/user' && req.method === 'PUT') {
         const uid = verifyBearer(req);
         if (!uid) return send(res, 401, { code: 401, error_code: 'bad_jwt', msg: 'invalid JWT' });
-        const { phone } = json();
+        const { phone, password } = json();
+        if (password !== undefined) {
+          if (String(password).length < 8) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 8 characters.' });
+          await admin.query(`UPDATE auth.users SET encrypted_password = crypt($1, gen_salt('bf')), updated_at = now() WHERE id = $2`, [password, uid]);
+          if (!phone) return send(res, 200, { id: uid });
+        }
         if (phone) {
           const digits = String(phone).replace(/\D/g, '');
           const { rows } = await admin.query(`SELECT id FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1 AND id <> $2`, [digits, uid]);
@@ -521,6 +527,10 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
            ON CONFLICT (auth_user_id) DO UPDATE SET role = EXCLUDED.role, full_name = EXCLUDED.full_name, phone = EXCLUDED.phone RETURNING id`,
           [id, role, o.name ?? `Test ${role}`, o.phone ?? null]
         );
+        // An admin also has a role (migration 27); the default is the owner's, which can do everything.
+        if (role === 'admin' && o.access !== null && (await c.query(`SELECT to_regclass('public.admin_access') AS t`)).rows[0].t) { // (a database from before migration 27 has no roles table)
+          await c.query(`INSERT INTO public.admin_access (profile_id, access) VALUES ($1, $2) ON CONFLICT (profile_id) DO UPDATE SET access = EXCLUDED.access`, [p.rows[0].id, o.access ?? 'super_admin']);
+        }
         await c.query('COMMIT');
         return { authId: id, profileId: p.rows[0].id as string, email, password };
       } catch (e) {

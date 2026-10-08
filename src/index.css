@@ -158,3 +158,17 @@ input, select, textarea { font-size: 16px; }
 @keyframes art-spray {
   to { stroke-dashoffset: -22; }
 }
+
+
+/* The slide-to-pay found something missing: it goes red and scrolls here, and this place flashes red once so the eye lands on it. */
+@keyframes missing-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(255 107 122 / 0); }
+  18%, 62% { box-shadow: 0 0 0 4px rgb(255 107 122 / 0.6), 0 0 32px rgb(255 107 122 / 0.4); }
+}
+.missing-flash {
+  animation: missing-flash 2s ease-in-out;
+  border-color: rgb(255 107 122 / 0.85) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .missing-flash { animation: none; box-shadow: 0 0 0 4px rgb(255 107 122 / 0.6); }
+}

@@ -63,9 +63,10 @@ describe('production-shaped schema (no profiles.email)', () => {
     expect((await cw.get('/api/me')).body.user).toMatchObject({ role: 'worker', full_name: 'Ravi Patil', needs_profile: false, email: w.email });
 
     const ca = new Client();
-    const ra = await ca.loginStaff(a.email, a.password);
+    const ra = await ca.loginStaff(a.email, a.password); // password, then the emailed code (an admin's second step works without any new migration)
     expect(ra.body.role).toBe('admin');
-    expect((await ca.get('/api/me')).body.user).toMatchObject({ role: 'admin', email: a.email });
+    expect((await ca.get('/api/me')).body.user).toMatchObject({ role: 'admin', email: a.email, admin: null }); // no roles table yet: signed in, but nothing to open until migration 27
+    expect((await ca.get('/api/admin/overview')).status).toBe(403);
   });
 
   it('role gates still hold: customers are kept out of the staff areas, workers out of admin', async () => {
@@ -79,7 +80,7 @@ describe('production-shaped schema (no profiles.email)', () => {
     expect((await cw.get('/api/admin/overview')).status).toBe(403);
   });
 
-  it('a customer cannot use the staff door', async () => {
+  it('a customer who has a password signs in as a customer with the one email form (never as staff)', async () => {
     const phone = randomPhone();
     const c = new Client();
     await c.loginCustomer(phone);
@@ -87,9 +88,10 @@ describe('production-shaped schema (no profiles.email)', () => {
     await fake.admin.query(`UPDATE auth.users SET email = $2, encrypted_password = crypt('Passw0rd!x', gen_salt('bf')) WHERE id = $1`, [rows[0].id, `cust-${phone}@t.test`]);
     const s = new Client();
     const r = await s.loginStaff(`cust-${phone}@t.test`, 'Passw0rd!x');
-    expect(r.status).toBe(403);
-    expect(r.body.code).toBe('not_staff');
-    expect(s.cookies.size).toBe(0);
+    expect(r.status).toBe(200);
+    expect(r.body.role).toBe('customer');
+    expect((await s.get('/api/worker/queue')).status).toBe(403);
+    expect((await s.get('/api/admin/overview')).status).toBe(403);
   });
 
   it('authenticated but no profile row: a clear 403, never a silent hang', async () => {

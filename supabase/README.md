@@ -188,3 +188,13 @@ A customer profile is created by a trigger when an auth account is created. A lo
 `public.ensure_my_profile()` repairs exactly that, for the CALLER's own login and only when it has no profile: a login with a confirmed number joins the profile that already has the number (the usual phone linking), otherwise a customer profile is made from the login's details. It never touches a login that has a profile and never makes staff.
 The website calls it right after a code has been accepted (email code and phone code). Tests: `after-26-ensure-my-profile.test.ts`, `backend/tests/api-email-login.test.ts`.
 
+
+
+## Admin roles, support, settings, activity log, dashboard and export (migration 27)
+
+`20261004000027_admin_roles_support_settings.sql`, additive and re-runnable. New: `admin_access` (one role per admin: super_admin, operations, finance, marketing, support), `admin_role_areas` (what each role may `view` or `manage`, as data), `app_settings` (maintenance mode, its message, the big-refund threshold), `support_tickets` + `support_messages`.
+All five tables have row-level security on and NO direct access for anyone: everything goes through `SECURITY DEFINER` functions that check the caller's role (`app_private.require_access(area, level)`). Functions: `my_admin_access`, `admin_team`, `admin_set_access`, `admin_promote_to_admin`, `admin_set_admin_active`, `get_public_settings` (anyone), `admin_get_settings`, `admin_set_setting`, `admin_refund_policy`,
+`create_support_ticket`, `my_support_tickets`, `my_support_ticket`, `reply_to_my_ticket`, `admin_support_list`, `admin_support_get`, `admin_support_reply`, `admin_support_set_status`, `admin_activity`, `admin_log_event`, `admin_dashboard`, `admin_export`.
+`admin_begin_refund`, `admin_finish_refund`, `admin_fail_refund` and `admin_resolve_refund` are replaced with the same bodies plus the `payments` permission, and (for a refund at or above the threshold) the super admin.
+The seed makes rajguruyash29@gmail.com the super admin and any other existing admin Operations. An admin with NO row in `admin_access` can do nothing new (fails closed); the website still treats the owner's email as super admin so a mistake in the table cannot lock the owner out.
+Production dry run (rolled back): data fingerprint unchanged, the one admin becomes super_admin with all 21 areas, the dashboard / export / team / settings functions answer for them against real data, and `anon` is refused.

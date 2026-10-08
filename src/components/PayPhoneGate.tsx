@@ -10,7 +10,7 @@ export function PayPhoneGate({ what = 'pay' }: { what?: 'pay' | 'claim' }) {
   const needs = useNeedsPhone();
   if (!needs) return null;
   return (
-    <div className="glass mt-5 border-warn/30 p-5" role="group" aria-label="Mobile number needed">
+    <div id="pay-phone" className="glass mt-5 border-warn/30 p-5" role="group" aria-label="Mobile number needed">
       <PhoneEntry
         compact
         intro={`You signed in with your email, so we need a mobile number before you ${what}. Your specialist rings you before every wash.`}

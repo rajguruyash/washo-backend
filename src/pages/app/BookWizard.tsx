@@ -7,6 +7,7 @@ import { ErrorState } from '../../components/EmptyState';
 import { ServicePhoto } from '../../components/ServicePhoto';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
+import { pausedBlocker, phoneBlocker } from '../../lib/payBlockers';
 import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { WizardStepper } from '../../components/WizardStepper';
@@ -15,7 +16,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { cn } from '../../lib/cn';
 import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
-import { useAddresses, useCapacity, useCatalog, useStartOnDemandPayment, useVehicles } from '../../lib/queries';
+import { useAddresses, useCapacity, useCatalog, usePublicSettings, useStartOnDemandPayment, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle } from '../../lib/types';
 import { usePay } from '../../lib/usePay';
@@ -55,7 +56,8 @@ export default function BookWizard() {
   const address = addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
   const ok = [Boolean(vehicle), Boolean(service), Boolean(date && slot), true][step];
   const dir = useStepDirection(step);
-  const needsPhone = useNeedsPhone(); // signed in by email: a verified mobile number first
+  const needsPhone = useNeedsPhone(); // signed in by email: a mobile number first
+  const paused = usePublicSettings().data;
   const slide = stepMotion(dir);
 
   // Slide to pay: resolves only when the payment is verified; throws if it was not, so the handle springs back.
@@ -120,7 +122,7 @@ export default function BookWizard() {
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t lg:left-[17rem] border-white/[0.08] bg-ink-900/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <Button variant="glass" size="lg" disabled={step === 0} onClick={() => setStep(step - 1)} aria-label="Back" icon={<ArrowLeft className="h-5 w-5" />} />
-          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(service.price!) : ''}`.trim()} disabled={!service || paying || start.isPending || needsPhone} onConfirm={submit} onDone={afterPaid} />}
+          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(service.price!) : ''}`.trim()} disabled={paying || start.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone)]} onConfirm={submit} onDone={afterPaid} />}
         </div>
       </div>
     </div>

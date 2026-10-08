@@ -126,22 +126,25 @@ export function renewalEmail(d: RenewalEmail): { subject: string; html: string }
   };
 }
 
-// ───────────────────────── sign-in code ─────────────────────────
-/** The email a customer asked for to sign in: the code, big, to copy and paste. Sent straight away and never logged or retried. */
-export function signInCodeEmail(code: string): { subject: string; html: string } {
+// ───────────────────────── admin sign-in code ─────────────────────────
+/**
+ * The second step of an ADMIN's sign-in (after their password): the code, big, to copy and paste. Sent straight away and never logged or retried.
+ * Customers never get one: they sign in with their mobile number (an SMS code) or an email and password.
+ */
+export function adminSignInCodeEmail(code: string): { subject: string; html: string } {
   const group = code.length % 4 === 0 ? 4 : 3; // 8 digits read as 4 + 4, 6 as 3 + 3
   const spaced = code.replace(new RegExp(`(\\d{${group}})(?=\\d)`, 'g'), '$1 ').trim();
   const body =
-    p('Use this code to sign in to WASHO. Copy it, go back to the page you were on, and paste it in.') +
+    p('Someone just entered your WASHO admin password. To finish signing in, copy this code and paste it into the sign-in page.') +
     `<p style="margin:18px 0 20px;text-align:center"><span style="display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:14px 22px;font-size:34px;font-weight:800;letter-spacing:6px;color:#0f172a;font-family:'SFMono-Regular',Menlo,Consolas,monospace">${esc(code)}</span></p>` +
     p('The code works for a short while and only once.');
   return {
-    subject: `${spaced} is your WASHO sign-in code`,
+    subject: `${spaced} is your WASHO admin sign-in code`,
     html: layout({
-      preheader: `Your WASHO sign-in code is ${spaced}.`,
-      heading: 'Your sign-in code',
+      preheader: `Your WASHO admin sign-in code is ${spaced}.`,
+      heading: 'Your admin sign-in code',
       body,
-      foot: 'If you did not ask for this, you can ignore this email: nobody can sign in without the code, and it goes to no one else.',
+      foot: 'If this was not you, do not share the code, and change your password as soon as you can: someone has your password.',
     }),
   };
 }

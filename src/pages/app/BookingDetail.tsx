@@ -99,6 +99,8 @@ export default function BookingDetail() {
         {b.cancel_reason && <div className="p-5"><p className="eyebrow">Cancellation reason</p><p className="mt-1 text-sm">{b.cancel_reason}</p></div>}
       </div>
 
+      <p className="mt-4 text-sm text-fog">Something wrong with this wash? <Link to={`/app/help?booking=${b.id}`} className="font-semibold text-washo-300 hover:text-white">Tell us</Link>.</p>
+
       {refund && (
         <div className="glass mt-5 flex items-start gap-3 p-5">
           <Undo2 className="mt-0.5 h-5 w-5 shrink-0 text-washo-300" />

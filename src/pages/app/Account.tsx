@@ -1,4 +1,4 @@
-import { LogOut, MapPin, Pencil, Plus } from 'lucide-react';
+import { LifeBuoy, LogOut, MapPin, Pencil, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
@@ -87,6 +87,13 @@ export default function Account() {
               <p className="text-sm text-fog">Manage the vehicles on your account.</p>
             </div>
             <Link to="/app/vehicles" className="text-sm font-semibold text-washo-300 hover:text-white">Open</Link>
+          </div>
+          <div className="glass flex items-center justify-between p-6">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-bold"><LifeBuoy className="h-5 w-5 text-washo-300" /> Help</h2>
+              <p className="text-sm text-fog">Something went wrong? Tell us, and follow our reply.</p>
+            </div>
+            <Link to="/app/help" className="text-sm font-semibold text-washo-300 hover:text-white">Open</Link>
           </div>
           <Button variant="glass" full icon={<LogOut className="h-4 w-4" />} onClick={() => void logout()}>Sign out</Button>
         </div>

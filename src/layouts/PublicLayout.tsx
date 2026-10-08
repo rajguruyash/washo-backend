@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Logo } from '../components/brand/Logo';
 import { CampaignBanner } from '../components/CampaignBanner';
+import { MaintenanceNotice } from '../components/MaintenanceNotice';
 import { ButtonLink } from '../components/ui/Button';
 import { useAuth } from '../state/auth';
 
@@ -54,6 +55,7 @@ export function PublicLayout() {
           </div>
         </div>
         <CampaignBanner />
+        <MaintenanceNotice className="mx-4 mb-2 mt-2 sm:mx-6 lg:mx-8" />
         <AnimatePresence>
           {open && (
             <motion.nav initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden md:hidden" aria-label="Mobile">

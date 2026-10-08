@@ -102,9 +102,13 @@ export async function createWorker(s: Session) {
   return u;
 }
 
-export async function createAdmin(s: Session) {
+export type AdminAccess = 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support';
+
+/** An admin. Since migration 27 an admin also has a role (admin_access); the default is the owner's, which can do everything. */
+export async function createAdmin(s: Session, access: AdminAccess | null = 'super_admin') {
   const u = await createCustomer(s);
   await setRole(s, u.profileId, 'admin');
+  if (access) await s.q(`DO $$ BEGIN IF to_regclass('public.admin_access') IS NOT NULL THEN INSERT INTO public.admin_access (profile_id, access) VALUES ('${u.profileId}', '${access}') ON CONFLICT (profile_id) DO UPDATE SET access = EXCLUDED.access; END IF; END $$`);
   return u;
 }
 

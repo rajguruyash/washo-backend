@@ -1,13 +1,17 @@
 import crypto from 'crypto';
 import { Request, Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
+import { adminAccessFor } from '../access';
+import * as adminStep from '../adminSession';
 import { config } from '../config';
 import { HttpError, parse } from '../errors';
 import { ACCESS_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireRole, requireSession, setSessionCookies } from '../middleware/http';
 import { Claims, withUser } from '../db';
 import { phoneSchema } from '../phone';
 import { Profile, forgetProfile, needsProfile, profileFor, profileForOrRepair } from '../profile';
-import { signInCodeEmail } from '../emails';
+import { adminSignInCodeEmail } from '../emails';
+import { customerPassword, strongPassword } from '../password';
 import { mailConfigured, sendMail } from '../notify';
 import { gotrue, gotrueAdmin } from '../supabase';
 import { verifyAccessToken } from '../jwt';
@@ -65,72 +69,84 @@ authRouter.post(
       req.body
     );
     const session = await gotrue.verifyOtp(phone, code);
-    setSessionCookies(res, session);
 
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    await recordSource(claims, source);
-
     let profile: Profile;
     try {
       profile = await profileForOrRepair(claims);
     } catch (err) {
       // Signed in at Supabase but unusable here: do not leave half a session behind, and say why.
-      clearSessionCookies(res);
+      await gotrue.logout(session.access_token);
       throw err;
     }
+    // A text message alone must never open an admin account (a stolen or swapped SIM would be enough): admins sign in with their email, password and emailed code.
+    if (profile.role === 'admin') {
+      await gotrue.logout(session.access_token);
+      throw new HttpError(403, 'admin_use_email', 'Admins sign in with their email and password. Choose "Continue with Email".');
+    }
+    setSessionCookies(res, session);
+    await recordSource(claims, source);
     res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
   })
 );
 
-// ───────────────────────── customers: sign in with an emailed code ─────────────────────────
-// The customer types their email, gets a code by email (sent from here through Resend; Supabase Auth makes and later checks the code,
-// with its expiry and attempt limits) and pastes it in. Only customers: specialists and admins keep their password, so a mailbox alone can
-// never open a staff account. A new address becomes a customer account.
+// ───────────────────────── email + password ─────────────────────────
+// A customer can sign up or sign in with an email and a password. There is NO email verification and NO emailed code for customers: the password is
+// their key (and a mobile number is asked for, unverified, before they pay). Specialists use the same form. An ADMIN's password is only the first step:
+// a code is then emailed to them (through Resend) and the session starts only when it comes back (below).
 const emailSchema = z.email('Enter a valid email address.').max(254);
+const loginBody = z.object({ email: emailSchema, password: z.string().min(1, 'Enter your password.').max(200) });
+
 const COOLDOWN_MS = 30_000;
 const HOURLY_MAX = 6;
-const asked = new Map<string, number[]>(); // email -> when codes were last asked for (this server only; Supabase and the IP limiter back it up)
+const asked = new Map<string, number[]>(); // address -> when admin codes were last asked for (this server only; Supabase and the IP limiter back it up)
 const tooMany = (email: string): HttpError | null => {
   const now = Date.now();
   const recent = (asked.get(email) ?? []).filter((t) => now - t < 3_600_000);
   if (recent.length && now - recent[recent.length - 1] < COOLDOWN_MS) return new HttpError(429, 'otp_cooldown', 'Please wait a little before asking for another code.');
-  if (recent.length >= HOURLY_MAX) return new HttpError(429, 'otp_cooldown', 'Too many codes were asked for this email. Please try again in an hour.');
+  if (recent.length >= HOURLY_MAX) return new HttpError(429, 'otp_cooldown', 'Too many codes were asked for this account. Please try again in an hour.');
   recent.push(now);
   asked.set(email, recent);
   if (asked.size > 2000) asked.clear();
   return null;
 };
 
-authRouter.post(
-  '/auth/email/otp/request',
-  authLimiter,
-  asyncHandler(async (req, res) => {
-    const { email } = parse(z.object({ email: emailSchema }), req.body);
-    const addr = email.trim().toLowerCase();
-    if (!mailConfigured()) throw new HttpError(503, 'otp_unavailable', 'We cannot email codes right now. Please use your mobile number, or try again shortly.');
-    const limited = tooMany(addr);
-    if (limited) throw limited;
-    const code = await gotrueAdmin.emailOtp(addr);
-    const mail = signInCodeEmail(code);
-    try {
-      await sendMail({ to: addr, ...mail });
-    } catch (err) {
-      console.error('Sign-in code email failed:', (err as Error).message);
-      throw new HttpError(503, 'otp_unavailable', 'We could not email that code. Please check the address and try again.');
-    }
-    res.json({ success: true, resend_in_seconds: 30 });
-  })
-);
+/** Tests only: forget who was sent a code, so one admin can sign in again at once. */
+export const forgetCodeCooldowns = () => asked.clear();
+
+// Wrong passwords for one address: after 8 in 15 minutes it waits, whoever is asking (Supabase has its own limits behind this one).
+const failures = new Map<string, number[]>();
+const FAIL_WINDOW_MS = 15 * 60_000;
+const FAIL_MAX = 8;
+const recentFailures = (key: string) => (failures.get(key) ?? []).filter((t) => Date.now() - t < FAIL_WINDOW_MS);
+const lockedOut = (key: string) => recentFailures(key).length >= FAIL_MAX;
+const noteFailure = (key: string) => {
+  failures.set(key, [...recentFailures(key), Date.now()]);
+  if (failures.size > 2000) failures.clear();
+};
+
+// A new account is a bigger step than a sign-in, so a single address (a robot) may only make so many an hour. Mobile networks and apartment wifi put many
+// real people behind one address, so the number is generous.
+const signupLimiter = rateLimit({
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: () => config.env === 'test',
+  windowMs: 60 * 60_000,
+  limit: 30,
+  message: { success: false, code: 'rate_limited', message: 'Too many new accounts from here. Please try again later.' },
+});
+
+const maskEmail = (e: string) => e.replace(/^(.)(.*)(.)@/, (_m, a: string, mid: string, z: string) => (mid ? `${a}***${z}@` : `${a}***@`));
 
 authRouter.post(
-  '/auth/email/otp/verify',
+  '/auth/email/signup',
   authLimiter,
+  signupLimiter,
   asyncHandler(async (req, res) => {
-    const { email, code, source } = parse(
-      z.object({ email: emailSchema, code: z.string().trim().regex(/^\d{4,10}$/, 'Enter the code from your email.'), source: sourceSchema }),
-      req.body
-    );
-    const session = await gotrue.verifyEmailOtp(email.trim().toLowerCase(), code);
+    const { email, password, source } = parse(z.object({ email: emailSchema, password: customerPassword, source: sourceSchema }), req.body);
+    const addr = email.trim().toLowerCase();
+    await gotrueAdmin.createEmailUser(addr, password);
+    const session = await gotrue.passwordLogin(addr, password);
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
     let profile: Profile;
     try {
@@ -141,47 +157,91 @@ authRouter.post(
     }
     if (profile.role !== 'customer') {
       await gotrue.logout(session.access_token);
-      throw new HttpError(403, 'staff_use_password', 'Specialists and admins sign in with their email and password.');
+      throw new HttpError(403, 'not_customer', 'That email cannot be used to sign up.');
     }
     setSessionCookies(res, session);
     await recordSource(claims, source);
-    res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
+    res.status(201).json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
   })
 );
 
-// Specialists and WASHO admins sign in with the email + password WASHO created for them. Customers never use this:
-// a customer account is refused here even with the right password.
-authRouter.post(
-  '/auth/staff/login',
-  authLimiter,
-  asyncHandler(async (req, res) => {
-    const { email, password } = parse(z.object({ email: z.email('Enter your email address.'), password: z.string().min(1, 'Enter your password.').max(200) }), req.body);
-    const session = await gotrue.passwordLogin(email.trim().toLowerCase(), password);
-    const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    let profile: Profile;
-    try {
-      profile = await profileFor(claims, { fresh: true });
-    } catch (err) {
-      await gotrue.logout(session.access_token);
-      throw err;
-    }
-    if (profile.role !== 'worker' && profile.role !== 'admin') {
-      await gotrue.logout(session.access_token);
-      throw new HttpError(403, 'not_staff', 'This sign-in is for WASHO staff. Customers sign in with their mobile number.');
-    }
-    setSessionCookies(res, session);
-    res.json({ success: true, role: profile.role });
-  })
-);
-
-// Email + password, for any account that has one (specialists and admins today). Where they land depends on their role.
 authRouter.post(
   '/auth/email/login',
   authLimiter,
   asyncHandler(async (req, res) => {
-    const { email, password } = parse(z.object({ email: z.email('Enter your email address.'), password: z.string().min(1, 'Enter your password.').max(200) }), req.body);
-    const session = await gotrue.passwordLogin(email.trim().toLowerCase(), password);
+    const { email, password } = parse(loginBody, req.body);
+    const addr = email.trim().toLowerCase();
+    if (lockedOut(addr)) throw new HttpError(429, 'login_limit', 'Too many wrong passwords for this account. Please wait 15 minutes, or sign in with your mobile number.');
+    let session;
+    try {
+      session = await gotrue.passwordLogin(addr, password);
+    } catch (err) {
+      if (err instanceof HttpError && err.code === 'bad_credentials') noteFailure(addr);
+      throw err;
+    }
+    failures.delete(addr);
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
+    let profile: Profile;
+    try {
+      profile = await profileForOrRepair(claims); // an older login with no profile is set up now, instead of being told its account is missing
+    } catch (err) {
+      await gotrue.logout(session.access_token);
+      throw err;
+    }
+    if (profile.role !== 'admin') {
+      setSessionCookies(res, session);
+      return res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
+    }
+
+    // An admin: the password was only the first step. The login Supabase just gave is thrown away; nothing is signed in until the emailed code comes back.
+    await gotrue.logout(session.access_token);
+    if (!adminStep.secondStepAvailable() || !mailConfigured()) {
+      throw new HttpError(503, 'two_step_unavailable', 'Admin sign-in needs email to be set up on the server, and it is not right now. Please try again shortly.');
+    }
+    const sentTo = await sendAdminCode(res, { sub: session.user.id, email: addr });
+    res.json({ success: true, step: 'code', email_hint: maskEmail(sentTo), resend_in_seconds: 30 });
+  })
+);
+
+/** Makes a code for the admin, emails it, and remembers (signed, in their browser) that the password was right. */
+async function sendAdminCode(res: Parameters<typeof adminStep.begin>[0], who: { sub: string; email: string }): Promise<string> {
+  const limited = tooMany(`admin:${who.email}`);
+  if (limited) throw limited;
+  const code = await gotrueAdmin.loginCode(who.email);
+  const to = config.admin.codeTo || who.email; // normally their own address (ADMIN_CODE_TO is a temporary escape hatch, see config)
+  try {
+    await sendMail({ to, ...adminSignInCodeEmail(code) });
+  } catch (err) {
+    console.error(`Admin sign-in code email to ${maskEmail(to)} failed:`, (err as Error).message);
+    throw new HttpError(503, 'otp_unavailable', 'We could not email the code. Please try again in a moment.');
+  }
+  adminStep.begin(res, who);
+  return to;
+}
+
+authRouter.post(
+  '/auth/admin/code/verify',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const step = adminStep.pending(req);
+    if (!step) throw new HttpError(401, 'step_expired', 'That took too long. Please enter your email and password again.');
+    const { code } = parse(z.object({ code: z.string().trim().regex(/^\d{4,10}$/, 'Enter the code from your email.') }), req.body);
+    let session;
+    try {
+      session = await gotrue.verifyEmailOtp(step.email, code);
+    } catch (err) {
+      if (err instanceof HttpError && err.code === 'otp_invalid') {
+        const left = adminStep.wrongCode(res, step);
+        if (left === 0) throw new HttpError(429, 'too_many_codes', 'Too many wrong codes. Please enter your email and password again.');
+        throw new HttpError(400, 'otp_invalid', `That code isn't right, or it has expired. ${left} ${left === 1 ? 'try' : 'tries'} left.`);
+      }
+      throw err;
+    }
+    const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
+    if (session.user.id !== step.sub) {
+      await gotrue.logout(session.access_token);
+      throw new HttpError(401, 'step_expired', 'That took too long. Please enter your email and password again.');
+    }
     let profile: Profile;
     try {
       profile = await profileFor(claims, { fresh: true });
@@ -189,8 +249,55 @@ authRouter.post(
       await gotrue.logout(session.access_token);
       throw err;
     }
+    if (profile.role !== 'admin') {
+      await gotrue.logout(session.access_token);
+      throw new HttpError(403, 'forbidden', 'You do not have access to that.');
+    }
     setSessionCookies(res, session);
-    res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
+    adminStep.finish(res, claims.sub);
+    // A record of the sign-in for the activity log. Best effort: it never blocks a sign-in.
+    await withUser(claims, (c) => c.query(`SELECT public.admin_log_event('admin_signed_in')`)).catch((e) => console.warn('Sign-in not logged:', (e as Error).message));
+    res.json({ success: true, role: 'admin' });
+  })
+);
+
+authRouter.post(
+  '/auth/admin/code/resend',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const step = adminStep.pending(req);
+    if (!step) throw new HttpError(401, 'step_expired', 'That took too long. Please enter your email and password again.');
+    if (!adminStep.secondStepAvailable() || !mailConfigured()) throw new HttpError(503, 'two_step_unavailable', 'We cannot email codes right now. Please try again shortly.');
+    const sentTo = await sendAdminCode(res, { sub: step.sub, email: step.email });
+    res.json({ success: true, email_hint: maskEmail(sentTo), resend_in_seconds: 30 });
+  })
+);
+
+// A signed-in person changes their own password (the old one is checked first). Staff and admins need the stronger rule.
+authRouter.post(
+  '/auth/password',
+  authLimiter,
+  requireSession,
+  asyncHandler(async (req, res) => {
+    const s = req.session!;
+    const email = s.claims.email; // the address this LOGIN uses (a contact email on the profile does not mean a password exists)
+    if (!email) throw new HttpError(409, 'no_password', 'You sign in with your mobile number, so there is no password to change.');
+    const b = parse(z.object({ current_password: z.string().min(1, 'Enter your current password.').max(200), new_password: s.profile.role === 'customer' ? customerPassword : strongPassword }), req.body);
+    if (b.new_password === b.current_password) throw new HttpError(400, 'validation_error', 'Choose a different password.', { fields: { new_password: 'Choose a different password.' } });
+    const key = email.toLowerCase();
+    if (lockedOut(key)) throw new HttpError(429, 'login_limit', 'Too many wrong passwords. Please wait 15 minutes.');
+    try {
+      const check = await gotrue.passwordLogin(key, b.current_password);
+      await gotrue.logout(check.access_token); // the check made a login of its own; drop it
+    } catch (err) {
+      if (err instanceof HttpError && err.code === 'bad_credentials') {
+        noteFailure(key);
+        throw new HttpError(400, 'validation_error', 'That is not your current password.', { fields: { current_password: 'That is not your current password.' } });
+      }
+      throw err;
+    }
+    await gotrue.updatePassword(s.accessToken, b.new_password);
+    res.json({ success: true });
   })
 );
 
@@ -252,6 +359,10 @@ authRouter.get(
       if (err instanceof HttpError && err.code === 'account_archived') return back('archived');
       console.error('Google sign-in: signed in at Supabase but the profile could not be loaded:', (err as Error).message);
       return back('google_profile');
+    }
+    if (profile.role === 'admin') {
+      await gotrue.logout(session.access_token);
+      return back('admin_use_email');
     }
     setSessionCookies(res, session);
     const home = homeFor(profile.role);
@@ -316,6 +427,7 @@ authRouter.get(
   requireSession,
   asyncHandler(async (req, res) => {
     const p = req.session!.profile;
-    res.json({ success: true, user: { ...p, needs_profile: needsProfile(p) } });
+    const admin = p.role === 'admin' ? await adminAccessFor(req.session!.claims) : undefined;
+    res.json({ success: true, user: { ...p, needs_profile: needsProfile(p), ...(p.role === 'admin' ? { admin: admin ? { ...admin, idle_minutes: config.admin.idleMinutes } : null } : {}) } });
   })
 );

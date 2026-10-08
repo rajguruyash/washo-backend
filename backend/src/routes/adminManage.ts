@@ -7,6 +7,7 @@ import { phoneSchema } from '../phone';
 import { ADMIN_BOOKING_SQL } from './admin';
 import { fetchGatewayPayment } from '../razorpay';
 import { forgetProfile } from '../profile';
+import { strongPassword } from '../password';
 import { gotrueAdmin } from '../supabase';
 
 /**
@@ -273,7 +274,7 @@ adminManageRouter.post(
   '/admin/workers/:id/reset-password',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    const { password } = parse(z.object({ password: z.string().min(8, 'Use at least 8 characters.').max(100) }), req.body);
+    const { password } = parse(z.object({ password: strongPassword }), req.body);
     const auth = (await call<{ a: string }>(req, 'SELECT public.admin_begin_password_reset($1) AS a', [id])).a;
     await gotrueAdmin.setPassword(auth, password);
     res.json({ success: true });

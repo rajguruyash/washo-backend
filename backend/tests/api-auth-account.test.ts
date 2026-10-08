@@ -139,23 +139,12 @@ describe('staff sign-in (email + password)', () => {
     expect((await ca.loginStaff(a.email, a.password)).body.role).toBe('admin');
   });
 
-  it('wrong password is 401; a customer account cannot use the staff door', async () => {
+  it('a wrong password is a plain 401 with no session, and the old staff-only door is gone (everyone uses the one email form)', async () => {
     const w = await fake.createStaff('worker');
     const bad = await new Client().loginStaff(w.email, 'nope');
     expect(bad.status).toBe(401);
     expect(bad.body.code).toBe('bad_credentials');
-
-    const cust = await fake.createStaff('worker', { email: 'cust-as-staff@washo.test', password: 'Passw0rd!x' });
-    await fake.admin.query(`SELECT set_config('washo.allow_role_change','on',false)`);
-    await fake.admin.query(`UPDATE public.profiles SET role = 'customer' WHERE id = $1`, [cust.profileId]).catch(() => undefined);
-    const c = new Client();
-    const r = await c.loginStaff(cust.email, cust.password);
-    // either the role flip was blocked by the database guard (still a worker) or it was refused as a customer
-    expect([200, 403]).toContain(r.status);
-    if (r.status === 403) {
-      expect(r.body.code).toBe('not_staff');
-      expect(c.cookies.size).toBe(0);
-    }
+    expect((await new Client().post('/api/auth/staff/login', { email: w.email, password: w.password })).status).toBe(404);
   });
 
   it('role gates: customers cannot reach worker or admin routes; workers cannot reach admin', async () => {
@@ -254,7 +243,7 @@ describe('sign out and speed', () => {
     await c.loginCustomer();
     const out = await c.post('/api/auth/logout');
     expect(out.status).toBe(200);
-    expect(out.setCookies).toHaveLength(2);
+    expect(out.setCookies).toHaveLength(3); // the two login cookies and the admin second-step cookie
     for (const sc of out.setCookies) {
       expect(sc).toMatch(/Path=\/api/);
       expect(sc).toMatch(/HttpOnly/i);

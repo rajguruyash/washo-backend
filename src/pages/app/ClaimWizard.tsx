@@ -11,6 +11,7 @@ import { PackOfferCard } from '../../components/PackOfferCard';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { SlideToPay } from '../../components/SlideToPay';
+import { addressBlocker, pausedBlocker, phoneBlocker } from '../../lib/payBlockers';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { Button, ButtonLink } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
@@ -20,7 +21,7 @@ import { claimView, dayOf } from '../../lib/campaign';
 import { cn } from '../../lib/cn';
 import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useCampaign, useCatalog, useClaimFreeWash, useSaveProfile, useVehicles } from '../../lib/queries';
+import { useAddresses, useCampaign, useCatalog, useClaimFreeWash, usePublicSettings, useSaveProfile, useVehicles } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import type { Campaign, Vehicle } from '../../lib/types';
 import { useAuth } from '../../state/auth';
@@ -54,7 +55,8 @@ export default function ClaimWizard() {
   const [email, setEmail] = useState('');
   const [step, setStep] = useState(0);
   const dir = useStepDirection(step);
-  const needsPhone = useNeedsPhone(); // signed in by email: a verified mobile number first
+  const needsPhone = useNeedsPhone(); // signed in by email: a mobile number first
+  const paused = usePublicSettings().data;
   const [picked, setVehicle] = useState<Vehicle | null>(null);
   const [addressId, setAddressId] = useState<string | null>(null);
   const [addrOpen, setAddrOpen] = useState(false);
@@ -152,7 +154,7 @@ export default function ClaimWizard() {
                 <span className="text-fog">Price</span>
                 <span className="flex items-baseline gap-2">{worth ? <s className="text-fog">{rupees(worth)}</s> : null}<span className="font-display text-2xl font-extrabold text-offer">FREE</span></span>
               </div>
-              <div className="p-5">
+              <div id="pay-address" className="p-5">
                 <p className="eyebrow">Where</p>
                 {addresses?.length ? (
                   <div className="mt-2 space-y-2">
@@ -184,7 +186,7 @@ export default function ClaimWizard() {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <SlideToPay label="Slide to claim your free wash" doneLabel="Claimed" errorLabel="Could not claim" disabled={!ok || claim.isPending || needsPhone} onConfirm={submit} onDone={afterClaim} />
+            <SlideToPay label="Slide to claim your free wash" doneLabel="Claimed" errorLabel="Could not claim" disabled={claim.isPending} blockers={[...pausedBlocker(paused), ...addressBlocker(Boolean(address)), ...phoneBlocker(needsPhone, 'claim')]} onConfirm={submit} onDone={afterClaim} />
           )}
         </div>
       </div>

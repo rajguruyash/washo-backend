@@ -4,6 +4,7 @@ import { HttpError, parse } from '../errors';
 import { campaignNames, withCampaignNames } from '../campaigns';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { reconcileOrder, refundPayment } from '../razorpay';
+import { strongPassword } from '../password';
 import { photoStorage } from '../supabase';
 
 export const adminRouter = Router();
@@ -235,6 +236,8 @@ adminRouter.get(
                          FROM public.refunds r JOIN public.profiles p ON p.id = r.customer_profile_id
                         WHERE r.status IN ('requested', 'approved', 'failed') ORDER BY r.created_at DESC LIMIT 50`)
       ).rows,
+      // How big is a "big" refund, and may this admin approve one (migration 27)
+      policy: (await c.query('SELECT public.admin_refund_policy() AS p')).rows[0].p as { threshold_cents: number; can_approve_big: boolean },
     }));
     res.json({ success: true, ...out });
   })
@@ -260,6 +263,17 @@ adminRouter.post(
   '/admin/refunds/:id/approve',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
+    const b = parse(z.object({ confirm_amount_cents: z.number().int().optional() }), req.body ?? {});
+    // A big refund needs the super admin AND the exact amount typed back (so it cannot be approved by a stray tap). The database enforces the role too.
+    const known = await req.db(async (c) => ({
+      refund: (await c.query('SELECT amount_cents FROM public.refunds WHERE id = $1', [id])).rows[0] as { amount_cents: number } | undefined,
+      policy: (await c.query('SELECT public.admin_refund_policy() AS p')).rows[0].p as { threshold_cents: number; can_approve_big: boolean },
+    }));
+    if (!known.refund) throw new HttpError(404, 'not_found', 'Refund not found');
+    if (known.refund.amount_cents >= known.policy.threshold_cents) {
+      if (!known.policy.can_approve_big) throw new HttpError(403, 'big_refund', `A refund of ₹${known.policy.threshold_cents / 100} or more needs the super admin to approve it.`);
+      if (b.confirm_amount_cents !== known.refund.amount_cents) throw new HttpError(422, 'confirm_amount', 'This is a big refund. Type the amount to confirm it.');
+    }
     const claim = await req.db(async (c) => (await c.query('SELECT public.admin_begin_refund($1) AS r', [id])).rows[0].r as {
       amount_cents: number; provider_payment_id: string;
     });
@@ -294,7 +308,7 @@ adminRouter.post(
         full_name: z.string().trim().min(2, 'Enter their name.').max(80),
         email: z.email('Enter a valid email address.'),
         phone: z.string().trim().regex(/^\+?[0-9 ]{10,15}$/, 'Enter a valid phone number.'),
-        password: z.string().min(8, 'Use at least 8 characters.').max(100),
+        password: strongPassword,
       }),
       req.body
     );

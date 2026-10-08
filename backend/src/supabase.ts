@@ -73,7 +73,7 @@ export const gotrue = {
     throw new HttpError(400, 'otp_invalid', "That code isn't right, or it has expired. Check it or ask for a new one.");
   },
 
-  /** Checks the code a customer was emailed (see gotrueAdmin.emailOtp) and signs them in. */
+  /** Checks the second-step code an admin was emailed (see gotrueAdmin.loginCode) and signs them in. */
   async verifyEmailOtp(email: string, token: string): Promise<AuthSession> {
     const { status, body } = await auth('/verify', { method: 'POST', body: JSON.stringify({ type: 'email', email, token }) });
     if (status < 300 && body.access_token) return body as AuthSession;
@@ -135,6 +135,16 @@ export const gotrue = {
     throw new HttpError(400, 'otp_invalid', "That code isn't right, or it has expired. Check it or ask for a new one.");
   },
 
+  /** The signed-in person chooses a new password. (The caller has already checked the old one.) */
+  async updatePassword(accessToken: string, password: string): Promise<void> {
+    const { status, body } = await auth('/user', { method: 'PUT', bearer: accessToken, body: JSON.stringify({ password }) });
+    if (status < 300) return;
+    if (status === 422) throw new HttpError(400, 'weak_password', String(body.msg || 'That password is not allowed. Try a longer one.'));
+    if (status === 401) throw new HttpError(401, 'unauthenticated', 'Please sign in again to change your password.');
+    console.error('Changing a password failed:', status, body.error_code, body.msg || body.message);
+    throw new HttpError(502, 'password_failed', 'We could not change your password. Please try again.');
+  },
+
   async refresh(refreshToken: string): Promise<AuthSession | null> {
     const { status, body } = await auth('/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) });
     return status < 300 && body.access_token ? (body as AuthSession) : null;
@@ -178,22 +188,34 @@ export const gotrueAdmin = {
   },
 
   /**
-   * A sign-in code for an email address. Supabase Auth makes and remembers the code (and checks it later, with its expiry and attempt
-   * limits); this server emails it itself (Resend), so nothing depends on Supabase's own mail settings. The code is returned to the caller
-   * ONLY so it can be put in that email: it is never sent to the browser. A first-time address becomes a customer account (a database
-   * trigger gives it a profile); the address is only trusted once the code that was mailed to it comes back.
+   * An email account with a password, confirmed straight away (no verification email: the person is signed in with the password they just chose).
+   * Used for a customer signing up with their email, and for an admin adding a team member. An address that already has an account is refused.
    */
-  async emailOtp(email: string): Promise<string> {
-    // The account must exist before a code can be made for it. An address that already has one is fine.
-    const made = await authAdmin('/users', { method: 'POST', body: { email, email_confirm: true } });
-    if (made.status >= 300 && !/exists|registered/i.test(String(made.body.error_code || '') + String(made.body.msg || ''))) {
-      console.error('Creating an email account failed:', made.status, made.body.error_code, made.body.msg || made.body.message);
-      throw new HttpError(502, 'otp_unavailable', 'We cannot send codes right now. Please try again shortly.');
+  async createEmailUser(email: string, password: string, fullName?: string): Promise<{ id: string }> {
+    const { status, body } = await authAdmin('/users', {
+      method: 'POST',
+      body: { email, password, email_confirm: true, ...(fullName ? { user_metadata: { full_name: fullName } } : {}) },
+    });
+    if (status < 300 && body.id) return { id: body.id as string };
+    const code = String(body.error_code || '');
+    if (code === 'email_exists' || code === 'user_already_exists' || /already (been )?registered|already exists/i.test(String(body.msg || body.message || ''))) {
+      throw new HttpError(409, 'email_taken', 'That email already has a WASHO account. Sign in instead, or use your mobile number.');
     }
+    if (code === 'weak_password' || status === 422) throw new HttpError(400, 'weak_password', String(body.msg || 'That password is not allowed. Try a longer one.'));
+    console.error('Creating an email account failed:', status, code, body.msg || body.message);
+    throw new HttpError(502, 'create_failed', 'We could not create the account. Please try again.');
+  },
+
+  /**
+   * The second-step code for an ADMIN who has just got their password right. Supabase Auth makes and remembers the code (and checks it later, with its
+   * expiry and attempt limits); this server emails it itself (Resend), so nothing depends on Supabase's own mail settings. The code is returned to the
+   * caller ONLY so it can be put in that email: it is never sent to the browser. The account must already exist: this never creates one.
+   */
+  async loginCode(email: string): Promise<string> {
     const { status, body } = await authAdmin('/generate_link', { method: 'POST', body: { type: 'magiclink', email } });
     const code = body.email_otp ?? body.properties?.email_otp;
     if (status < 300 && typeof code === 'string' && code) return code;
-    console.error('Making an email sign-in code failed:', status, body.error_code, body.msg || body.message);
+    console.error('Making an admin sign-in code failed:', status, body.error_code, body.msg || body.message);
     throw new HttpError(503, 'otp_unavailable', 'We cannot send codes right now. Please try again shortly.');
   },
 

@@ -59,3 +59,28 @@ export async function notifyAdminOfRequest(r: RequestSummary): Promise<void> {
     console.error('Admin notification email failed:', err);
   }
 }
+
+/** Tells WASHO a customer raised a complaint. Best-effort: a mail failure never affects the customer (the complaint is already saved). */
+export async function notifyAdminOfComplaint(c: { reference_code: string; category: string; subject: string; message: string; customer: string | null; phone: string | null }): Promise<void> {
+  if (!transport) return;
+  try {
+    await transport({
+      to: config.email.adminEmail,
+      subject: `New complaint · ${c.reference_code} · ${c.subject}`.slice(0, 150),
+      html: `
+        <div style="font-family:Arial,sans-serif;padding:24px;color:#0f172a;background:#f8fafc;border-radius:12px;max-width:520px">
+          <h2 style="color:#1248B8;margin:0 0 8px">A customer needs help</h2>
+          <table style="width:100%;font-size:14px;border-collapse:collapse">
+            <tr><td style="padding:6px 0;color:#64748b">Reference</td><td><strong>${esc(c.reference_code)}</strong></td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">Customer</td><td>${esc(c.customer)} ${esc(c.phone)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">About</td><td>${esc(c.category)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">Title</td><td>${esc(c.subject)}</td></tr>
+          </table>
+          <p style="font-size:14px;line-height:1.5;white-space:pre-wrap">${esc(c.message)}</p>
+          <p style="font-size:13px;color:#64748b">Open Support in the WASHO admin console to answer.</p>
+        </div>`,
+    });
+  } catch (err) {
+    console.error('Complaint notification email failed:', (err as Error).message);
+  }
+}

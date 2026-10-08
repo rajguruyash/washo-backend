@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { Link, NavLink, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { AvatarHead } from '../components/brand/Avatar';
 import { Logo } from '../components/brand/Logo';
+import { MaintenanceNotice } from '../components/MaintenanceNotice';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
 import { cn } from '../lib/cn';
@@ -181,6 +182,7 @@ export function AppLayout() {
         )}
         <main className={cn('mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-10', focused ? 'py-8' : 'pb-32 pt-6 md:pt-10 lg:pb-16')}>
           {/* Opacity only: a transform here would become the containing block for the wizards' fixed action bars. */}
+          <MaintenanceNotice className="mb-5" />
           <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
             <Outlet />
           </motion.div>

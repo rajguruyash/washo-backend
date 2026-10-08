@@ -6,6 +6,15 @@ export type SlotId = 'morning' | 'afternoon' | 'night';
 export type Role = 'customer' | 'worker' | 'admin';
 export type WashKind = 'body' | 'deep';
 
+export type AdminRole = 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support';
+/** What the signed-in admin may do: their role, and each area of the console as 'view' (look) or 'manage' (change). */
+export interface AdminAccessInfo {
+  access: AdminRole;
+  areas: Record<string, 'view' | 'manage'>;
+  /** The server signs an admin out after this many minutes without a request. */
+  idle_minutes?: number;
+}
+
 export interface User {
   id: string;
   role: Role;
@@ -13,6 +22,8 @@ export interface User {
   phone: string | null;
   email: string | null;
   needs_profile: boolean;
+  /** Only for admins. Null = an admin account that has no role yet (it can do nothing). */
+  admin?: AdminAccessInfo | null;
 }
 
 export interface Address {
@@ -501,6 +512,8 @@ export interface Attention {
   pending: PendingPayment[];
   unfulfilled: { id: string; amount_cents: number; payment_kind: string; provider_payment_id: string | null; updated_at: string; customer_name: string | null; customer_phone: string | null }[];
   refunds: { id: string; amount_cents: number; reason: string; status: string; failure_reason: string | null; created_at: string; customer_name: string | null; customer_phone: string | null }[];
+  /** How big a "big" refund is, and whether this admin may approve one. */
+  policy: { threshold_cents: number; can_approve_big: boolean };
 }
 
 // ───────── free-wash campaigns ─────────
@@ -601,3 +614,75 @@ export interface PlanPreview {
   dates: { date: string; kind: WashKind; state: CrowdState }[];
 }
 export interface ExactDate { date: string; kind: WashKind }
+
+
+// ───────── back-office: dashboard, activity, complaints, settings, team ─────────
+export interface AdminDashboard {
+  today: string;
+  new_customers: { today: number; last_7_days: number; last_30_days: number };
+  orders: { paid_today: number; paid_last_7_days: number; free_washes_today: number };
+  /** Null for a role that may not see payments. */
+  money: { collected_today_cents: number; refunded_today_cents: number; collected_7_days_cents: number; collected_30_days_cents: number; refunded_30_days_cents: number } | null;
+  payment_problems: { failed_today: number; unfulfilled: number; unconfirmed_checkouts: number } | null;
+  open_complaints: number | null;
+  series: { date: string; new_customers: number; paid_orders: number; collected_cents: number | null }[];
+}
+
+export interface ActivityEvent {
+  id: string;
+  created_at: string;
+  event_type: string;
+  entity_type: string;
+  entity_id: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type TicketCategory = 'payment' | 'booking' | 'specialist' | 'refund' | 'membership' | 'other';
+export interface SupportTicket {
+  id: string;
+  reference_code: string;
+  category: TicketCategory;
+  subject: string;
+  status: TicketStatus;
+  created_at: string;
+  updated_at: string;
+  last_from_admin: boolean | null;
+}
+export interface AdminSupportTicket extends SupportTicket {
+  customer_name: string | null;
+  customer_phone: string | null;
+  booking_reference: string | null;
+  messages: number;
+}
+export interface SupportMessage {
+  id: string;
+  from_admin: boolean;
+  body: string;
+  created_at: string;
+  author?: string | null;
+}
+export interface SupportThread {
+  ticket: { id: string; reference_code: string; category: TicketCategory; subject: string; status: TicketStatus; created_at: string; booking_id: string | null; booking_reference: string | null; customer_id?: string; customer_name?: string | null; customer_phone?: string | null };
+  messages: SupportMessage[];
+}
+
+export interface AdminSettings {
+  maintenance_mode: boolean;
+  maintenance_message: string;
+  big_refund_threshold_cents: number;
+}
+export interface AdminSecurity { two_step: boolean; two_step_ready: boolean; idle_minutes: number; super_admin_email: string }
+export interface PublicSettings { maintenance_mode: boolean; maintenance_message: string }
+
+export interface TeamMember {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  access: AdminRole | null;
+  archived: boolean;
+  created_at: string;
+  last_sign_in_at: string | null;
+}

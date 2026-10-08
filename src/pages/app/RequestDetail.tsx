@@ -7,13 +7,16 @@ import { QuoteBreakdownView } from '../../components/Quote';
 import { RemovePlan } from '../../components/RemovePlan';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
+import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { SlideToPay } from '../../components/SlideToPay';
+import { pausedBlocker, phoneBlocker } from '../../lib/payBlockers';
+import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { Button, ButtonLink } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAcceptQuote, useDeclineQuote, useEstimate, useRequest } from '../../lib/queries';
+import { useAcceptQuote, useDeclineQuote, useEstimate, usePublicSettings, useRequest } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { usePay } from '../../lib/usePay';
 
@@ -34,6 +37,8 @@ export default function RequestDetail() {
   const { pay, paying } = usePay();
   const [confirmDecline, setConfirmDecline] = useState(false);
   // While WASHO is still reviewing, show the rate-card estimate so the customer knows roughly what to expect.
+  const needsPhone = useNeedsPhone();
+  const paused = usePublicSettings().data;
   const estimate = useEstimate(r?.status === 'submitted' ? { vehicle_type: r.vehicle_type, weekly_pattern: r.weekly_pattern, duration_months: r.duration_months } : null);
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
@@ -109,9 +114,10 @@ export default function RequestDetail() {
             </div>
             <QuoteBreakdownView q={r.quoted_breakdown} />
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <SlideToPay label={r.status === 'accepted' ? 'Slide to complete payment' : `Slide to accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`} disabled={paying || accept.isPending} onConfirm={startPayment} />
+              <SlideToPay label={r.status === 'accepted' ? 'Slide to complete payment' : `Slide to accept and pay ${rupees(r.quoted_amount_cents ?? 0)}`} disabled={paying || accept.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone)]} onConfirm={startPayment} />
               {r.status === 'quoted' && <Button size="lg" variant="glass" onClick={() => setConfirmDecline(true)}>Decline</Button>}
             </div>
+            <PayPhoneGate />
             <p className="mt-3 text-center text-xs text-fog">Your membership and washes are created only after your payment is verified.</p>
             <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-4">
               <p className="text-xs text-fog">Changed your mind? Nothing has been charged.</p>

@@ -1,16 +1,42 @@
 import { motion } from 'framer-motion';
 import { LogOut } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Link, Outlet, ScrollRestoration } from 'react-router-dom';
 import { Logo } from '../components/brand/Logo';
 import { Badge } from '../components/ui/Badge';
+import { post } from '../lib/http';
 import type { Role } from '../lib/types';
 import { useAuth } from '../state/auth';
 import { RequireRole } from './AppLayout';
 
+/**
+ * An admin who walks away is signed out: after `minutes` without touching the page this signs them out and says why. (The server enforces the same limit on every
+ * request, so a page left open cannot keep a session alive; this just makes it visible and immediate.)
+ */
+function useIdleSignOut(minutes: number | null) {
+  const last = useRef(Date.now());
+  useEffect(() => {
+    if (!minutes) return;
+    last.current = Date.now();
+    const touch = () => { last.current = Date.now(); };
+    const events = ['pointerdown', 'keydown', 'scroll', 'touchstart', 'visibilitychange'] as const;
+    events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const timer = window.setInterval(() => {
+      if (Date.now() - last.current < minutes * 60_000) return;
+      window.clearInterval(timer);
+      void post('/auth/logout').catch(() => undefined).finally(() => window.location.assign('/login?mode=email&reason=idle'));
+    }, 15_000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, touch));
+      window.clearInterval(timer);
+    };
+  }, [minutes]);
+}
+
 /** Shared shell for the specialist's and WASHO admin's consoles. */
 export function StaffLayout({ role, title, children }: { role: Exclude<Role, 'customer'>; title: string; children?: ReactNode }) {
   const { user, logout } = useAuth();
+  useIdleSignOut(role === 'admin' && user ? (user.admin?.idle_minutes ?? 30) : null);
   return (
     <RequireRole role={role}>
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/80 backdrop-blur-xl">

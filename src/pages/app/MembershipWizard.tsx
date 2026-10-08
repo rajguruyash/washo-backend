@@ -18,12 +18,13 @@ import { TextArea } from '../../components/ui/Field';
 import { cn } from '../../lib/cn';
 import { addDays, duration, istDay, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, useStartMembershipPayment, useVehicles } from '../../lib/queries';
+import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, usePublicSettings, useStartMembershipPayment, useVehicles } from '../../lib/queries';
 import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { SlideToPay } from '../../components/SlideToPay';
+import { addressBlocker, pausedBlocker, phoneBlocker, type Blocker } from '../../lib/payBlockers';
 import { slotLabel } from '../../lib/slots';
 import { exactDatesProblem } from '../../lib/schedule';
 import type { ExactDate, Membership, SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
@@ -239,7 +240,15 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   };
 
   const dir = useStepDirection(step);
-  const needsPhone = useNeedsPhone(); // signed in by email: a verified mobile number first
+  const needsPhone = useNeedsPhone(); // signed in by email: a mobile number first
+  const paused = usePublicSettings().data;
+  // What is still missing when they slide to pay, top of the page to bottom (the slider goes red and scrolls to the first one)
+  const blockers: Blocker[] = [
+    ...pausedBlocker(paused),
+    ...addressBlocker(Boolean(addressId)),
+    ...phoneBlocker(needsPhone),
+    ...(chosenEstimate.data ? [] : [{ label: 'Price is still loading' }]),
+  ];
   const slide = stepMotion(dir);
 
   return (
@@ -456,7 +465,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                   <p className="mt-1 font-semibold">{[discount('frequency', perWeek) ? `${percent(discount('frequency', perWeek))} ${offerApplies(perWeek) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
                 </div>
               </div>
-              <div className="p-5">
+              <div id="pay-address" className="p-5">
                 <p className="eyebrow">Where</p>
                 {addresses?.length ? (
                   <div className="mt-2 space-y-2">
@@ -502,7 +511,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           {step < STEPS.length - 1 ? (
             <Button size="lg" full disabled={!canNext} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
-            <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={!canNext || !chosenEstimate.data || checkout.isPending || paying || needsPhone} onConfirm={submit} onDone={afterPaid} />
+            <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={checkout.isPending || paying} blockers={blockers} onConfirm={submit} onDone={afterPaid} />
           )}
         </div>
       </div>

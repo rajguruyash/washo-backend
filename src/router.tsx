@@ -38,6 +38,8 @@ export const router = createBrowserRouter([
       { path: 'bookings/:id', ...page(() => import('./pages/app/BookingDetail')) },
       { path: 'vehicles', ...page(() => import('./pages/app/Vehicles')) },
       { path: 'account', ...page(() => import('./pages/app/Account')) },
+      { path: 'help', ...page(() => import('./pages/app/Help')) },
+      { path: 'help/:id', ...page(() => import('./pages/app/HelpTicket')) },
       { path: '*', element: <NotFound /> },
     ],
   },

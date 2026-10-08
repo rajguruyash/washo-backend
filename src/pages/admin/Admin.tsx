@@ -18,52 +18,76 @@ import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminBooking, AdminMembership, AdminRequest, Attention as AttentionData, RequestStatus, SlotId } from '../../lib/types';
 import { StaffLayout } from '../../layouts/StaffLayout';
+import { ROLE_LABEL, canDo, isReadOnly } from '../../lib/adminAccess';
+import { useAuth } from '../../state/auth';
+import Activity from './Activity';
 import { AddWashSheet } from './AddWash';
 import { BookingSheet } from './BookingSheet';
 import Capacity from './Capacity';
+import { Dashboard } from './Dashboard';
+import Export from './Export';
 import Campaigns from './Campaigns';
 import History from './History';
 import People from './People';
 import ServicesAdmin from './ServicesAdmin';
+import Settings from './Settings';
+import Support from './Support';
+import Team from './Team';
 import { Loading, errText } from './shared';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'capacity' | 'attention';
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'requests', label: 'Requests' },
-  { value: 'bookings', label: 'Washes' },
-  { value: 'history', label: 'History' },
-  { value: 'memberships', label: 'Memberships' },
-  { value: 'people', label: 'People' },
-  { value: 'services', label: 'Services & prices' },
-  { value: 'campaigns', label: 'Campaigns' },
-  { value: 'capacity', label: 'Capacity' },
-  { value: 'attention', label: 'Needs attention' },
+type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+// Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
+const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
+  { value: 'overview', label: 'Dashboard', area: 'overview' },
+  { value: 'bookings', label: 'Washes', area: 'bookings' },
+  { value: 'memberships', label: 'Memberships', area: 'memberships' },
+  { value: 'people', label: 'People', area: 'people' },
+  { value: 'requests', label: 'Requests', area: 'requests' },
+  { value: 'history', label: 'History', area: 'history' },
+  { value: 'services', label: 'Services & prices', area: 'services' },
+  { value: 'campaigns', label: 'Campaigns', area: 'campaigns' },
+  { value: 'capacity', label: 'Capacity', area: 'capacity' },
+  { value: 'attention', label: 'Payments & refunds', area: 'payments' },
+  { value: 'support', label: 'Support', area: 'support' },
+  { value: 'export', label: 'Export', area: (a) => ['customers', 'washes', 'memberships', 'payments', 'refunds', 'support', 'activity'].some((k) => canDo(a, `export_${k}`, 'manage')) },
+  { value: 'activity', label: 'Activity log', area: 'activity' },
+  { value: 'team', label: 'Team', area: 'team' },
+  { value: 'settings', label: 'Settings', area: 'settings' },
 ];
+/** The area a tab's content is governed by (used to say "view only"). */
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', requests: 'requests', history: 'history', services: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
-function Overview({ go }: { go: (t: Tab) => void }) {
+function Overview({ go, allowed }: { go: (t: Tab) => void; allowed: (t: Tab) => boolean }) {
   const { data: o, isLoading, isError, refetch } = useAdminOverview();
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !o) return <Loading />;
-  const tile = (label: string, value: number, tab: Tab, hot = false) => (
-    <button key={label} onClick={() => go(tab)} className={`glass p-5 text-left transition-colors hover:border-washo-400/40 ${hot && value > 0 ? 'border-warn/40' : ''}`}>
-      <p className={`font-display text-4xl font-extrabold tabular-nums ${hot && value > 0 ? 'text-warn' : ''}`}>{value}</p>
-      <p className="mt-1 text-sm text-fog">{label}</p>
-    </button>
-  );
+  const tile = (label: string, value: number, tab: Tab, hot = false) => {
+    const body = (
+      <>
+        <p className={`font-display text-4xl font-extrabold tabular-nums ${hot && value > 0 ? 'text-warn' : ''}`}>{value}</p>
+        <p className="mt-1 text-sm text-fog">{label}</p>
+      </>
+    );
+    const cls = `glass p-5 text-left ${hot && value > 0 ? 'border-warn/40' : ''}`;
+    return allowed(tab) ? <button key={label} onClick={() => go(tab)} className={`${cls} transition-colors hover:border-washo-400/40`}>{body}</button> : <div key={label} className={cls}>{body}</div>;
+  };
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-      {tile('Requests to quote', o.requests_to_quote, 'requests', true)}
-      {tile('Quotes awaiting customer', o.quotes_awaiting_customer, 'requests')}
-      {tile('Washes today', o.washes_today, 'bookings')}
-      {tile('Done today', o.washes_done_today, 'bookings')}
-      {tile('Unassigned, next 3 days', o.unassigned_next_3_days, 'bookings', true)}
-      {tile('Worker issues, 24h', o.issues_24h, 'bookings', true)}
-      {tile('Active memberships', o.active_memberships, 'memberships')}
-      {tile('Payments / refunds to resolve', o.unfulfilled_payments + o.refunds_requested, 'attention', true)}
-    </div>
+    <>
+      <Dashboard go={(t) => allowed(t) && go(t)} />
+      <h2 className="mb-3 text-lg font-bold">Washes and memberships</h2>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        {tile('Requests to quote', o.requests_to_quote, 'requests', true)}
+        {tile('Quotes awaiting customer', o.quotes_awaiting_customer, 'requests')}
+        {tile('Washes today', o.washes_today, 'bookings')}
+        {tile('Done today', o.washes_done_today, 'bookings')}
+        {tile('Unassigned, next 3 days', o.unassigned_next_3_days, 'bookings', true)}
+        {tile('Worker issues, 24h', o.issues_24h, 'bookings', true)}
+        {tile('Active memberships', o.active_memberships, 'memberships')}
+        {tile('Payments / refunds to resolve', o.unfulfilled_payments + o.refunds_requested, 'attention', true)}
+      </div>
+    </>
   );
 }
 
@@ -147,7 +171,7 @@ function Requests() {
 }
 
 // ───────────────────────── bookings ─────────────────────────
-function Bookings({ membership, onAdd }: { membership?: string; onAdd: () => void }) {
+function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: boolean; onAdd: () => void }) {
   const [from, setFrom] = useState(todayIST());
   const [to, setTo] = useState(addDays(todayIST(), 7));
   const [status, setStatus] = useState('');
@@ -157,7 +181,7 @@ function Bookings({ membership, onAdd }: { membership?: string; onAdd: () => voi
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="space-y-4">
-      {!membership && <div className="flex justify-end"><Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={onAdd}>Book a wash</Button></div>}
+      {!membership && canAdd && <div className="flex justify-end"><Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={onAdd}>Book a wash</Button></div>}
       {!membership && (
         <div className="glass grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
           <Input label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -249,6 +273,7 @@ function Attention() {
   const refresh = useRefreshAll();
   const toast = useToast();
   const [approving, setApproving] = useState<AttentionData['refunds'][number] | null>(null);
+  const [typed, setTyped] = useState(''); // for a big refund: the amount, typed back
   const [resolving, setResolving] = useState<string | null>(null);
   const [rid, setRid] = useState('');
   const [checking, setChecking] = useState<string | null>(null);
@@ -266,7 +291,7 @@ function Attention() {
   const approve = async () => {
     if (!approving) return;
     try {
-      await act.mutateAsync({ path: `refunds/${approving.id}/approve` });
+      await act.mutateAsync({ path: `refunds/${approving.id}/approve`, body: bigRefund(approving) ? { confirm_amount_cents: approving.amount_cents } : {} });
       toast.success(`${rupees(approving.amount_cents)} refunded through Razorpay`);
     } catch (e) {
       toast.error(errText(e));
@@ -279,6 +304,11 @@ function Attention() {
   };
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
+  const policy = data.policy;
+  const bigRefund = (r: { amount_cents: number }) => Boolean(policy) && r.amount_cents >= policy.threshold_cents;
+  // A big refund needs the super admin, and the amount typed back so it cannot be approved by a stray tap.
+  const blocked = approving && bigRefund(approving) && !policy.can_approve_big;
+  const typedOk = !approving || !bigRefund(approving) || Math.round((Number(typed.replace(/[^0-9.]/g, '')) || 0) * 100) === approving.amount_cents;
   return (
     <div className="space-y-8">
       <section>
@@ -301,19 +331,27 @@ function Attention() {
         {data.refunds.length ? <ul className="space-y-2">{data.refunds.map((r) => (
           <li key={r.id} className="panel flex flex-wrap items-center justify-between gap-3 p-4">
             <div className="text-sm">
-              <p className="font-semibold">{rupees(r.amount_cents)} · {r.customer_name} {prettyPhone(r.customer_phone)}</p>
+              <p className="font-semibold">{rupees(r.amount_cents)}{bigRefund(r) && <Badge tone="amber" className="ml-2 align-middle">Big refund</Badge>} · {r.customer_name} {prettyPhone(r.customer_phone)}</p>
               <p className="text-xs text-fog">{r.reason} · {r.status}</p>
               {r.status === 'failed' && r.failure_reason && <p className="mt-1 text-xs text-warn">Razorpay said: {r.failure_reason}</p>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="ghost" onClick={() => setResolving(r.id)}>Paid it by hand</Button>
-              <Button size="sm" onClick={() => setApproving(r)}>{r.status === 'failed' ? 'Try again' : 'Approve and refund'}</Button>
+              <Button size="sm" onClick={() => { setTyped(''); setApproving(r); }}>{r.status === 'failed' ? 'Try again' : 'Approve and refund'}</Button>
             </div>
           </li>
         ))}</ul> : <p className="panel p-5 text-sm text-fog">No open refunds.</p>}
       </section>
-      <Sheet open={Boolean(approving)} onClose={() => setApproving(null)} size="sm" title="Approve this refund?" description={approving ? `${rupees(approving.amount_cents)} goes back to ${approving.customer_name ?? 'the customer'} on the payment method they used. This cannot be undone.` : undefined} footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setApproving(null)}>Not now</Button><Button loading={act.isPending} icon={<Check className="h-4 w-4" />} onClick={() => void approve()}>Approve and refund</Button></div>}>
+      <Sheet open={Boolean(approving)} onClose={() => setApproving(null)} size="sm" title="Approve this refund?" description={approving ? `${rupees(approving.amount_cents)} goes back to ${approving.customer_name ?? 'the customer'} on the payment method they used. This cannot be undone.` : undefined} footer={<div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setApproving(null)}>Not now</Button><Button loading={act.isPending} disabled={Boolean(blocked) || !typedOk} icon={<Check className="h-4 w-4" />} onClick={() => void approve()}>Approve and refund</Button></div>}>
         <p className="text-sm text-fog">{approving?.reason}</p>
+        {approving && bigRefund(approving) && (blocked ? (
+          <p role="alert" className="mt-4 rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn">This is a big refund ({rupees(policy.threshold_cents)} or more). Only the super admin can approve it. Ask them to open this page.</p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            <p className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn">This is a big refund. To be sure, type the amount below.</p>
+            <Input label={`Type ${approving.amount_cents / 100} to confirm (₹)`} inputMode="decimal" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+          </div>
+        ))}
       </Sheet>
       <Sheet open={Boolean(resolving)} onClose={() => setResolving(null)} size="sm" title="Record a refund you paid by hand" description="Use this only if you already refunded it from the Razorpay dashboard." footer={<div className="grid gap-3"><Button loading={act.isPending} disabled={rid.trim().length < 4} icon={<Check className="h-4 w-4" />} onClick={() => void resolve('processed')}>Mark refunded</Button><Button variant="danger" onClick={() => void resolve('failed')}>Mark failed</Button></div>}>
         <Input label="Razorpay refund id" value={rid} onChange={(e) => setRid(e.target.value)} placeholder="rfnd_…" hint="Needed to mark it refunded." />
@@ -324,25 +362,44 @@ function Attention() {
 
 export default function Admin() {
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'overview';
+  const { user } = useAuth();
+  const access = user?.admin;
+  const visible = useMemo(() => TABS.filter((x) => (typeof x.area === 'function' ? x.area(access) : canDo(access, x.area))), [access]);
+  const requested = (params.get('tab') as Tab) || 'overview';
+  const tab: Tab = visible.some((x) => x.value === requested) ? requested : (visible[0]?.value ?? 'overview');
   const membership = params.get('membership') ?? undefined;
   const go = (t: Tab, extra?: Record<string, string>) => setParams({ tab: t, ...extra });
+  const allowed = (t: Tab) => visible.some((x) => x.value === t);
+  const area = AREA_OF_TAB[tab];
+  const readOnly = Boolean(area) && isReadOnly(access, area!);
   // "Book a wash" is available from the Washes tab (pick any customer) and from a customer's page (that customer).
   const [adding, setAdding] = useState<{ customerId: string | null } | null>(null);
   return (
-    <StaffLayout role="admin" title="Admin">
+    <StaffLayout role="admin" title={access ? `Admin · ${ROLE_LABEL[access.access]}` : 'Admin'}>
       <div className="mb-6"><h1 className="text-3xl font-extrabold">WASHO admin</h1></div>
-      <div className="mb-6"><Segmented label="Admin sections" value={tab} onChange={(t) => go(t)} options={TABS} /></div>
-      {tab === 'overview' && <Overview go={go} />}
-      {tab === 'requests' && <Requests />}
-      {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} onAdd={() => setAdding({ customerId: null })} /></>)}
-      {tab === 'history' && <History />}
-      {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} />}
-      {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
-      {tab === 'services' && <ServicesAdmin />}
-      {tab === 'campaigns' && <Campaigns />}
-      {tab === 'capacity' && <Capacity />}
-      {tab === 'attention' && <Attention />}
+      {!access ? (
+        <div role="alert" className="glass max-w-xl p-6"><h2 className="text-lg font-bold">Your account has no role yet</h2><p className="mt-2 text-sm text-fog">You are signed in, but the super admin has not given you a role, so there is nothing you can open. Ask them to add you under Team.</p></div>
+      ) : (
+        <>
+          <div className="mb-6"><Segmented label="Admin sections" value={tab} onChange={(t) => go(t)} options={visible.map((x) => ({ value: x.value, label: x.label }))} /></div>
+          {readOnly && <p role="note" className="mb-5 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-fog">Your role can look at this page but not change anything on it.</p>}
+          {tab === 'overview' && <Overview go={go} allowed={allowed} />}
+          {tab === 'requests' && <Requests />}
+          {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} canAdd={canDo(access, 'bookings', 'manage')} onAdd={() => setAdding({ customerId: null })} /></>)}
+          {tab === 'history' && <History />}
+          {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} />}
+          {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
+          {tab === 'services' && <ServicesAdmin />}
+          {tab === 'campaigns' && <Campaigns />}
+          {tab === 'capacity' && <Capacity />}
+          {tab === 'attention' && <Attention />}
+          {tab === 'support' && <Support canReply={canDo(access, 'support', 'manage')} />}
+          {tab === 'export' && <Export />}
+          {tab === 'activity' && <Activity />}
+          {tab === 'team' && <Team />}
+          {tab === 'settings' && <Settings canEdit={canDo(access, 'settings', 'manage')} />}
+        </>
+      )}
       <AddWashSheet open={Boolean(adding)} customerId={adding?.customerId} onClose={() => setAdding(null)} onCreated={() => go('bookings')} />
     </StaffLayout>
   );

@@ -5,6 +5,7 @@ import { config } from '../config';
 import { Claims, withUser } from '../db';
 import { HttpError, fromPg } from '../errors';
 import { verifyAccessToken } from '../jwt';
+import * as adminStep from '../adminSession';
 import { Profile, Role, profileFor } from '../profile';
 import { AuthSession, gotrue } from '../supabase';
 
@@ -55,6 +56,7 @@ export function clearSessionCookies(res: Response) {
   // Same attributes the cookies were set with, so Safari and Chrome both treat this as the SAME cookie and delete it.
   res.clearCookie(ACCESS_COOKIE, cookieBase);
   res.clearCookie(REFRESH_COOKIE, cookieBase);
+  adminStep.clear(res);
 }
 
 // One refresh per refresh-token at a time (several page requests can hit an expired access token together).
@@ -98,6 +100,15 @@ export const requireSession = asyncHandler(async (req, res, next) => {
     // An archived account is signed out, not left holding a session that can never work.
     if (err instanceof HttpError && err.code === 'account_archived') clearSessionCookies(res);
     throw err;
+  }
+
+  // An admin must also have finished the second step (the emailed code), recently. A login token from the password alone is not enough.
+  if (profile.role === 'admin') {
+    const step = adminStep.check(req, res, claims.sub);
+    if (step !== 'ok') {
+      clearSessionCookies(res);
+      throw new HttpError(401, 'unauthenticated', step === 'idle' ? 'You were signed out after a while without activity. Please sign in again.' : 'Please sign in again to continue.');
+    }
   }
 
   req.session = { accessToken: token, claims, profile };

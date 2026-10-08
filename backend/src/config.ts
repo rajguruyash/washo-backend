@@ -37,6 +37,21 @@ export const config = {
     photoBucket: process.env.SUPABASE_PHOTO_BUCKET || 'wash-photos',
   },
 
+  // Admin sign-in has a second step (a code emailed to the admin). What proves the step was done is a cookie signed with this secret, so it cannot be made
+  // without this server. Set ADMIN_2FA_SECRET to your own long random value; if it is not set the secret is derived from the service-role key
+  // (which this server must hold anyway). With neither, admins cannot sign in at all (the server never falls back to a password alone).
+  admin: {
+    secret: process.env.ADMIN_2FA_SECRET || '',
+    // Signed out after this many minutes without any request, and always after twelve hours.
+    idleMinutes: Math.max(5, Number(process.env.ADMIN_IDLE_MINUTES) || 30),
+    // This account is always the super admin, whatever the roles table says, so a mistake there can never lock the owner out.
+    superEmail: (process.env.SUPER_ADMIN_EMAIL || 'rajguruyash29@gmail.com').trim().toLowerCase(),
+    // Optional, and meant to be TEMPORARY. Resend only delivers to arbitrary inboxes once the sender domain is verified; until then it may refuse to mail the
+    // admin's own address. Setting this sends EVERY admin's sign-in code to this one inbox (one the owner reads) instead, so the second step still works and
+    // nobody is locked out. Remove it once the domain is verified.
+    codeTo: (process.env.ADMIN_CODE_TO || '').trim().toLowerCase(),
+  },
+
   database: {
     // Supabase connection pooler URL for the least-privilege `washo_api` role (NOT the postgres superuser).
     url: required('DATABASE_URL', 'postgresql://washo_api@localhost:5432/postgres'),

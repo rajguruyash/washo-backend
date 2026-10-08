@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import helmet from 'helmet';
 import path from 'path';
+import { adminGate } from './access';
 import { config } from './config';
 import { HttpError } from './errors';
 import { apiLimiter, errorHandler, sameOriginWrites } from './middleware/http';
@@ -9,6 +10,7 @@ import { accountRouter } from './routes/account';
 import { adminRouter } from './routes/admin';
 import { adminCampaignsRouter } from './routes/adminCampaigns';
 import { adminManageRouter } from './routes/adminManage';
+import { adminOpsRouter } from './routes/adminOps';
 import { authRouter } from './routes/auth';
 import { bookingsRouter } from './routes/bookings';
 import { campaignRouter } from './routes/campaign';
@@ -18,6 +20,8 @@ import { catalogRouter } from './routes/catalog';
 import { geoRouter } from './routes/geo';
 import { membershipsRouter } from './routes/memberships';
 import { remindersRouter } from './routes/reminders';
+import { maintenanceGate, settingsRouter } from './routes/settings';
+import { supportRouter } from './routes/support';
 import { webhookRouter } from './routes/webhook';
 import { workerRouter } from './routes/worker';
 
@@ -59,13 +63,16 @@ export function createApp() {
     })
   );
   app.use('/api', apiLimiter, sameOriginWrites);
+  // Every admin request passes ONE gate first: signed in, second step done, has a role, and the role may do this (access.ts). Then maintenance mode.
+  app.use('/api/admin', ...adminGate);
+  app.use('/api', maintenanceGate);
   // Anything an admin changes (prices, services, campaigns, limits) must show on the public pages at once: empty the few seconds of memory they use.
   app.use('/api/admin', (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') res.on('finish', forgetPublic);
     next();
   });
   app.get('/api/health', (_req, res) => res.json({ success: true }));
-  app.use('/api', catalogRouter, authRouter, accountRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminCampaignsRouter, remindersRouter, webhookRouter);
+  app.use('/api', catalogRouter, settingsRouter, authRouter, accountRouter, supportRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminOpsRouter, adminCampaignsRouter, remindersRouter, webhookRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'Not found')));
 
   // Serve the built React app (same origin as the API, which keeps cookie auth simple).

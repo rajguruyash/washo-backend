@@ -1,7 +1,8 @@
 /**
  * `npm run dev:stack`: the website API against a LOCAL stand-in for Supabase (Auth, edge functions, Storage) backed by a
  * real local copy of the WASHO database with every migration applied. For trying the site by hand. Not for production.
- *   Customer OTP is always 123456.  Admin: admin@washo.test / Admin-pass-1   Specialist: worker@washo.test / Worker-pass-1
+ *   Customer OTP is always 123456.  Admin: admin@washo.test / Admin-pass-1, then the emailed code (always 123456; the mail is at /__dev/mail?to=admin@washo.test)
+ *   Specialist: worker@washo.test / Worker-pass-1.  Customers can also sign up with an email and a password.
  * Run `npm run dev` (Vite) in another terminal and open the URL it prints.
  */
 import express from 'express';
@@ -47,7 +48,7 @@ async function main() {
   outer.use(createApp());
   outer.listen(config.port, () => {
     console.log(`\nWASHO API on http://localhost:${config.port}  (fake Supabase at ${fake.url})`);
-    console.log('Customer OTP: 123456 · Admin: admin@washo.test / Admin-pass-1 · Specialist: worker@washo.test / Worker-pass-1');
+    console.log('Customer OTP: 123456 · Admin: admin@washo.test / Admin-pass-1 then code 123456 · Specialist: worker@washo.test / Worker-pass-1');
     console.log('Razorpay is simulated: GET /__dev/checkout?order=<order_id> returns what Checkout would send to /api/payments/verify.\n');
   });
 }

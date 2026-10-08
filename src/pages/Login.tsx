@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Loader2, Mail, MessageSquareText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2, Mail, MessageSquareText } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { AvatarFull } from '../components/brand/Avatar';
@@ -20,6 +20,7 @@ type OtpProblem = null | { kind: 'invalid' | 'throttled' | 'network'; message: s
 const prettyPhone = (p: string) => `+91 ${p.slice(0, 5)} ${p.slice(5)}`;
 const signInErrors: Record<string, string> = {
   archived: 'This account has been deactivated. Please contact WASHO.',
+  admin_use_email: 'Admins sign in with their email and password.',
 };
 
 const homeFor = (role: Role) => (role === 'admin' ? '/admin' : role === 'worker' ? '/worker' : '/app');
@@ -59,15 +60,19 @@ export default function Login() {
   const [shakeKey, setShakeKey] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Email sign-in: customers ask for a code and paste it in; specialists and admins use their password (?staff=1 opens that directly).
-  const [emailStep, setEmailStep] = useState<'enter' | 'code' | 'password'>(params.get('staff') === '1' ? 'password' : 'enter');
+  // Email sign-in: an email and a password (to sign in, or to create an account: no code, no verification email). An ADMIN's password is only the first
+  // step: a code is then emailed to them and entered on the second screen.
+  const [emailStep, setEmailStep] = useState<'form' | 'code'>('form');
+  const [tab, setTab] = useState<'signin' | 'signup'>(params.get('tab') === 'signup' ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [emailError, setEmailError] = useState<{ field?: 'email' | 'password'; message: string } | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailHint, setEmailHint] = useState('');
   const [emailCode, setEmailCode] = useState('');
   const [emailProblem, setEmailProblem] = useState('');
   const [emailVerifying, setEmailVerifying] = useState(false);
-  const [password, setPassword] = useState('');
-  const [emailError, setEmailError] = useState('');
-  const [emailBusy, setEmailBusy] = useState(false);
 
   // Already signed in (and not mid-login): go straight through.
   if (user && step !== 'done' && !emailBusy && !emailVerifying) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
@@ -136,43 +141,41 @@ export default function Login() {
     if (v.length === 6) void verify(v);
   };
 
-  const emailSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailError('');
-    setEmailBusy(true);
-    try {
-      const res = await post<{ role: Role }>('/auth/email/login', { email, password });
-      const me = await refresh();
-      const home = homeFor(me.role ?? res.role);
-      navigate(next && next.startsWith(home) ? next : home, { replace: true });
-    } catch (err) {
-      setEmailError(err instanceof ApiError ? err.fields.email ?? err.fields.password ?? err.message : 'Something went wrong. Please try again.');
-      setEmailBusy(false);
-    }
+  const finishSignIn = async (fallbackRole: Role) => {
+    const me = await refresh();
+    const home = homeFor(me.role ?? fallbackRole);
+    if (me.role === 'customer') {
+      // customers get the pop-up; specialists and admins go straight to their console
+      setWelcomeName(me.full_name ?? null);
+      setStep('done');
+      setTimeout(() => navigate(next && next.startsWith(home) ? next : home, { replace: true }), CELEBRATE_MS);
+    } else navigate(next && next.startsWith(home) ? next : home, { replace: true });
   };
 
-  // Asks for the emailed code. The server sends it (never to the browser); the customer copies it from the email and pastes it here.
-  const sendEmailCode = async (isResend = false) => {
+  const emailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     const addr = email.trim();
-    if (!/^\S+@\S+\.\S+$/.test(addr)) {
-      setEmailError('Enter a valid email address.');
-      return;
-    }
-    setEmailError('');
-    setEmailProblem('');
-    setSending(true);
+    if (!/^\S+@\S+\.\S+$/.test(addr)) return setEmailError({ field: 'email', message: 'Enter a valid email address.' });
+    if (!password) return setEmailError({ field: 'password', message: tab === 'signup' ? 'Choose a password.' : 'Enter your password.' });
+    setEmailError(null);
+    setEmailBusy(true);
     try {
-      await post('/auth/email/otp/request', { email: addr });
-      startResend(30);
-      setEmailCode('');
-      setEmailStep('code');
-      if (isResend) setEmailProblem('');
+      const res = await post<{ role?: Role; step?: 'code'; email_hint?: string }>(tab === 'signup' ? '/auth/email/signup' : '/auth/email/login', tab === 'signup' ? { email: addr, password, source: getSource() } : { email: addr, password });
+      if (res.step === 'code') {
+        // An admin: the password was right; a code has been emailed.
+        setEmailHint(res.email_hint ?? '');
+        setEmailCode('');
+        setEmailProblem('');
+        setEmailStep('code');
+        startResend(30);
+        setEmailBusy(false);
+        return;
+      }
+      await finishSignIn(res.role ?? 'customer');
     } catch (err) {
-      const msg = err instanceof ApiError ? err.fields.email ?? err.message : 'Something went wrong. Please try again.';
-      if (emailStep === 'code') setEmailProblem(msg);
-      else setEmailError(msg);
-    } finally {
-      setSending(false);
+      setEmailBusy(false);
+      if (err instanceof ApiError) setEmailError({ field: err.fields.email ? 'email' : err.fields.password ? 'password' : undefined, message: err.fields.email ?? err.fields.password ?? err.message });
+      else setEmailError({ message: 'Something went wrong. Please try again.' });
     }
   };
 
@@ -180,14 +183,37 @@ export default function Login() {
     setEmailVerifying(true);
     setEmailProblem('');
     try {
-      await post('/auth/email/otp/verify', { email: email.trim(), code: value, source: getSource() });
-      const me = await refresh();
-      setWelcomeName(me.full_name ?? null);
-      setStep('done');
-      setTimeout(() => navigate(next && next.startsWith(homeFor(me.role)) ? next : homeFor(me.role), { replace: true }), CELEBRATE_MS);
+      await post('/auth/admin/code/verify', { code: value });
+      await finishSignIn('admin');
     } catch (err) {
       setEmailVerifying(false);
+      if (err instanceof ApiError && (err.code === 'step_expired' || err.code === 'too_many_codes')) {
+        // The step is over: back to the password, with the reason.
+        setEmailStep('form');
+        setPassword('');
+        setEmailError({ message: err.message });
+        return;
+      }
       setEmailProblem(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    }
+  };
+
+  const resendEmailCode = async () => {
+    setSending(true);
+    setEmailProblem('');
+    try {
+      const r = await post<{ email_hint?: string }>('/auth/admin/code/resend', {});
+      if (r.email_hint) setEmailHint(r.email_hint);
+      setEmailCode('');
+      startResend(30);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'step_expired') {
+        setEmailStep('form');
+        setPassword('');
+        setEmailError({ message: err.message });
+      } else setEmailProblem(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -197,7 +223,8 @@ export default function Login() {
     p.delete('error');
     if (toEmail) {
       p.set('mode', 'email');
-      setEmailStep('enter');
+      setEmailStep('form');
+      setEmailError(null);
     } else p.delete('mode');
     setParams(p, { replace: true });
   };
@@ -219,32 +246,43 @@ export default function Login() {
 
           <div className="flex flex-1 items-center justify-center py-8">
             <motion.div layout className="glass w-full max-w-md overflow-hidden p-6 sm:p-9" transition={{ layout: { duration: 0.3 } }}>
+              {params.get('reason') === 'idle' && <p role="status" className="mb-5 rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-warn">You were signed out because you were away for a while. Please sign in again.</p>}
               <AnimatePresence mode="wait" initial={false}>
                 {emailMode ? (
-                  emailStep === 'enter' ? (
+                  emailStep === 'form' ? (
                     <motion.form
-                      key="email-enter"
+                      key="email-form"
                       initial={{ opacity: 0, x: 24 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -24 }}
-                      onSubmit={(e) => { e.preventDefault(); void sendEmailCode(); }}
+                      onSubmit={(e) => void emailSubmit(e)}
                       noValidate
                       className="space-y-5"
                     >
                       <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
                       <div>
-                        <h1 className="text-3xl font-extrabold">Sign in with email</h1>
-                        <p className="mt-2 text-fog">Enter your email and we'll send you a code. Copy it and paste it in. No password needed.</p>
+                        <h1 className="text-3xl font-extrabold">{tab === 'signup' ? 'Create your account' : 'Sign in with email'}</h1>
+                        <p className="mt-2 text-fog">{tab === 'signup' ? 'Choose a password: 8 or more characters, with letters and a number. No code to wait for.' : 'Enter your email and password.'}</p>
                       </div>
-                      <Input label="Email" type="email" autoComplete="email" inputMode="email" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(''); }} error={emailError} autoFocus required />
-                      <Button type="submit" size="lg" full loading={sending} iconRight={<ArrowRight className="h-5 w-5" />}>Email me a code</Button>
+                      <div role="tablist" aria-label="Sign in or create an account" className="grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-1">
+                        {([['signin', 'Sign in'], ['signup', 'Create account']] as const).map(([v, label]) => (
+                          <button key={v} type="button" role="tab" aria-selected={tab === v} onClick={() => { setTab(v); setEmailError(null); }} className={cn('rounded-xl px-3 py-2 text-sm font-semibold transition-colors', tab === v ? 'border border-white/[0.1] bg-white/[0.09] text-white' : 'border border-transparent text-fog hover:text-mist')}>{label}</button>
+                        ))}
+                      </div>
+                      <Input label="Email" type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null); }} error={emailError?.field === 'email' ? emailError.message : undefined} autoFocus required />
+                      <div className="relative">
+                        <Input label="Password" type={showPw ? 'text' : 'password'} autoComplete={tab === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(e) => { setPassword(e.target.value); setEmailError(null); }} error={emailError?.field === 'password' ? emailError.message : undefined} required className="[&_input]:pr-12" />
+                        <button type="button" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw} className="absolute right-2 top-[2.05rem] grid h-9 w-9 place-items-center rounded-xl text-fog hover:bg-white/10 hover:text-white">{showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                      </div>
+                      {emailError && !emailError.field && <p role="alert" className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{emailError.message}</p>}
+                      <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>{tab === 'signup' ? 'Create account' : 'Sign in'}</Button>
                       {problemCode && signInErrors[problemCode] && <p role="alert" className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
                       <div className="grid gap-1 pt-1 text-center text-sm">
+                        {tab === 'signin' && <p className="text-fog">Forgot your password? Use your mobile number instead.</p>}
                         <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
-                        <button type="button" onClick={() => { setEmailError(''); setEmailStep('password'); }} className="text-fog hover:text-white">Specialist or admin? Sign in with a password</button>
                       </div>
                     </motion.form>
-                  ) : emailStep === 'code' ? (
+                  ) : (
                     <motion.form
                       key="email-code"
                       initial={{ opacity: 0, x: 24 }}
@@ -254,12 +292,12 @@ export default function Login() {
                       noValidate
                       className="space-y-5"
                     >
-                      <button type="button" onClick={() => { setEmailStep('enter'); setEmailProblem(''); setEmailCode(''); }} className="-ml-1 inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-sm text-fog hover:text-white">
-                        <ArrowLeft className="h-4 w-4" /> Change email
+                      <button type="button" onClick={() => { setEmailStep('form'); setEmailProblem(''); setEmailCode(''); setPassword(''); }} className="-ml-1 inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-sm text-fog hover:text-white">
+                        <ArrowLeft className="h-4 w-4" /> Back
                       </button>
                       <div>
                         <h1 className="text-3xl font-extrabold">Check your email</h1>
-                        <p className="mt-2 text-fog">We sent a code to <span className="break-all font-semibold text-white">{email.trim()}</span>. Copy it and paste it here. It can take a minute to arrive; look in spam too.</p>
+                        <p className="mt-2 text-fog">Your password was right. For your security we sent a code to <span className="break-all font-semibold text-white">{emailHint || 'your email'}</span>. Copy it and paste it here. It can take a minute to arrive; look in spam too.</p>
                       </div>
                       <Input
                         label="Code from the email"
@@ -280,24 +318,8 @@ export default function Login() {
                       <Button type="submit" size="lg" full loading={emailVerifying} iconRight={<ArrowRight className="h-5 w-5" />}>Verify and sign in</Button>
                       <p className="text-center text-sm text-fog">
                         Didn't get it?{' '}
-                        {resendIn > 0 ? <span className="tabular-nums">Resend in {resendIn}s</span> : <button type="button" onClick={() => void sendEmailCode(true)} disabled={sending} className="font-semibold text-washo-300 hover:text-white disabled:opacity-50">{sending ? 'Sending…' : 'Send a new code'}</button>}
+                        {resendIn > 0 ? <span className="tabular-nums">Resend in {resendIn}s</span> : <button type="button" onClick={() => void resendEmailCode()} disabled={sending} className="font-semibold text-washo-300 hover:text-white disabled:opacity-50">{sending ? 'Sending…' : 'Send a new code'}</button>}
                       </p>
-                    </motion.form>
-                  ) : (
-                    <motion.form key="email-password" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} onSubmit={emailSubmit} noValidate className="space-y-5">
-                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
-                      <div>
-                        <h1 className="text-3xl font-extrabold">Sign in with a password</h1>
-                        <p className="mt-2 text-fog">For specialists and admins: use the email and password WASHO gave you.</p>
-                      </div>
-                      <Input label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
-                      <Input label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                      {emailError && <p role="alert" className="text-sm text-bad">{emailError}</p>}
-                      <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>Sign in</Button>
-                      <div className="grid gap-1 pt-1 text-center text-sm">
-                        <button type="button" onClick={() => { setEmailError(''); setEmailStep('enter'); }} className="text-fog hover:text-white">Email me a code instead</button>
-                        <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
-                      </div>
                     </motion.form>
                   )
                 ) : (
