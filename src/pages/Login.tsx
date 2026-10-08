@@ -234,7 +234,7 @@ export default function Login() {
                       <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Mail className="h-6 w-6" /></span>
                       <div>
                         <h1 className="text-3xl font-extrabold">Sign in with email</h1>
-                        <p className="mt-2 text-fog">Enter your email and we'll send you a 6-digit code. Copy it and paste it in. No password needed.</p>
+                        <p className="mt-2 text-fog">Enter your email and we'll send you a code. Copy it and paste it in. No password needed.</p>
                       </div>
                       <Input label="Email" type="email" autoComplete="email" inputMode="email" value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(''); }} error={emailError} autoFocus required />
                       <Button type="submit" size="lg" full loading={sending} iconRight={<ArrowRight className="h-5 w-5" />}>Email me a code</Button>
@@ -259,7 +259,7 @@ export default function Login() {
                       </button>
                       <div>
                         <h1 className="text-3xl font-extrabold">Check your email</h1>
-                        <p className="mt-2 text-fog">We sent a 6-digit code to <span className="break-all font-semibold text-white">{email.trim()}</span>. Copy it and paste it here. It can take a minute to arrive; look in spam too.</p>
+                        <p className="mt-2 text-fog">We sent a code to <span className="break-all font-semibold text-white">{email.trim()}</span>. Copy it and paste it here. It can take a minute to arrive; look in spam too.</p>
                       </div>
                       <Input
                         label="Code from the email"
@@ -273,7 +273,7 @@ export default function Login() {
                         onChange={(e) => { setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 10)); setEmailProblem(''); }}
                         onPaste={(e) => {
                           const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 10);
-                          if (pasted.length === 6) { e.preventDefault(); setEmailCode(pasted); void verifyEmailCode(pasted); } // a pasted 6-digit code signs in at once
+                          if (pasted.length >= 6) { e.preventDefault(); setEmailCode(pasted); void verifyEmailCode(pasted); } // a pasted code signs in at once (its length is Supabase's setting)
                         }}
                         className="[&_input]:h-14 [&_input]:text-center [&_input]:font-display [&_input]:text-2xl [&_input]:tracking-[0.35em]"
                       />
@@ -359,7 +359,7 @@ export default function Login() {
                           <ArrowLeft className="h-4 w-4" /> Change number
                         </button>
                         <h1 className="text-3xl font-extrabold">Enter your code</h1>
-                        <p className="mt-2 text-fog">We sent a 6-digit code to <span className="font-semibold text-white">{prettyPhone(digits)}</span></p>
+                        <p className="mt-2 text-fog">We sent a code to <span className="font-semibold text-white">{prettyPhone(digits)}</span></p>
 
                         {/* One real input (so autofill/paste work) drawn as six cells. */}
                         <div key={shakeKey} className={cn('relative mt-7', shakeKey > 0 && problem?.kind === 'invalid' && 'animate-shake')}>

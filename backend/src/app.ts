@@ -13,6 +13,7 @@ import { authRouter } from './routes/auth';
 import { bookingsRouter } from './routes/bookings';
 import { campaignRouter } from './routes/campaign';
 import { capacityRouter } from './routes/capacity';
+import { forgetPublic } from './publicCache';
 import { catalogRouter } from './routes/catalog';
 import { geoRouter } from './routes/geo';
 import { membershipsRouter } from './routes/memberships';
@@ -31,9 +32,11 @@ export function createApp() {
       contentSecurityPolicy: {
         useDefaults: true,
         directives: {
+          // Over plain http (a local copy of the built site) Safari would turn every asset request into https and fail; production is https already.
+          ...(config.isProd ? {} : { 'upgrade-insecure-requests': null }),
           'script-src': ["'self'", 'https://checkout.razorpay.com'],
-          'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-          'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
+          'style-src': ["'self'", "'unsafe-inline'"],
+          'font-src': ["'self'", 'data:'], // fonts are self-hosted
           // wash photos arrive as signed Supabase Storage URLs
           'img-src': ["'self'", 'data:', 'blob:', 'https:'],
           'connect-src': ["'self'", 'https://api.razorpay.com', 'https://lumberjack.razorpay.com', 'https://checkout.razorpay.com'],
@@ -56,6 +59,11 @@ export function createApp() {
     })
   );
   app.use('/api', apiLimiter, sameOriginWrites);
+  // Anything an admin changes (prices, services, campaigns, limits) must show on the public pages at once: empty the few seconds of memory they use.
+  app.use('/api/admin', (req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') res.on('finish', forgetPublic);
+    next();
+  });
   app.get('/api/health', (_req, res) => res.json({ success: true }));
   app.use('/api', catalogRouter, authRouter, accountRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminCampaignsRouter, remindersRouter, webhookRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'Not found')));
@@ -63,8 +71,22 @@ export function createApp() {
   // Serve the built React app (same origin as the API, which keeps cookie auth simple).
   const distPath = process.env.STATIC_DIR || path.join(__dirname, '..', '..', 'dist');
   if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath, { index: false, maxAge: '1h' }));
-    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    // Everything under /assets has its content in its file name (a new build is a new name), so it can be kept for a year and never re-checked:
+    // a returning visitor loads the site from their own device. The few plain files (icons) are kept a day. The page itself is always re-checked,
+    // so a new build is picked up at once.
+    app.use(
+      express.static(distPath, {
+        index: false,
+        maxAge: '1d',
+        setHeaders: (res, file) => {
+          if (file.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        },
+      })
+    );
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   } else {
     app.get('/', (_req, res) => res.send('WASHO API is running. Build the frontend (npm run build) or use the Vite dev server.'));
   }

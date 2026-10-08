@@ -1,6 +1,6 @@
 'use client';
 
-import { useInView, useMotionValue, useSpring } from 'framer-motion';
+import { animate, useInView, useMotionValue } from 'framer-motion';
 import { useCallback, useEffect, useRef } from 'react';
 
 interface CountUpProps {
@@ -30,14 +30,6 @@ export default function CountUp({
 }: CountUpProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const motionValue = useMotionValue(direction === 'down' ? to : from);
-
-  const damping = 20 + 40 * (1 / duration);
-  const stiffness = 100 * (1 / duration);
-
-  const springValue = useSpring(motionValue, {
-    damping,
-    stiffness
-  });
 
   const isInView = useInView(ref, { once: true, margin: '0px' });
 
@@ -83,8 +75,11 @@ export default function CountUp({
         onStart();
       }
 
+      // WASHO: a timed tween, not a spring. A spring has a long tail (the last rupees crawl in for seconds after the "duration"), so the count
+      // took far longer than asked. This one reaches the real number exactly when `duration` says, easing out as it lands.
+      let controls: { stop: () => void } | undefined;
       const timeoutId = setTimeout(() => {
-        motionValue.set(direction === 'down' ? from : to);
+        controls = animate(motionValue, direction === 'down' ? from : to, { duration, ease: [0.22, 1, 0.36, 1] });
       }, delay * 1000);
 
       const durationTimeoutId = setTimeout(
@@ -99,19 +94,20 @@ export default function CountUp({
       return () => {
         clearTimeout(timeoutId);
         clearTimeout(durationTimeoutId);
+        controls?.stop();
       };
     }
   }, [isInView, startWhen, motionValue, direction, from, to, delay, onStart, onEnd, duration]);
 
   useEffect(() => {
-    const unsubscribe = springValue.on('change', (latest: number) => {
+    const unsubscribe = motionValue.on('change', (latest: number) => {
       if (ref.current) {
         ref.current.textContent = formatValue(latest);
       }
     });
 
     return () => unsubscribe();
-  }, [springValue, formatValue]);
+  }, [motionValue, formatValue]);
 
   return <span className={className} ref={ref} />;
 }

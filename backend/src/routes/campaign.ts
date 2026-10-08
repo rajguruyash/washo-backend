@@ -5,6 +5,7 @@ import { freeWashEmail, sendTracked } from '../emails';
 import { mailConfigured } from '../notify';
 import { parse } from '../errors';
 import { withAnon } from '../db';
+import { cached, forgetPublic } from '../publicCache';
 import { asyncHandler, optionalSession, requirePhone, requireRole, requireSession } from '../middleware/http';
 
 export const campaignRouter = Router();
@@ -52,10 +53,11 @@ campaignRouter.get(
   '/campaign',
   optionalSession,
   asyncHandler(async (req, res) => {
-    const run = req.session ? req.db : withAnon;
+    const load = (run: typeof withAnon) => run(async (c) => (await c.query('SELECT public.get_campaign_status() AS s')).rows[0].s);
     let status: unknown = EMPTY_STATUS;
     try {
-      status = await run(async (c) => (await c.query('SELECT public.get_campaign_status() AS s')).rows[0].s);
+      // A visitor's view is the same for everyone (kept a few seconds); a signed-in customer also sees their own claim and offer, so theirs is fresh.
+      status = req.session ? await load(req.db as unknown as typeof withAnon) : await cached('campaign:visitor', 5_000, () => load(withAnon));
     } catch (err) {
       if (!campaignsNotInstalled(err)) throw err;
     }
@@ -92,6 +94,7 @@ campaignRouter.post(
           ])
         ).rows[0].r
     );
+    forgetPublic(); // the number of free washes left has just changed
     res.status(201).json({ success: true, ...r });
     void emailConfirmation(req, r.booking_id).catch((err) => console.error('Free wash confirmation email failed:', (err as Error).message));
   })

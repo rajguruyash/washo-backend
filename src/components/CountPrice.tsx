@@ -1,5 +1,6 @@
 import { useReducedMotion } from 'framer-motion';
 import { rupees } from '../lib/format';
+import { useSiteReady } from '../lib/siteReady';
 import CountUp from './reactbits/CountUp';
 
 /**
@@ -27,17 +28,18 @@ export function anchorTotalCents(lines: { code?: string; quantity: number }[]): 
 
 /**
  * ₹ price that counts down from a higher number to the real one (React Bits CountUp). Pass `code` for a per-wash service
- * price, or `fromCents` for a total. Shows the plain price when the animation does not apply (reduced motion, paise, or no
+ * price, or `fromCents` for a total. It starts once the opening loading screen has gone and the price is on screen, and takes under a second. Shows the plain price when the animation does not apply (reduced motion, paise, or no
  * higher starting number), and when `animate` is false.
  */
-export function CountPrice({ cents, code, fromCents, animate = true, className, duration = 1.2 }: { cents: number; code?: string; fromCents?: number | null; animate?: boolean; className?: string; duration?: number }) {
+export function CountPrice({ cents, code, fromCents, animate = true, className, duration = 0.8 }: { cents: number; code?: string; fromCents?: number | null; animate?: boolean; className?: string; duration?: number }) {
   const reduce = useReducedMotion();
+  const siteReady = useSiteReady(); // not before the opening loading screen has gone: it would count unseen
   const from = fromCents != null ? fromCents / 100 : code ? COUNT_FROM_RUPEES[code] : undefined;
   const to = cents / 100;
   if (reduce || !animate || from == null || !Number.isInteger(to) || !Number.isInteger(from) || from <= to) return <span className={className}>{rupees(cents)}</span>;
   return (
     <span className={className}>
-      <span aria-hidden>₹<CountUp from={from} to={to} duration={duration} separator="," /></span>
+      <span aria-hidden>₹<CountUp from={from} to={to} duration={duration} separator="," startWhen={siteReady} /></span>
       <span className="sr-only">{rupees(cents)}</span>
     </span>
   );

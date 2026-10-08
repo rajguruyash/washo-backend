@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { parse } from '../errors';
 import { withAnon } from '../db';
 import { asyncHandler, optionalSession } from '../middleware/http';
+import { cached } from '../publicCache';
 
 export const catalogRouter = Router();
 
@@ -11,15 +12,21 @@ export const catalogRouter = Router();
 catalogRouter.get(
   '/catalog',
   asyncHandler(async (_req, res) => {
-    const catalog = await withAnon(async (c) => (await c.query('SELECT public.get_public_catalog() AS c')).rows[0].c);
-    // How much notice a wash needs (set in Admin). The booking pages use it to grey out times that cannot be booked, instead of
-    // letting a customer pick one and be refused at the end. The database still enforces it.
-    const rules = await withAnon(async (c) =>
-      (await c.query(`SELECT key, value_int FROM public.pricing_settings WHERE key IN ('on_demand_min_lead_hours', 'membership_min_lead_days')`)).rows as { key: string; value_int: number }[]
-    ).catch(() => []);
-    const rule = (key: string, fallback: number) => rules.find((r) => r.key === key)?.value_int ?? fallback;
+    const out = await cached('catalog', 30_000, async () => {
+      // the two lookups are independent: ask the database for both at once
+      const [catalog, rules] = await Promise.all([
+        withAnon(async (c) => (await c.query('SELECT public.get_public_catalog() AS c')).rows[0].c),
+        // How much notice a wash needs (set in Admin). The booking pages use it to grey out times that cannot be booked, instead of
+        // letting a customer pick one and be refused at the end. The database still enforces it.
+        withAnon(async (c) =>
+          (await c.query(`SELECT key, value_int FROM public.pricing_settings WHERE key IN ('on_demand_min_lead_hours', 'membership_min_lead_days')`)).rows as { key: string; value_int: number }[]
+        ).catch(() => [] as { key: string; value_int: number }[]),
+      ]);
+      const rule = (key: string, fallback: number) => rules.find((r) => r.key === key)?.value_int ?? fallback;
+      return { ...catalog, booking_rules: { on_demand_min_lead_hours: rule('on_demand_min_lead_hours', 2), membership_min_lead_days: rule('membership_min_lead_days', 2) } };
+    });
     res.set('Cache-Control', 'public, max-age=60');
-    res.json({ success: true, ...catalog, booking_rules: { on_demand_min_lead_hours: rule('on_demand_min_lead_hours', 2), membership_min_lead_days: rule('membership_min_lead_days', 2) } });
+    res.json({ success: true, ...out });
   })
 );
 
@@ -38,10 +45,15 @@ catalogRouter.post(
       }),
       req.body
     );
-    const run = req.session ? req.db : withAnon;
-    const estimate = await run(async (c) =>
-      (await c.query('SELECT public.estimate_membership_price($1::public.vehicle_type, $2::jsonb, $3) AS q', [b.vehicle_type, JSON.stringify(b.weekly_pattern), b.duration_months])).rows[0].q
-    );
+    const ask = (run: typeof withAnon) =>
+      run(async (c) =>
+        (await c.query('SELECT public.estimate_membership_price($1::public.vehicle_type, $2::jsonb, $3) AS q', [b.vehicle_type, JSON.stringify(b.weekly_pattern), b.duration_months])).rows[0].q
+      );
+    // A visitor's price is the standard one, the same for everybody asking the same thing, so it is kept briefly. A signed-in customer's price
+    // can include their own welcome offer, so theirs is always worked out fresh.
+    const estimate = req.session
+      ? await ask(req.db as unknown as typeof withAnon)
+      : await cached(`estimate:${b.vehicle_type}:${JSON.stringify(b.weekly_pattern)}:${b.duration_months}`, 60_000, () => ask(withAnon));
     res.json({ success: true, estimate });
   })
 );

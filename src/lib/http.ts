@@ -26,6 +26,18 @@ export const onUnauthenticated = (fn: Listener) => {
   };
 };
 
+/**
+ * A request the page started before the app's code had loaded (public/early.js), used once and only while it is fresh. This is what lets the
+ * first screen have its data about a second sooner: the answer is usually already there by the time the app asks.
+ */
+function takeEarly(path: string): Promise<Response> | null {
+  const early = (window as unknown as { __early?: Record<string, Promise<Response> | number | undefined> }).__early;
+  const hit = early?.[path];
+  if (!early || typeof hit === 'number' || !hit || Date.now() - (early.at as number) > 20_000) return null;
+  early[path] = undefined;
+  return hit;
+}
+
 export async function request<T = any>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   path: string,
@@ -35,14 +47,17 @@ export async function request<T = any>(
   opts?: { keepalive?: boolean }
 ): Promise<T> {
   let res: Response;
-  try {
-    res = await fetch(`/api${path}`, {
+  const send = () =>
+    fetch(`/api${path}`, {
       method,
       credentials: 'same-origin',
       headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       keepalive: opts?.keepalive,
     });
+  try {
+    const early = method === 'GET' ? takeEarly(path) : null;
+    res = early ? await early.catch(send) : await send();
   } catch {
     throw new ApiError(0, 'network', "We couldn't reach WASHO. Check your connection and try again.");
   }

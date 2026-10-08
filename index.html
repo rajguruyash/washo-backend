@@ -14,9 +14,10 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- The two fonts the first screen is set in, fetched alongside the page (they are self-hosted: no third-party stylesheet blocks the first paint) -->
+    <link rel="preload" href="/src/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/sora-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <script src="/early.js" defer></script>
   </head>
   <body>
     <div id="root"></div>

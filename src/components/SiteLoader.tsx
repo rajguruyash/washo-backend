@@ -1,25 +1,23 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { SERVICE_PHOTOS } from '../lib/serviceImages';
+import bike from '../assets/loader/bike-body-wash.webp';
+import carBody from '../assets/loader/car-body-wash.webp';
+import carDeep from '../assets/loader/car-deep-cleaning.webp';
+import suvDeep from '../assets/loader/suv-deep-cleaning.webp';
+import { markSiteReady } from '../lib/siteReady';
 import { useAuth } from '../state/auth';
 import { Logo } from './brand/Logo';
 import DriftWall, { type DriftWallItem } from './reactbits/DriftWall';
 
-// The screen is never up for less than this (so it is a moment, not a flash) nor more than this (so a slow server never traps anyone).
-// The first time in a browser tab it gets its full moment; a reload in the same tab only a short one.
-const FIRST_MS = 1500;
-const AGAIN_MS = 600;
-const MAX_MS = 7000;
-const KEY = 'washo_seen_loader';
-const minimum = () => {
-  try {
-    const seen = sessionStorage.getItem(KEY) === '1';
-    sessionStorage.setItem(KEY, '1');
-    return seen ? AGAIN_MS : FIRST_MS;
-  } catch {
-    return FIRST_MS; // storage can be unavailable (private windows, blocked site data)
-  }
-};
+// The screen is never up for less than this (so it is a proper moment, not a flash) nor more than this (so a slow server never traps anyone).
+// It stays the same length on every visit: the wall of photos is part of how WASHO opens. If the site takes longer than this to be ready, it
+// simply stays until it is.
+const MIN_MS = 3500;
+const MAX_MS = 9000;
+
+// The wall is made from small copies of the service photos (about 15 KB each, not the 70 KB ones the page shows), so it appears at once and
+// does not compete with the page for the connection.
+const WALL_PHOTOS = [bike, carBody, carDeep, suvDeep];
 
 // Has the browser finished loading the page's files? (An external store, so a load that finishes between render and effect is never missed.)
 const onPageLoad = (cb: () => void) => {
@@ -40,7 +38,7 @@ export function SiteLoader() {
   const phone = useMemo(() => window.matchMedia('(max-width: 639px)').matches, []);
 
   useEffect(() => {
-    const a = window.setTimeout(() => setMinPassed(true), minimum());
+    const a = window.setTimeout(() => setMinPassed(true), MIN_MS);
     const b = window.setTimeout(() => setGaveUp(true), MAX_MS);
     return () => {
       window.clearTimeout(a);
@@ -49,13 +47,13 @@ export function SiteLoader() {
   }, []);
 
   const items = useMemo<DriftWallItem[]>(() => {
-    const photos = Object.values(SERVICE_PHOTOS);
-    return Array.from({ length: 20 }, (_, i) => ({ image: photos[(i * 3 + Math.floor(i / 4)) % photos.length], title: 'WASHO' }));
+    return Array.from({ length: 20 }, (_, i) => ({ image: WALL_PHOTOS[(i * 3 + Math.floor(i / 4)) % WALL_PHOTOS.length], title: 'WASHO' }));
   }, []);
 
   const ready = (pageLoaded && minPassed && !loading) || gaveUp;
   return (
-    <AnimatePresence>
+    // (the price countdown and other opening animations wait until the screen has completely gone)
+    <AnimatePresence onExitComplete={markSiteReady}>
       {!ready && (
         <motion.div
           key="site-loader"

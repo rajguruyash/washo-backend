@@ -68,3 +68,24 @@ export async function profileFor(claims: Claims, o: { fresh?: boolean } = {}): P
   remembered.set(claims.sub, { at: Date.now(), profile });
   return profile;
 }
+
+/**
+ * profileFor, for the moment someone has just proved who they are (a code): a login with no profile (an account made before profiles were created
+ * automatically, or one the trigger missed) gets one, instead of being told their account is not set up. Falls back to the original answer if the
+ * database cannot repair it (or does not have ensure_my_profile yet).
+ */
+export async function profileForOrRepair(claims: Claims): Promise<Profile> {
+  try {
+    return await profileFor(claims, { fresh: true });
+  } catch (err) {
+    if (!(err instanceof HttpError && err.code === 'no_profile')) throw err;
+    try {
+      await withUser(claims, (c) => c.query('SELECT public.ensure_my_profile()'));
+    } catch (repair) {
+      console.warn('Could not create a missing profile on sign-in:', (repair as Error).message);
+      throw err;
+    }
+    forgetProfile(claims.sub);
+    return profileFor(claims, { fresh: true });
+  }
+}

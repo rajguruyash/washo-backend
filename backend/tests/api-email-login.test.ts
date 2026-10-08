@@ -74,6 +74,65 @@ describe('asking for the code', () => {
   });
 });
 
+/** A login made before profiles were created automatically: it exists, and has no profile. (One transaction, so no other test ever sees the trigger switched off.) */
+async function orphanLogin(o: { email?: string; phone?: string }) {
+  const c = await fake.admin.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('ALTER TABLE auth.users DISABLE TRIGGER on_auth_user_created_create_customer_profile');
+    const { rows } = await c.query(
+      `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+       VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1::text, CASE WHEN $1::text IS NOT NULL THEN now() END, $2::text, CASE WHEN $2::text IS NOT NULL THEN now() END, '{"provider":"email"}'::jsonb, '{}'::jsonb, now(), now()) RETURNING id`,
+      [o.email ?? null, o.phone ?? null]
+    );
+    await c.query('ALTER TABLE auth.users ENABLE TRIGGER on_auth_user_created_create_customer_profile');
+    await c.query('COMMIT');
+    return rows[0].id as string;
+  } catch (err) {
+    await c.query('ROLLBACK');
+    throw err;
+  } finally {
+    c.release();
+  }
+}
+const profileCount = async (authId: string) => (await fake.admin.query('select count(*)::int n from public.profiles where auth_user_id = $1', [authId])).rows[0].n;
+
+describe('an older login that has no profile', () => {
+  it('an email that signed up long ago, with no profile, is set up at sign-in instead of being turned away', async () => {
+    const email = mail();
+    const authId = await orphanLogin({ email });
+    expect(await profileCount(authId)).toBe(0);
+    const c = new Client();
+    expectOk(await ask(c, email));
+    const r = expectOk(await enter(c, email, FAKE.otpCode));
+    expect(r.body).toMatchObject({ role: 'customer', needs_profile: true }); // it only needs a name now
+    expect(await profileCount(authId)).toBe(1);
+    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'customer', email, phone: null });
+    expectOk(await c.put('/api/me', { full_name: 'Yash Raj', email }));
+  });
+
+  it('a mobile number with no profile is set up at sign-in too', async () => {
+    const phone = String(9_100_000_000 + crypto.randomInt(0, 99_999_999));
+    const authId = await orphanLogin({ phone: `+91${phone}` });
+    expect(await profileCount(authId)).toBe(0);
+    const c = new Client();
+    expectOk(await c.post('/api/auth/otp/request', { phone }));
+    expectOk(await c.post('/api/auth/otp/verify', { phone, code: FAKE.otpCode }));
+    expect(expectOk(await c.get('/api/me')).body.user).toMatchObject({ role: 'customer', phone: `+91${phone}` });
+    expect(await profileCount(authId)).toBe(1);
+  });
+});
+
+describe('the code in the email', () => {
+  it('is read out in groups, whatever length Supabase makes it (8 digits today)', async () => {
+    const { signInCodeEmail } = await import('../src/emails');
+    expect(signInCodeEmail('08760394').subject).toBe('0876 0394 is your WASHO sign-in code');
+    expect(signInCodeEmail('123456').subject).toBe('123 456 is your WASHO sign-in code');
+    expect(signInCodeEmail('08760394').html).toContain('>08760394<');
+    expect(signInCodeEmail('08760394').html).not.toMatch(/6-digit/);
+  });
+});
+
 describe('pasting the code', () => {
   it('signs the customer in with httpOnly cookies, and a new one has no mobile number yet', async () => {
     const email = mail();

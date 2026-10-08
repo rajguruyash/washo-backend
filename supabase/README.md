@@ -182,3 +182,9 @@ A campaign claim no longer asks for a date or a time window. `app_private.pick_c
 `public.set_my_phone(number)` sets (or, with NULL, clears) the number on the caller's own customer profile, without a code: 10 digits starting 6 to 9 (a +91 or 91 in front is accepted), stored as +91XXXXXXXXXX. It refuses someone who signs in WITH a confirmed number (that number is their identity), a number another profile already has, staff and visitors.
 It is a typed number, not a verified one, and never links or merges accounts (only a number a login has confirmed does that). It raises the same `washo.allow_identity_change` switch the account-merge function uses, so the profile phone lock in `cutover/20261005000005`, when it is applied, still lets it through. The audit trail records `phone_added_unverified` with the last four digits. Tests: `after-25-set-my-phone.test.ts`, `backend/tests/api-email-login.test.ts`.
 
+## A login with no profile gets one when it signs in (migration 26)
+
+A customer profile is created by a trigger when an auth account is created. A login made before that trigger existed (production has a few, including an email address that signed up in September) could sign in but had no profile, and the website said "Your account is not set up yet".
+`public.ensure_my_profile()` repairs exactly that, for the CALLER's own login and only when it has no profile: a login with a confirmed number joins the profile that already has the number (the usual phone linking), otherwise a customer profile is made from the login's details. It never touches a login that has a profile and never makes staff.
+The website calls it right after a code has been accepted (email code and phone code). Tests: `after-26-ensure-my-profile.test.ts`, `backend/tests/api-email-login.test.ts`.
+

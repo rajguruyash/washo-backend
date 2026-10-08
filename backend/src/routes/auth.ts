@@ -6,7 +6,7 @@ import { HttpError, parse } from '../errors';
 import { ACCESS_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireRole, requireSession, setSessionCookies } from '../middleware/http';
 import { Claims, withUser } from '../db';
 import { phoneSchema } from '../phone';
-import { Profile, forgetProfile, needsProfile, profileFor } from '../profile';
+import { Profile, forgetProfile, needsProfile, profileFor, profileForOrRepair } from '../profile';
 import { signInCodeEmail } from '../emails';
 import { mailConfigured, sendMail } from '../notify';
 import { gotrue, gotrueAdmin } from '../supabase';
@@ -72,7 +72,7 @@ authRouter.post(
 
     let profile: Profile;
     try {
-      profile = await profileFor(claims, { fresh: true });
+      profile = await profileForOrRepair(claims);
     } catch (err) {
       // Signed in at Supabase but unusable here: do not leave half a session behind, and say why.
       clearSessionCookies(res);
@@ -83,7 +83,7 @@ authRouter.post(
 );
 
 // ───────────────────────── customers: sign in with an emailed code ─────────────────────────
-// The customer types their email, gets a 6-digit code by email (sent from here through Resend; Supabase Auth makes and later checks the code,
+// The customer types their email, gets a code by email (sent from here through Resend; Supabase Auth makes and later checks the code,
 // with its expiry and attempt limits) and pastes it in. Only customers: specialists and admins keep their password, so a mailbox alone can
 // never open a staff account. A new address becomes a customer account.
 const emailSchema = z.email('Enter a valid email address.').max(254);
@@ -134,7 +134,7 @@ authRouter.post(
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
     let profile: Profile;
     try {
-      profile = await profileFor(claims, { fresh: true });
+      profile = await profileForOrRepair(claims);
     } catch (err) {
       await gotrue.logout(session.access_token);
       throw err;

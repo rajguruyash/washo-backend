@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts.css";
 
 /* ───────────── WASHO design tokens ─────────────
    Dark, automotive, WASHO blue. Glass is used for floating surfaces only

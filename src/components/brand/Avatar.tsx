@@ -15,6 +15,7 @@ export function AvatarFull({ className, priority }: { className?: string; priori
         height={1200}
         alt="A WASHO crew member in a navy WASHO cap and polo, holding a pressure washer"
         loading={priority ? 'eager' : 'lazy'}
+        fetchPriority={priority ? 'high' : undefined}
         decoding="async"
         draggable={false}
         className="relative mx-auto h-auto w-full select-none animate-float drop-shadow-[0_30px_40px_rgb(0_0_0/0.5)]"

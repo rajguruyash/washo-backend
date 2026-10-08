@@ -320,8 +320,15 @@ describe('claiming the free wash', () => {
       const r1 = await claim(s, first, camp, await istDate(s, 2));
       slots.push(r1.time_slot);
       for (let i = 0; i < 2; i++) { const r = await claim(s, await person(s), camp, await istDate(s, 2)); expect(r.scheduled_date).toBe(r1.scheduled_date); slots.push(r.time_slot); }
-      // three washes on one day with nothing else booked: three different windows
-      expect(new Set(slots).size).toBe(3);
+      // three washes on one day with nothing else booked: a different window each, as many as are still far enough ahead that day
+      // (late in the day the first day has fewer windows left, so the count is worked out, not assumed)
+      await s.as('postgres');
+      const open = (await s.q(
+        `select count(*)::int n from unnest(array['morning','afternoon','night']::public.time_slot[]) w
+          where app_private.slot_start($1::date, w) >= now() + make_interval(hours => app_private.setting('on_demand_min_lead_hours'))`,
+        [r1.scheduled_date]
+      ))[0].n;
+      expect(new Set(slots).size).toBe(Math.min(3, open));
     }));
 
   it('one wash per vehicle per day still holds: a day the vehicle already has a wash is passed over', async () =>
