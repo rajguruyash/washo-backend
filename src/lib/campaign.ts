@@ -9,11 +9,11 @@ export const shortDayIST = (iso: string): string =>
 export const dayOf = (date: string): string =>
   new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
 
-/** "5% for 1 per week, 10% for 2, 15% for 3 or more" */
+/** "5% for 4 to 7 washes a month, 10% for 8 to 11, 15% for 12 or more" */
 export const offerRates = (o: Pick<CampaignPackOffer, 'bp_1' | 'bp_2' | 'bp_3plus'>): string =>
-  `${percent(o.bp_1)} for 1 per week, ${percent(o.bp_2)} for 2, ${percent(o.bp_3plus)} for 3 or more`;
+  `${percent(o.bp_1)} for 4 to 7 washes a month, ${percent(o.bp_2)} for 8 to 11, ${percent(o.bp_3plus)} for 12 or more`;
 
-/** The frequency discount (basis points) the offer gives for this many washes per week. */
+/** The frequency discount (basis points) the offer gives for this many washes a week (a month's washes divided by 4, rounded down: 4-7 a month is 1, 8-11 is 2, 12 or more is 3 and up). */
 export const offerBpFor = (o: Pick<CampaignPackOffer, 'bp_1' | 'bp_2' | 'bp_3plus'>, perWeek: number): number =>
   perWeek <= 1 ? o.bp_1 : perWeek === 2 ? o.bp_2 : o.bp_3plus;
 

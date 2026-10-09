@@ -137,7 +137,7 @@ export function ComboPacks() {
           </div>
         </SpotlightCard>
       </Reveal>
-      <p className="mt-5 text-sm text-fog">Want more? Choose any number of washes from 1 to 7 per week when you build your plan, with the price updating as you go.</p>
+      <p className="mt-5 text-sm text-fog">Want a different mix? Choose any 4 to 28 washes a month, in any combination of Body washes and Deep cleans, when you build your plan, with the price updating as you go.</p>
     </section>
   );
 }

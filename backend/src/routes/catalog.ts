@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { parse } from '../errors';
 import { withAnon } from '../db';
 import { asyncHandler, optionalSession } from '../middleware/http';
+import { monthlyNotInstalled, monthlyPlanSchema } from '../plan';
 import { cached } from '../publicCache';
 
 export const catalogRouter = Router();
@@ -40,20 +41,24 @@ catalogRouter.post(
     const b = parse(
       z.object({
         vehicle_type: z.enum(['bike', 'car', 'suv']),
-        weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1).max(7),
+        // either a weekly pattern (the older way: a few washes a week) or washes in a month (4 to 28, any mix)
+        weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1).max(7).optional(),
+        monthly: monthlyPlanSchema.pick({ body: true, deep: true }).optional(),
         duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
-      }),
+      }).refine((x) => Boolean(x.weekly_pattern) !== Boolean(x.monthly), 'Send either a weekly pattern or the washes in a month.'),
       req.body
     );
     const ask = (run: typeof withAnon) =>
       run(async (c) =>
-        (await c.query('SELECT public.estimate_membership_price($1::public.vehicle_type, $2::jsonb, $3) AS q', [b.vehicle_type, JSON.stringify(b.weekly_pattern), b.duration_months])).rows[0].q
-      );
+        b.monthly
+          ? (await c.query('SELECT public.estimate_monthly_price($1::public.vehicle_type, $2, $3, $4) AS q', [b.vehicle_type, b.monthly.body, b.monthly.deep, b.duration_months])).rows[0].q
+          : (await c.query('SELECT public.estimate_membership_price($1::public.vehicle_type, $2::jsonb, $3) AS q', [b.vehicle_type, JSON.stringify(b.weekly_pattern), b.duration_months])).rows[0].q
+      ).catch((err) => { throw monthlyNotInstalled(err) ?? err; });
     // A visitor's price is the standard one, the same for everybody asking the same thing, so it is kept briefly. A signed-in customer's price
     // can include their own welcome offer, so theirs is always worked out fresh.
     const estimate = req.session
       ? await ask(req.db as unknown as typeof withAnon)
-      : await cached(`estimate:${b.vehicle_type}:${JSON.stringify(b.weekly_pattern)}:${b.duration_months}`, 60_000, () => ask(withAnon));
+      : await cached(`estimate:${b.vehicle_type}:${JSON.stringify(b.weekly_pattern ?? b.monthly)}:${b.duration_months}`, 60_000, () => ask(withAnon));
     res.json({ success: true, estimate });
   })
 );

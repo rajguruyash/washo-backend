@@ -44,16 +44,14 @@ export const useCapacity = (from: string, to: string, enabled = true) =>
     retry: false,
   });
 
-export interface PreviewInput { vehicle_id: string; weekly_pattern: PatternItem[]; duration_months: number; time_slot: SlotId; start_date: string }
+/** The washes in a month (4 to 28, any mix) and the weekdays the customer likes. */
+export interface MonthlyPlan { body: number; deep: number; weekdays?: number[] }
+export type PreviewInput = { vehicle_id: string; duration_months: number; time_slot: SlotId; start_date: string } & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: MonthlyPlan; weekly_pattern?: never });
 /** Where a plan lands on the calendar before paying (the database lays it out the way the payment will). */
 export const usePlanPreview = (input: PreviewInput | null) =>
   useQuery({ queryKey: ['plan-preview', input], queryFn: () => post<PlanPreview & { success: boolean }>('/membership-preview', input), enabled: Boolean(input), staleTime: 30_000, retry: false, placeholderData: keepPreviousData });
 
-export interface EstimateInput {
-  vehicle_type: VehicleType;
-  weekly_pattern: PatternItem[];
-  duration_months: number;
-}
+export type EstimateInput = { vehicle_type: VehicleType; duration_months: number } & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: { body: number; deep: number }; weekly_pattern?: never });
 
 /** Live price estimate from the rate card (the database runs the calculator). Null input = nothing to price yet. */
 export const useEstimate = (input: EstimateInput | null) => {
@@ -184,9 +182,8 @@ export const useDeleteVehicle = () => {
   return useMutation({ mutationFn: (id: string) => del(`/vehicles/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: keys.vehicles }) });
 };
 
-export interface MembershipRequestInput {
+export type MembershipRequestInput = {
   vehicle_id: string;
-  weekly_pattern: PatternItem[];
   duration_months: number;
   time_slot: SlotId;
   start_date: string;
@@ -195,7 +192,7 @@ export interface MembershipRequestInput {
   customer_notes?: string;
   /** Exact dates for every wash, instead of letting the plan land on its weekdays. */
   custom_dates?: ExactDate[];
-}
+} & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: MonthlyPlan; weekly_pattern?: never });
 
 /** Pay for a custom membership straight away: the server prices it from the rate card and opens the Razorpay order. */
 export const useStartMembershipPayment = () =>

@@ -198,3 +198,17 @@ All five tables have row-level security on and NO direct access for anyone: ever
 `admin_begin_refund`, `admin_finish_refund`, `admin_fail_refund` and `admin_resolve_refund` are replaced with the same bodies plus the `payments` permission, and (for a refund at or above the threshold) the super admin.
 The seed makes rajguruyash29@gmail.com the super admin and any other existing admin Operations. An admin with NO row in `admin_access` can do nothing new (fails closed); the website still treats the owner's email as super admin so a mistake in the table cannot lock the owner out.
 Production dry run (rolled back): data fingerprint unchanged, the one admin becomes super_admin with all 21 areas, the dashboard / export / team / settings functions answer for them against real data, and `anon` is refused.
+
+
+## Washes in a month (migration 28)
+
+`20261004000028_monthly_membership_plan.sql`, additive. A membership can be chosen as washes in a MONTH (4 to 28, any mix of Body and Deep) instead of washes a week. New columns on `membership_requests` (`monthly_body`, `monthly_deep`, `preferred_weekdays`); a monthly request has an empty `weekly_pattern` and `frequency_per_week` holds the weekly equivalent, so every older reader keeps working.
+New: `compute_monthly_quote`, `estimate_monthly_price` (anyone), `plan_monthly_washes` (the one place that lays a month out: windows tile the term, washes at positions (i + 0.5) x days / washes among the candidate weekdays, Deep cleans spread among them), `check_custom_dates_counts`, `preview_monthly_dates`, `create_monthly_membership_request`, `start_monthly_membership_checkout`.
+Replaced (same bodies, only what they say or count changed): `fulfil_membership` (a monthly plan holds monthly_body + monthly_deep washes a month; a weekly plan is untouched), `my_membership_requests` / `admin_list_membership_requests` / `svc_membership_reminders_due` (more columns), `worker_queue` (the label says "5 washes a month · 3 months"), `admin_export` (memberships: "Washes a month").
+Production dry run (rolled back): data fingerprint unchanged; 3 a week x 3 months and 8 Body + 4 Deep x 3 months both cost 5,335.20; the customer, admin, export and reminder reads work on real rows; anon is refused.
+
+
+## Renewal emails in three steps (migration 29)
+
+`20261004000029_membership_renewal_stages.sql`, additive. `svc_membership_renewals_due(kind, from_days, to_days, requires_kind, requires_days, limit)` lists who is due for one of three emails (`membership_renewal_reminder`: ends in 1-7 days; `membership_renewal_last_call`: ends in 0-2 days, only after the first went out 2+ days earlier; `membership_renewal_ended`: ended 1-3 days ago). A plan's last day is the day its washes stop, so "0 days" is the last day itself.
+Excluded: already renewed, archived, no email, cancelled; once per kind per membership (`email_log`); never two renewal emails within 24 hours. Only the service role and the website's database role can call it. `svc_membership_reminders_due()` (first step only) is kept.

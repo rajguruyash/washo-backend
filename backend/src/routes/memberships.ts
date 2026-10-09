@@ -125,7 +125,7 @@ membershipsRouter.post(
 // ───────────────────────── active memberships ─────────────────────────
 const MEMBERSHIP_SQL = `
   SELECT m.id, m.status, m.duration_months, m.start_at, m.end_at, m.base_amount_cents, m.discount_amount_cents, m.final_amount_cents,
-         m.pricing_snapshot, r.reference_code, r.frequency_per_week, r.weekly_pattern, r.time_slot::text AS time_slot,
+         m.pricing_snapshot, r.reference_code, r.frequency_per_week, r.weekly_pattern, r.washes_per_month, r.monthly_body, r.monthly_deep, r.preferred_weekdays, r.time_slot::text AS time_slot,
          v.id AS vehicle_id, v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number,
          (SELECT count(*)::int FROM public.bookings b WHERE b.membership_id = m.id AND b.status <> 'cancelled') AS washes_total,
          (SELECT count(*)::int FROM public.bookings b WHERE b.membership_id = m.id AND b.status = 'completed') AS washes_completed,

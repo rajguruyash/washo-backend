@@ -46,7 +46,7 @@ describe('free wash confirmation', () => {
     expect(mine[0].html).toContain('Car Body Wash');
     expect(mine[0].html).toContain('Nothing to pay');
     expect(mine[0].html).toContain(`/app/bookings/${claimed.body.booking_id}`);
-    expect(mine[0].html).toContain('5% off for 1 wash per week');
+    expect(mine[0].html).toContain('5% off for 4 to 7 washes a month');
     expect(await dbRows(`select status, attempts from public.email_log where kind='free_wash_confirmation' and ref_id=$1`, [claimed.body.booking_id])).toEqual([{ status: 'sent', attempts: 1 }]);
   });
 
@@ -123,6 +123,57 @@ describe('membership renewal reminders', () => {
 
     expectOk(await admin.c.post('/api/admin/reminders/run'));
     expect(sent.filter((x) => x.to === m.email)).toHaveLength(1); // still one
+  });
+
+  const logFirst = (membershipId: string, daysAgo: number) =>
+    fake.admin.query(`insert into public.email_log (kind, ref_id, to_email, status, attempts, sent_at, updated_at) values ('membership_renewal_reminder', $1, 'x@example.com', 'sent', 1, now() - $2 * interval '1 day', now() - $2 * interval '1 day')`, [membershipId, daysAgo]);
+
+  it('three steps: a week before, a last reminder in the last days (after the first, two days apart), and one after it ended; each once, each saying so', async () => {
+    const admin = await staffClient('admin');
+    const week = await endingIn(6);
+    const last = await endingIn(1);
+    const over = await endingIn(-2);
+    await logFirst(last.membershipId, 4); // its first reminder went out four days ago
+
+    const run1 = expectOk(await admin.c.post('/api/admin/reminders/run')).body;
+    expect(run1.stages.map((s: any) => s.stage)).toEqual(['week', 'last', 'ended']);
+    expect(run1.failed).toBe(0);
+    const w = sent.filter((x) => x.to === week.email), l = sent.filter((x) => x.to === last.email), o = sent.filter((x) => x.to === over.email);
+    expect([w.length, l.length, o.length]).toEqual([1, 1, 1]);
+    expect(w[0].subject).toMatch(/membership ends in 6 days: renew in one tap/);
+    expect(l[0].subject).toMatch(/membership ends tomorrow: renew to keep your washes/);
+    expect(l[0].html).toContain('last reminder');
+    expect(l[0].html).toMatch(/12 washes are still unused/);
+    expect(o[0].subject).toBe('Your WASHO membership has ended: renew in one tap');
+    expect(o[0].html).toContain('your regular washes have stopped');
+    expect(o[0].html).toContain('Ended');
+    for (const x of [week, last, over]) expect(sent.find((m) => m.to === x.email)!.html).toContain(`/app/membership/new?renew=${x.membershipId}`);
+    expect(await dbRows(`select kind from public.email_log where ref_id = any($1::uuid[]) and status = 'sent' order by kind`, [[last.membershipId, over.membershipId, week.membershipId]]))
+      .toEqual([{ kind: 'membership_renewal_ended' }, { kind: 'membership_renewal_last_call' }, { kind: 'membership_renewal_reminder' }, { kind: 'membership_renewal_reminder' }]);
+
+    // again: nothing more for any of them
+    const run2 = expectOk(await admin.c.post('/api/admin/reminders/run')).body;
+    expect(run2.sent).toBe(0);
+    expect([week, last, over].map((x) => sent.filter((m) => m.to === x.email).length)).toEqual([1, 1, 1]);
+  });
+
+  it('a membership ending tomorrow that was never reminded gets ONE email now, not two in a row', async () => {
+    const admin = await staffClient('admin');
+    const m = await endingIn(1);
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(sent.filter((x) => x.to === m.email)).toHaveLength(1);
+    expect(sent.find((x) => x.to === m.email)!.subject).toMatch(/ends tomorrow: renew in one tap/);
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(sent.filter((x) => x.to === m.email)).toHaveLength(1); // the last-call step waits until the first is two days old
+  });
+
+  it('a dry run counts each step and names who is in it', async () => {
+    const admin = await staffClient('admin');
+    const m = await endingIn(-1);
+    const dry = expectOk(await admin.c.post('/api/admin/reminders/run?dry=1')).body;
+    expect(dry.stages.find((s: any) => s.stage === 'ended').due).toBeGreaterThanOrEqual(1);
+    expect(dry.would.find((w: any) => w.membership_id === m.membershipId)).toMatchObject({ stage: 'ended', days_left: -1 });
+    expect(sent.filter((x) => x.to === m.email)).toHaveLength(0);
   });
 
   it('a membership that ends later is left alone, and one already renewed is not reminded', async () => {

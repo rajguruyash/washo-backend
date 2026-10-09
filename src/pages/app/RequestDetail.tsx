@@ -19,6 +19,7 @@ import { ApiError } from '../../lib/http';
 import { useAcceptQuote, useDeclineQuote, useEstimate, usePublicSettings, useRequest } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { usePay } from '../../lib/usePay';
+import { monthlyDetail, planTitle } from '../../lib/plan';
 
 const timeLeft = (iso: string) => {
   const ms = new Date(iso).getTime() - Date.now();
@@ -79,14 +80,14 @@ export default function RequestDetail() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">{r.reference_code}</p>
-          <h1 className="mt-1 text-3xl font-extrabold">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''}</h1>
+          <h1 className="mt-1 text-3xl font-extrabold">{planTitle(r)}</h1>
         </div>
         <Badge tone={status.tone} icon={status.icon}>{status.label}</Badge>
       </div>
 
       <div className="glass divide-y divide-white/[0.07]">
         <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{r.vehicle_make ? `${r.vehicle_make} ` : ''}{r.vehicle_model}</p></div><Plate reg={r.registration_number} /></div>
-        <div className="p-5"><p className="eyebrow">Weekly schedule</p><p className="mt-1 text-sm">{patternLabel(r.weekly_pattern)}</p><p className="mt-1 text-xs text-fog">{slotLabel(r.time_slot)} · starting {prettyDate(r.start_date)}</p></div>
+        <div className="p-5"><p className="eyebrow">{r.monthly_body != null ? 'Your plan' : 'Weekly schedule'}</p><p className="mt-1 text-sm">{monthlyDetail(r, r.vehicle_type === 'bike') ?? patternLabel(r.weekly_pattern)}</p><p className="mt-1 text-xs text-fog">{slotLabel(r.time_slot)} · starting {prettyDate(r.start_date)}</p></div>
         {r.customer_notes && <div className="p-5"><p className="eyebrow">Your note</p><p className="mt-1 text-sm text-mist">{r.customer_notes}</p></div>}
       </div>
 

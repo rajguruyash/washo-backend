@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { campaignsNotInstalled } from '../campaigns';
 import { parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
+import { monthlyNotInstalled, monthlyPlanSchema } from '../plan';
 
 export const capacityRouter = Router();
 
@@ -44,16 +45,19 @@ capacityRouter.post(
     const b = parse(
       z.object({
         vehicle_id: z.string().uuid(),
-        weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1).max(7),
+        weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1).max(7).optional(),
+        monthly: monthlyPlanSchema.optional(),
         duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
         time_slot: z.enum(['morning', 'afternoon', 'night']),
         start_date: isoDate,
-      }),
+      }).refine((x) => Boolean(x.weekly_pattern) !== Boolean(x.monthly), 'Send either a weekly pattern or the washes in a month.'),
       req.body
     );
     const preview = await req.db(async (c) =>
-      (await c.query('SELECT public.preview_membership_dates($1, $2::jsonb, $3, $4::public.time_slot, $5::date) AS r', [b.vehicle_id, JSON.stringify(b.weekly_pattern), b.duration_months, b.time_slot, b.start_date])).rows[0].r
-    );
+      b.monthly
+        ? (await c.query('SELECT public.preview_monthly_dates($1, $2, $3, $4::integer[], $5, $6::public.time_slot, $7::date) AS r', [b.vehicle_id, b.monthly.body, b.monthly.deep, b.monthly.weekdays, b.duration_months, b.time_slot, b.start_date])).rows[0].r
+        : (await c.query('SELECT public.preview_membership_dates($1, $2::jsonb, $3, $4::public.time_slot, $5::date) AS r', [b.vehicle_id, JSON.stringify(b.weekly_pattern), b.duration_months, b.time_slot, b.start_date])).rows[0].r
+    ).catch((err) => { throw monthlyNotInstalled(err) ?? err; });
     res.json({ success: true, ...preview });
   })
 );

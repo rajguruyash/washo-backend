@@ -86,7 +86,7 @@ function Sidebar() {
       <Link to="/app/membership/new" className="glass mb-4 block p-4 transition-colors hover:border-washo-400/40">
         <p className="eyebrow">Membership</p>
         <p className="mt-1 text-sm font-semibold">Start a custom plan</p>
-        <p className="text-xs text-fog">1 to 7 washes per week</p>
+        <p className="text-xs text-fog">4 to 28 washes a month</p>
       </Link>
       <div className="flex items-center gap-3 rounded-2xl border border-white/[0.07] p-3">
         <AvatarHead className="h-10 w-10" ring={false} />

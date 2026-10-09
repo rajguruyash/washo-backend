@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { Plate } from '../../components/brand/Plate';
@@ -27,22 +27,20 @@ import { SlideToPay } from '../../components/SlideToPay';
 import { addressBlocker, pausedBlocker, phoneBlocker, type Blocker } from '../../lib/payBlockers';
 import { slotLabel } from '../../lib/slots';
 import { exactDatesProblem } from '../../lib/schedule';
+import { MAX_PER_MONTH, MIN_PER_MONTH, dayNames, daysNeeded, minWashesMessage, perWeekCap } from '../../lib/plan';
 import type { ExactDate, Membership, SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
-const STEPS = ['Vehicle', 'Washes per week', 'Your days', 'Length', 'Start & time', 'Review & pay'] as const;
+const STEPS = ['Vehicle', 'Washes a month', 'Your days', 'Length', 'Start & time', 'Review & pay'] as const;
 const MONTHS = [1, 3, 6, 12] as const;
-const MAX_PER_WEEK = 7;
 const KIND_LABEL: Record<WashKind, string> = { body: 'Body wash', deep: 'Deep clean' };
+// Monday first, as a week reads in India
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 
-/** How many Body washes and Deep cleans a plan starts with for N washes a week: all Body for a bike, otherwise Body, Deep, Body, Deep... */
-const startingMix = (n: number, bike: boolean) => ({ body: bike ? n : Math.ceil(n / 2), deep: bike ? 0 : Math.floor(n / 2) });
-
-/** A plain pattern for pricing before the days are chosen: Body washes first, then Deep cleans, on the first weekdays. */
-const previewFor = (body: number, deep: number): { weekday: number; kind: WashKind }[] =>
-  [...Array.from({ length: body }, () => 'body' as WashKind), ...Array.from({ length: deep }, () => 'deep' as WashKind)].map((kind, weekday) => ({ weekday, kind }));
+/** How many Body washes and Deep cleans a MONTH a plan starts with, from the older "N a week" links (the landing page's packs): four weeks' worth, all Body for a bike, otherwise Body, Deep, Body, Deep... */
+const startingMix = (perWeek: number, bike: boolean) => ({ body: 4 * (bike ? perWeek : Math.ceil(perWeek / 2)), deep: bike ? 0 : 4 * Math.floor(perWeek / 2) });
 
 /** "+ / -" for one kind of wash. The (i) says what the wash includes. */
-function CountRow({ label, price, value, onChange, canAdd, canRemove, onInfo, note }: { label: string; price: number; value: number; onChange: (n: number) => void; canAdd: boolean; canRemove: boolean; onInfo: () => void; note?: string }) {
+function CountRow({ label, price, value, onChange, canAdd, canRemove, onInfo, note, unit = 'per week' }: { label: string; price: number; value: number; onChange: (n: number) => void; canAdd: boolean; canRemove: boolean; onInfo: () => void; note?: string; unit?: string }) {
   const round = 'grid h-11 w-11 place-items-center rounded-full border border-white/15 bg-white/[0.06] transition-colors hover:bg-white/[0.12] disabled:pointer-events-none disabled:opacity-35';
   return (
     <div className="panel flex items-center justify-between gap-4 p-4">
@@ -54,17 +52,17 @@ function CountRow({ label, price, value, onChange, canAdd, canRemove, onInfo, no
         <p className="text-sm text-fog">{note ?? `${rupees(price)} per wash`}</p>
       </div>
       <div className="flex items-center gap-3">
-        <button type="button" disabled={!canRemove} onClick={() => onChange(value - 1)} aria-label={`One fewer ${label.toLowerCase()} per week`} className={round}><Minus className="h-5 w-5" /></button>
-        <span aria-live="polite" aria-label={`${value} ${label.toLowerCase()} per week`} className="w-9 text-center font-display text-4xl font-extrabold tabular-nums">{value}</span>
-        <button type="button" disabled={!canAdd} onClick={() => onChange(value + 1)} aria-label={`One more ${label.toLowerCase()} per week`} className={round}><Plus className="h-5 w-5" /></button>
+        <button type="button" disabled={!canRemove} onClick={() => onChange(value - 1)} aria-label={`One fewer ${label.toLowerCase()} ${unit}`} className={round}><Minus className="h-5 w-5" /></button>
+        <span aria-live="polite" aria-label={`${value} ${label.toLowerCase()} ${unit}`} className="w-9 text-center font-display text-4xl font-extrabold tabular-nums">{value}</span>
+        <button type="button" disabled={!canAdd} onClick={() => onChange(value + 1)} aria-label={`One more ${label.toLowerCase()} ${unit}`} className={round}><Plus className="h-5 w-5" /></button>
       </div>
     </div>
   );
 }
 
 /** The total for one length option, e.g. "₹1,800 total · ₹600 / month". */
-function DurationPrice({ vehicleType, pattern, months }: { vehicleType: VehicleType; pattern: { weekday: number; kind: WashKind }[]; months: number }) {
-  const { data } = useEstimate({ vehicle_type: vehicleType, weekly_pattern: pattern, duration_months: months });
+function DurationPrice({ vehicleType, body, deep, months }: { vehicleType: VehicleType; body: number; deep: number; months: number }) {
+  const { data } = useEstimate({ vehicle_type: vehicleType, monthly: { body, deep }, duration_months: months });
   if (!data) return <p className="mt-2 h-5 text-sm text-fog">…</p>;
   return <p className="mt-2 text-sm font-semibold tabular-nums">{rupees(data.final_cents)} <span className="font-normal text-fog">total · {rupees(Math.round(data.final_cents / months))} / month</span></p>;
 }
@@ -87,21 +85,28 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const checkout = useStartMembershipPayment();
   const { pay, paying } = usePay();
 
-  // Renewing starts from the old plan: the step the customer is most likely to change (the length) comes first.
-  const oldPattern = renewing?.weekly_pattern ?? null;
-  const [step, setStep] = useState(renewing && oldPattern ? 3 : 0);
+  // Renewing starts from the old plan: the step the customer is most likely to change (the length) comes first. A plan chosen the older way (washes a
+  // week) is read as four weeks' worth a month, on the same weekdays.
+  const renewMix = (() => {
+    if (!renewing) return null;
+    if (renewing.monthly_body != null) return { body: renewing.monthly_body, deep: renewing.monthly_deep ?? 0 };
+    const old = renewing.weekly_pattern ?? [];
+    return old.length ? { body: 4 * old.filter((x) => x.kind === 'body').length, deep: 4 * old.filter((x) => x.kind === 'deep').length } : null;
+  })();
+  const renewDays = renewing ? (renewing.preferred_weekdays?.length ? renewing.preferred_weekdays : (renewing.weekly_pattern ?? []).map((x) => x.weekday)) : [];
+  const [step, setStep] = useState(renewing && renewMix ? 3 : 0);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
-  // How many Body washes and Deep cleans a week, then which weekdays each goes on.
+  // How many Body washes and Deep cleans a MONTH (at least 4 in all), then which weekdays suit the customer: the washes are spread through each month on those days.
   const [counts, setCounts] = useState<{ body: number; deep: number }>(() => {
-    if (oldPattern?.length) return { body: oldPattern.filter((x) => x.kind === 'body').length, deep: oldPattern.filter((x) => x.kind === 'deep').length };
+    if (renewMix) return renewMix;
     const n = Number(params.get('perWeek'));
-    return Number.isInteger(n) && n >= 1 && n <= MAX_PER_WEEK ? startingMix(n, params.get('type') === 'bike') : { body: 1, deep: 0 };
+    return Number.isInteger(n) && n >= 1 && n <= 7 ? startingMix(n, params.get('type') === 'bike') : { body: MIN_PER_MONTH, deep: 0 };
   });
-  const [bodyDays, setBodyDays] = useState<number[]>(() => oldPattern?.filter((x) => x.kind === 'body').map((x) => x.weekday) ?? []);
-  const [deepDays, setDeepDays] = useState<number[]>(() => oldPattern?.filter((x) => x.kind === 'deep').map((x) => x.weekday) ?? []);
+  const [days, setDays] = useState<number[]>(renewDays);
   const [info, setInfo] = useState<WashKind | null>(null);
-  // The weekday row paints one kind at a time: tap "Body washes" or "Deep cleans", then the days.
-  const [paint, setPaint] = useState<WashKind>('body');
+  // The two steps that need something before they go on show it in red when Continue is pressed too early.
+  const [minTried, setMinTried] = useState(0);
+  const [daysTried, setDaysTried] = useState(0);
   // Exact dates, picked by hand instead of the automatic spread. Tied to the plan they were made for: change the plan and they are dropped.
   const [custom, setCustom] = useState<{ key: string; dates: ExactDate[] } | null>(null);
   const [exactOpen, setExactOpen] = useState(false);
@@ -128,30 +133,29 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   }, [addresses, vehicle, addressId]);
 
   const bike = vehicle?.vehicle_type === 'bike';
-  const perWeek = counts.body + counts.deep;
+  const perMonth = counts.body + counts.deep;
+  const tooFew = perMonth < MIN_PER_MONTH;
+  const needDays = daysNeeded(perMonth);
+  const daysOk = days.length >= needDays;
+  // "N washes a month" earns the discount of the same many washes a week (4-7 = 1 a week, 8-11 = 2, 12 or more = 3 and up), as the database counts it
+  const freqKey = Math.min(7, Math.max(1, Math.floor(perMonth / 4)));
   const minStart = addDays(todayIST(), 2);
   const address = addresses?.find((a) => a.id === addressId);
-  const weeks = catalog?.weeks_per_month ?? 4;
-  const total = months ? perWeek * weeks * months : 0;
+  const total = months ? perMonth * months : 0;
 
   const vtype = vehicle?.vehicle_type;
-  // The plan as the server wants it: one entry per wash, each on its own weekday.
-  const pattern = useMemo(
-    () => [...bodyDays.map((weekday) => ({ weekday, kind: 'body' as WashKind })), ...deepDays.map((weekday) => ({ weekday, kind: 'deep' as WashKind }))].sort((a, b) => a.weekday - b.weekday),
-    [bodyDays, deepDays]
-  );
-  const planReady = Boolean(vtype && perWeek >= 1 && bodyDays.length === counts.body && deepDays.length === counts.deep);
-  // Before the days are chosen, price a plain mix so the counters already show what each choice costs per month.
-  const monthly = useEstimate(vtype && perWeek >= 1 ? { vehicle_type: vtype, weekly_pattern: planReady ? pattern : previewFor(counts.body, counts.deep), duration_months: 1 } : null);
-  const planKey = JSON.stringify([vehicle?.id, pattern, months, start, slot]);
+  const planReady = Boolean(vtype && !tooFew && perMonth <= MAX_PER_MONTH && daysOk);
+  // The price per month, live, as soon as the counts are valid (the counters already show what each choice costs)
+  const monthly = useEstimate(vtype && !tooFew ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: 1 } : null);
+  const planKey = JSON.stringify([vehicle?.id, counts, days, months, start, slot]);
   const customActive = custom && custom.key === planKey ? custom.dates : null;
-  const preview = usePlanPreview(vehicle && planReady && months && slot && start ? { vehicle_id: vehicle.id, weekly_pattern: pattern, duration_months: months, time_slot: slot, start_date: start } : null);
+  const preview = usePlanPreview(vehicle && planReady && months && slot && start ? { vehicle_id: vehicle.id, monthly: { body: counts.body, deep: counts.deep, weekdays: days }, duration_months: months, time_slot: slot, start_date: start } : null);
   const minLeadDays = catalog?.booking_rules?.membership_min_lead_days ?? 2;
   const earliest = addDays(todayIST(), minLeadDays);
   const termEnd = preview.data?.end_date;
   const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4);
-  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * weeks * (months ?? 1), deep: counts.deep * weeks * (months ?? 1) }, perWeek, minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
-  const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, weekly_pattern: pattern, duration_months: months } : null);
+  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }, perWeek: perWeekCap(perMonth), minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
+  const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months } : null);
 
   const serviceName = (kind: WashKind) => {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
@@ -171,38 +175,28 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const discount = (kind: 'frequency' | 'duration', key: number) => (kind === 'frequency' && offer ? Math.max(standard(kind, key), offerBpFor(offer, key)) : standard(kind, key));
   const offerApplies = (n: number) => Boolean(offer) && offerBpFor(offer!, n) > standard('frequency', n);
 
-  // Changing a count trims the days already picked for that kind, never keeps more days than washes.
+  // Any count from 0 up (the total must reach 4 before the customer can go on; below that the page says so in red), at most 28 a month in all.
   const setCount = (kind: WashKind, n: number) => {
     const next = { ...counts, [kind]: Math.max(0, n) };
-    if (next.body + next.deep < 1 || next.body + next.deep > MAX_PER_WEEK || (bike && next.deep > 0)) return;
+    if (next.body + next.deep > MAX_PER_MONTH || (bike && next.deep > 0)) return;
     setCounts(next);
-    setBodyDays((d) => d.slice(0, next.body));
-    setDeepDays((d) => d.slice(0, next.deep));
   };
 
-  // One weekday row. Tap a day to give it to the kind being painted; tap it again to take it off; tap a day of the other kind to move it over.
-  const paintDay = (d: number) => {
-    const other: WashKind = paint === 'body' ? 'deep' : 'body';
-    const days = { body: bodyDays, deep: deepDays };
-    const set = { body: setBodyDays, deep: setDeepDays };
-    if (days[paint].includes(d)) return set[paint](days[paint].filter((x) => x !== d));
-    if (days[paint].length >= counts[paint]) {
-      if (days[other].length < counts[other]) setPaint(other); // this kind is done: carry on with the other
-      return;
-    }
-    set[other](days[other].filter((x) => x !== d));
-    set[paint]([...days[paint], d]);
-    if (days[paint].length + 1 >= counts[paint] && days[other].filter((x) => x !== d).length < counts[other]) setPaint(other);
-  };
+  const toggleDay = (d: number) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
 
   const canNext = [
     Boolean(vehicle),
-    perWeek >= 1,
-    planReady,
+    true, // pressing Continue with fewer than 4 washes shows the error instead of moving on
+    true, // ... and so does choosing too few days
     Boolean(months),
     Boolean(slot && start) && (customActive ? !customProblem : preview.data?.fits !== false),
     Boolean(addressId),
   ][step];
+  const goNext = () => {
+    if (step === 1 && tooFew) return setMinTried((n) => n + 1);
+    if (step === 2 && !daysOk) return setDaysTried((n) => n + 1);
+    setStep(step + 1);
+  };
 
   // Pay now: the server prices the plan from the rate card and opens the Razorpay order; the membership and its washes are
   // created only once the payment is verified.
@@ -216,7 +210,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
       result = await pay(
         () => checkout.mutateAsync({
           vehicle_id: vehicle.id,
-          weekly_pattern: pattern,
+          monthly: { body: counts.body, deep: counts.deep, weekdays: days },
           duration_months: months,
           time_slot: slot,
           start_date: start,
@@ -225,7 +219,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           customer_notes: notes.trim() || undefined,
           custom_dates: customActive ?? undefined,
         }),
-        `WASHO membership · ${perWeek} per week · ${months} month${months > 1 ? 's' : ''}`
+        `WASHO membership · ${perMonth} washes a month · ${months} month${months > 1 ? 's' : ''}`
       );
     } catch (err) {
       // usePay reports payment problems itself; this covers plan problems the database refused (shown under the button)
@@ -263,14 +257,14 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           <motion.section key="s0" {...slide}>
             <h1 className="text-3xl font-extrabold">Which vehicle?</h1>
             <p className="mt-1.5 mb-6 text-fog">Your membership is for one vehicle. You can start another one later.</p>
-            <VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); setBodyDays([]); setDeepDays([]); if (v.vehicle_type === 'bike') setCounts(({ body, deep }) => ({ body: body + deep, deep: 0 })); }} />
+            <VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); if (v.vehicle_type === 'bike') setCounts(({ body, deep }) => ({ body: body + deep, deep: 0 })); }} />
           </motion.section>
         )}
 
         {step === 1 && (
           <motion.section key="s1" {...slide}>
-            <h1 className="text-3xl font-extrabold">How many washes per week?</h1>
-            <p className="mt-1.5 mb-6 text-fog">Choose how many {bike ? 'bike washes' : 'Body washes and how many Deep cleans'} you want each week, up to {MAX_PER_WEEK} in total. Tap <Info className="inline h-3.5 w-3.5 align-text-top" /> to see what each one includes.</p>
+            <h1 className="text-3xl font-extrabold">How many washes a month?</h1>
+            <p className="mt-1.5 mb-6 text-fog">Choose how many {bike ? 'bike washes' : 'Body washes and Deep cleans'} you want in a month, <strong className="text-white">at least {MIN_PER_MONTH} in all</strong>, any mix you like (for example 2 Body and 2 Deep, or 4 Body and 1 Deep). Tap <Info className="inline h-3.5 w-3.5 align-text-top" /> to see what each one includes.</p>
 
             <div className="space-y-3">
               <CountRow
@@ -278,38 +272,46 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 price={basePrice('body')}
                 value={counts.body}
                 onChange={(n) => setCount('body', n)}
-                canAdd={perWeek < MAX_PER_WEEK}
-                canRemove={counts.body > 0 && perWeek > 1}
+                canAdd={perMonth < MAX_PER_MONTH}
+                canRemove={counts.body > 0}
                 onInfo={() => setInfo('body')}
+                unit="a month"
               />
               <CountRow
                 label={KIND_LABEL.deep}
                 price={basePrice('deep')}
                 value={counts.deep}
                 onChange={(n) => setCount('deep', n)}
-                canAdd={!bike && perWeek < MAX_PER_WEEK}
-                canRemove={counts.deep > 0 && perWeek > 1}
+                canAdd={!bike && perMonth < MAX_PER_MONTH}
+                canRemove={counts.deep > 0}
                 onInfo={() => setInfo('deep')}
                 note={bike ? 'Not offered for bikes' : undefined}
+                unit="a month"
               />
             </div>
+
+            {tooFew && (
+              <p key={minTried} id="min-washes-error" role="alert" className={cn('mt-4 flex items-start gap-2 rounded-2xl border border-bad/40 bg-bad/10 p-4 text-sm font-semibold text-bad', minTried > 0 && 'animate-shake')}>
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {minWashesMessage(perMonth)} Add {MIN_PER_MONTH - perMonth} more to carry on.
+              </p>
+            )}
 
             <div className="glass mt-5 p-5" aria-live="polite">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-lg font-bold">{perWeek} wash{perWeek > 1 ? 'es' : ''} per week · {perWeek * weeks} a month</p>
+                  <p className={cn('text-lg font-bold', tooFew && 'text-bad')}>{perMonth} wash{perMonth === 1 ? '' : 'es'} a month</p>
                   <p className="mt-1 text-sm text-fog">
-                    {[counts.body > 0 && `${counts.body} × ${bike ? 'Bike wash' : 'Body wash'}`, counts.deep > 0 && `${counts.deep} × Deep clean`].filter(Boolean).join(' + ')} each week
+                    {[counts.body > 0 && `${counts.body} × ${bike ? 'Bike wash' : 'Body wash'}`, counts.deep > 0 && `${counts.deep} × Deep clean`].filter(Boolean).join(' + ') || 'Nothing chosen yet'}
                   </p>
-                  {discount('frequency', perWeek) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', perWeek))} off for {perWeek} per week{offerApplies(perWeek) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
+                  {!tooFew && discount('frequency', freqKey) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', freqKey))} off for {perMonth} washes a month{offerApplies(freqKey) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
                 </div>
                 <div className="text-right">
                   <p className="eyebrow">Price</p>
-                  <p className="font-display text-3xl font-extrabold tabular-nums">{monthly.data ? rupees(monthly.data.final_cents) : '…'}<span className="ml-1 text-sm font-medium text-fog">/ month</span></p>
+                  <p className="font-display text-3xl font-extrabold tabular-nums">{!tooFew && monthly.data ? rupees(monthly.data.final_cents) : '—'}<span className="ml-1 text-sm font-medium text-fog">/ month</span></p>
                 </div>
               </div>
               <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
-                Price per wash{vehicle ? ` for your ${vehicle.vehicle_type === 'suv' ? 'SUV' : vehicle.vehicle_type}` : ''}: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body wash ${rupees(basePrice('body'))} · Deep clean ${rupees(basePrice('deep'))}`}.
+                Price per wash{vehicle ? ` for your ${vehicle.vehicle_type === 'suv' ? 'SUV' : vehicle.vehicle_type}` : ''}: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body wash ${rupees(basePrice('body'))} · Deep clean ${rupees(basePrice('deep'))}`}. Minimum {MIN_PER_MONTH} washes a month, up to {MAX_PER_MONTH}.
               </p>
             </div>
           </motion.section>
@@ -318,47 +320,31 @@ function Wizard({ renewing }: { renewing?: Membership }) {
         {step === 2 && (
           <motion.section key="s2" {...slide}>
             <h1 className="text-3xl font-extrabold">Pick your days</h1>
-            <p className="mt-1.5 mb-6 text-fog">Just add your preferred days and we will manage your whole month accordingly.</p>
+            <p className="mt-1.5 mb-6 text-fog">Choose the days of the week that suit you. We spread your {perMonth} washes evenly through every month on those days and take care of the rest, so you do not have to plan the whole month.</p>
 
-            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${counts.deep > 0 && counts.body > 0 ? 2 : 1}, minmax(0, 1fr))` }} role="group" aria-label="Which kind of wash you are placing">
-              {(['body', 'deep'] as const).filter((k) => counts[k] > 0).map((k) => {
-                const n = k === 'body' ? bodyDays.length : deepDays.length;
-                const on = paint === k;
+            <div className="grid grid-cols-7 gap-2" role="group" aria-label="Weekdays">
+              {WEEK_ORDER.map((id) => {
+                const on = days.includes(id);
+                const d = WEEKDAYS[id];
                 return (
-                  <button key={k} type="button" aria-pressed={on} onClick={() => setPaint(k)} className={cn('rounded-2xl border p-3.5 text-left transition-all', on ? (k === 'body' ? 'border-washo-400/70 bg-washo-500/20 shadow-[0_0_24px_-8px_rgb(63_124_255/0.7)]' : 'border-offer/60 bg-offer/15') : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
-                    <span className="flex items-center gap-2 font-bold"><span className={cn('h-2.5 w-2.5 rounded-full', k === 'body' ? 'bg-washo-400' : 'bg-offer')} />{bike ? 'Bike washes' : k === 'body' ? 'Body washes' : 'Deep cleans'}</span>
-                    <span className={cn('mt-0.5 block text-sm', n === counts[k] ? 'text-ok' : 'text-fog')}>{n === counts[k] ? 'All chosen' : `${n} of ${counts[k]} chosen`}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 grid grid-cols-7 gap-2" role="group" aria-label="Weekdays">
-              {WEEKDAYS.map((d) => {
-                const kind: WashKind | null = bodyDays.includes(d.id) ? 'body' : deepDays.includes(d.id) ? 'deep' : null;
-                return (
-                  <button key={d.id} type="button" aria-pressed={kind !== null} aria-label={`${d.long}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}`} onClick={() => paintDay(d.id)}
-                    className={cn('flex h-[4.5rem] flex-col items-center justify-center rounded-2xl border text-sm font-bold transition-all', kind === 'body' ? 'border-washo-400 bg-washo-500 text-white' : kind === 'deep' ? 'border-offer bg-offer text-ink-950' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25')}>
+                  <button key={id} type="button" aria-pressed={on} aria-label={d.long} onClick={() => toggleDay(id)}
+                    className={cn('flex h-[4.5rem] flex-col items-center justify-center rounded-2xl border text-sm font-bold transition-all', on ? 'border-washo-400 bg-washo-500 text-white shadow-[0_0_24px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25')}>
                     {d.short}
-                    <span className={cn('mt-0.5 text-[9px] font-semibold uppercase', kind ? 'opacity-80' : 'text-fog')}>{kind === 'body' ? (bike ? 'Wash' : 'Body') : kind === 'deep' ? 'Deep' : 'tap'}</span>
+                    <span className={cn('mt-0.5 text-[9px] font-semibold uppercase', on ? 'opacity-80' : 'text-fog')}>{on ? 'chosen' : 'tap'}</span>
                   </button>
                 );
               })}
             </div>
-            <p className="mt-3 text-xs text-fog">Tap a day to give it a {paint === 'body' ? (bike ? 'bike wash' : 'Body wash') : 'Deep clean'}. Tap it again to take it off. A day can have one wash. {perWeek} per week in all.</p>
-
-            {pattern.length > 0 && (
-              <div className="panel mt-5 divide-y divide-white/[0.07]">
-                {pattern.map((p) => (
-                  <div key={p.weekday} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                    <span className="font-semibold">{WEEKDAYS[p.weekday].long}</span>
-                    <span className="flex items-center gap-2 text-mist"><span className={cn('h-2 w-2 rounded-full', p.kind === 'body' ? 'bg-washo-400' : 'bg-offer')} />{serviceName(p.kind)}</span>
-                  </div>
-                ))}
-              </div>
+            <p className={cn('mt-3 text-sm', daysOk ? 'text-ok' : 'text-fog')}>
+              {days.length ? `${dayNames(days)} · ` : ''}{daysOk ? `${days.length} day${days.length > 1 ? 's' : ''} chosen. Enough for ${perMonth} washes a month.` : `Pick at least ${needDays} day${needDays > 1 ? 's' : ''} so ${perMonth} washes a month fit (a day of the week comes round about 4 times a month, and a vehicle is washed once a day).`}
+            </p>
+            {!daysOk && daysTried > 0 && (
+              <p key={daysTried} id="days-error" role="alert" className="mt-3 flex items-start gap-2 rounded-2xl border border-bad/40 bg-bad/10 p-4 text-sm font-semibold text-bad animate-shake">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Pick at least {needDays} day{needDays > 1 ? 's' : ''} of the week.
+              </p>
             )}
             {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Price for this plan: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
-            {planReady && <p className="mt-2 text-xs text-fog">Your washes follow these days through the whole membership. You can pick exact dates instead on the next steps.</p>}
+            <p className="mt-2 text-xs text-fog">Want every date your own way? You can pick exact dates on the Start step.</p>
           </motion.section>
         )}
 
@@ -374,8 +360,8 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                   <button key={m} type="button" role="radio" aria-checked={active} onClick={() => setMonths(m)} className={cn('rounded-3xl border p-5 text-left transition-all', active ? 'border-washo-400/70 bg-washo-500/15 shadow-[0_0_30px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
                     <span className="font-display text-4xl font-extrabold">{m}</span>
                     <span className="ml-1.5 text-sm text-fog">month{m > 1 ? 's' : ''}</span>
-                    <p className="mt-2 text-sm text-mist">{perWeek ? perWeek * weeks * m : ''} washes</p>
-                    {vtype && planReady && <DurationPrice vehicleType={vtype} pattern={pattern} months={m} />}
+                    <p className="mt-2 text-sm text-mist">{perMonth * m} washes</p>
+                    {vtype && planReady && <DurationPrice vehicleType={vtype} body={counts.body} deep={counts.deep} months={m} />}
                     {off > 0 ? <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(off)} off</Badge> : <p className="mt-3 text-xs text-fog">Full rate</p>}
                   </button>
                 );
@@ -394,7 +380,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               <div className="mt-8 space-y-4">
                 {preview.isError && <p role="alert" className="flex items-start gap-2 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {(preview.error as Error).message}</p>}
                 {preview.data && !customActive && !preview.data.fits && (
-                  <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your chosen days cannot fit all {preview.data.total} washes before your membership ends, because this vehicle already has a wash on some of them. Choose other days or a later start, or pick exact dates below.</p>
+                  <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your {perMonth} washes a month do not all fit on those days, because this vehicle already has a wash on some of them. Choose more days or a later start, or pick exact dates below.</p>
                 )}
                 {preview.data && !customActive && preview.data.fits && preview.data.dates.some((d) => d.state === 'full') && (
                   <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'One of your washes falls on a rush day' : `${preview.data.dates.filter((d) => d.state === 'full').length} of your washes fall on rush days`}, so there might be a slight delay on {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'that day' : 'those days'}. Everything is still booked as you chose.</p>
@@ -419,7 +405,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                     <div className="border-t border-white/[0.07] p-4">
                       {customActive && termEnd ? (
                         <ExactDatesCalendar
-                          start={start} end={termEnd} minDate={[start, earliest].sort().at(-1)!} need={{ body: counts.body * weeks * (months ?? 1), deep: counts.deep * weeks * (months ?? 1) }} perWeek={perWeek}
+                          start={start} end={termEnd} minDate={[start, earliest].sort().at(-1)!} need={{ body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }} perWeek={perWeekCap(perMonth)}
                           value={customActive} onChange={(dates) => setCustom({ key: planKey, dates })} crowd={crowd} slot={slot}
                           onReset={() => { setCustom(null); setExactOpen(false); }}
                         />
@@ -444,25 +430,27 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           </motion.section>
         )}
 
-        {step === 5 && vehicle && perWeek && months && slot && start && (
+        {step === 5 && vehicle && planReady && months && slot && start && (
           <motion.section key="s5" {...slide}>
             <h1 className="text-3xl font-extrabold">Review and pay</h1>
             <p className="mt-1.5 mb-6 text-fog">Check your plan, then pay securely. Your washes are scheduled as soon as the payment is verified.</p>
             <div className="glass divide-y divide-white/[0.07]">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="p-5">
-                <p className="eyebrow">Weekly schedule · {perWeek} per week</p>
+                <p className="eyebrow">Your plan · {perMonth} washes a month</p>
                 <ul className="mt-2 space-y-1.5 text-sm">
-                  {pattern.map((p) => (<li key={p.weekday} className="flex justify-between gap-3"><span>{WEEKDAYS[p.weekday].long}</span><span className="text-mist">{serviceName(p.kind)}</span></li>))}
+                  {counts.body > 0 && <li className="flex justify-between gap-3"><span>{serviceName('body')}</span><span className="text-mist">{counts.body} a month</span></li>}
+                  {counts.deep > 0 && <li className="flex justify-between gap-3"><span>{serviceName('deep')}</span><span className="text-mist">{counts.deep} a month</span></li>}
+                  {!customActive && <li className="flex justify-between gap-3"><span>On</span><span className="text-mist">{dayNames(days)}</span></li>}
                 </ul>
               </div>
               <div className="grid grid-cols-2 gap-4 p-5 text-sm">
-                <div><p className="eyebrow">Length</p><p className="mt-1 font-semibold">{months} month{months > 1 ? 's' : ''} · {total} washes</p></div>
+                <div><p className="eyebrow">Length</p><p className="mt-1 font-semibold">{months} month{months > 1 ? 's' : ''} · {total} washes in all</p></div>
                 <div><p className="eyebrow">Time</p><p className="mt-1 font-semibold">{slotLabel(slot)}</p></div>
                 <div><p className="eyebrow">Starting</p><p className="mt-1 font-semibold">{prettyDate(start)}</p></div>
                 <div>
                   <p className="eyebrow">Discounts</p>
-                  <p className="mt-1 font-semibold">{[discount('frequency', perWeek) ? `${percent(discount('frequency', perWeek))} ${offerApplies(perWeek) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
+                  <p className="mt-1 font-semibold">{[discount('frequency', freqKey) ? `${percent(discount('frequency', freqKey))} ${offerApplies(freqKey) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
                 </div>
               </div>
               <div id="pay-address" className="p-5">
@@ -509,7 +497,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <Button variant="glass" size="lg" disabled={step === 0} onClick={() => { setError(''); setStep(step - 1); }} aria-label="Back" icon={<ArrowLeft className="h-5 w-5" />} />
           {step < STEPS.length - 1 ? (
-            <Button size="lg" full disabled={!canNext} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
+            <Button size="lg" full disabled={!canNext} onClick={goNext} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
           ) : (
             <SlideToPay label={`Slide to pay ${chosenEstimate.data ? rupees(chosenEstimate.data.final_cents) : ''}`.trim()} disabled={checkout.isPending || paying} blockers={blockers} onConfirm={submit} onDone={afterPaid} />
           )}

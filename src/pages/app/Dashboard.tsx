@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { CampaignGlare } from '../../components/CampaignGlare';
 import { PackOfferCard } from '../../components/PackOfferCard';
+import { RenewalNotice } from '../../components/RenewalNotice';
 import { RemovePlan } from '../../components/RemovePlan';
 import { EmptyState, PageHeader } from '../../components/EmptyState';
 import { BookingCard } from '../../components/WashBits';
@@ -14,6 +15,7 @@ import { prettyDate } from '../../lib/format';
 import { useBookings, useCampaign, useMemberships, useRequests } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { useAuth } from '../../state/auth';
+import { planTitle } from '../../lib/plan';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -39,6 +41,7 @@ export default function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /></div>
       ) : (
         <div className="space-y-8">
+          <RenewalNotice />
           {view === 'eligible' && c && (
             <CampaignGlare><Link to="/app/claim" className="glass flex items-center gap-4 border-offer/30 p-5 transition-colors hover:border-offer/60">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
@@ -66,7 +69,7 @@ export default function Dashboard() {
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Clock className="h-6 w-6" /></span>
                 <div className="min-w-0 flex-1">
                   <p className="font-bold">{r.status === 'quoted' ? 'Your price is ready' : r.status === 'accepted' ? 'Finish your payment' : 'WASHO is reviewing your request'}</p>
-                  <p className="text-sm text-fog">{r.frequency_per_week} wash{r.frequency_per_week > 1 ? 'es' : ''} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} · {r.vehicle_model}</p>
+                  <p className="text-sm text-fog">{planTitle(r)} · {r.vehicle_model}</p>
                 </div>
                 <ArrowRight className="h-5 w-5 text-fog" />
               </Link>
@@ -87,7 +90,7 @@ export default function Dashboard() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="eyebrow">{m.reference_code}</p>
-                        <p className="mt-1 text-lg font-bold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} per week · {m.duration_months} mo</p>
+                        <p className="mt-1 text-lg font-bold">{planTitle(m, { short: true })}</p>
                       </div>
                       <Badge tone="green" icon={<BadgeCheck className="h-3.5 w-3.5" />}>Active</Badge>
                     </div>

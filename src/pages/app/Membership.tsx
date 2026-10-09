@@ -10,6 +10,8 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { fullDate, istDay, prettyDate } from '../../lib/format';
 import { useMemberships, useRequests } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
+import { monthlyDetail, planTitle } from '../../lib/plan';
+import { RenewalNotice } from '../../components/RenewalNotice';
 
 const reqLabel: Record<string, { label: string; tone: 'amber' | 'blue' | 'green' | 'red' | 'slate' }> = {
   submitted: { label: 'With WASHO', tone: 'amber' },
@@ -37,6 +39,7 @@ export default function Membership() {
         <Skeleton className="h-40" />
       ) : (
         <div className="space-y-10">
+          <RenewalNotice />
           {reqs.length > 0 && (
             <section aria-labelledby="reqs">
               <h2 id="reqs" className="mb-3 text-lg font-bold">Earlier requests</h2>
@@ -45,8 +48,8 @@ export default function Membership() {
                   <div key={r.id} className="glass p-4 transition-colors hover:border-washo-400/40">
                     <Link to={`/app/membership/requests/${r.id}`} className="group flex items-center gap-4">
                       <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-2 font-bold">{r.frequency_per_week} per week · {r.duration_months} month{r.duration_months > 1 ? 's' : ''} <Badge tone={reqLabel[r.status].tone}>{reqLabel[r.status].label}</Badge></p>
-                        <p className="mt-1 text-xs text-fog">{r.reference_code} · {r.vehicle_model} · {patternLabel(r.weekly_pattern)}</p>
+                        <p className="flex flex-wrap items-center gap-2 font-bold">{planTitle(r)} <Badge tone={reqLabel[r.status].tone}>{reqLabel[r.status].label}</Badge></p>
+                        <p className="mt-1 text-xs text-fog">{r.reference_code} · {r.vehicle_model} · {monthlyDetail(r, r.vehicle_type === 'bike') ?? patternLabel(r.weekly_pattern)}</p>
                       </div>
                       <ChevronRight className="h-5 w-5 text-fog transition-transform group-hover:translate-x-0.5" />
                     </Link>
@@ -70,8 +73,8 @@ export default function Membership() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="eyebrow">{m.reference_code}</p>
-                        <p className="mt-1 text-lg font-bold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} per week · {m.duration_months} mo</p>
-                        {m.weekly_pattern && <p className="mt-1 text-xs text-fog">{patternLabel(m.weekly_pattern)}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}
+                        <p className="mt-1 text-lg font-bold">{planTitle(m, { short: true })}</p>
+                        {(m.monthly_body != null || m.weekly_pattern) && <p className="mt-1 text-xs text-fog">{monthlyDetail(m, m.vehicle_type === 'bike') ?? patternLabel(m.weekly_pattern ?? [])}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}
                       </div>
                       <Badge tone={m.status === 'active' ? 'green' : 'slate'} icon={<BadgeCheck className="h-3.5 w-3.5" />}>{m.status === 'active' ? 'Active' : m.status}</Badge>
                     </div>

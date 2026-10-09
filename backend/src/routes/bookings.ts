@@ -5,6 +5,7 @@ import { config } from '../config';
 import { campaignNames } from '../campaigns';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
+import { monthlyNotInstalled, monthlyPlanSchema } from '../plan';
 import { openOrder, reconcileOrder, verifyAndSettle } from '../razorpay';
 import { photoStorage } from '../supabase';
 
@@ -186,7 +187,9 @@ bookingsRouter.post(
 
 const membershipCheckoutSchema = z.object({
   vehicle_id: z.string().uuid('Choose a vehicle.'),
-  weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1, 'Choose your washes for the week.').max(7),
+  // Either washes in a MONTH (4 to 28, any mix of Body and Deep, on the weekdays the customer likes) or, the older way, a weekly pattern.
+  monthly: monthlyPlanSchema.optional(),
+  weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1, 'Choose your washes for the week.').max(7).optional(),
   duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
   time_slot: slot,
   start_date: isoDate,
@@ -195,7 +198,7 @@ const membershipCheckoutSchema = z.object({
   customer_notes: z.string().trim().max(500).optional(),
   // Exact dates, instead of letting the plan land on its weekdays. The database checks every rule again.
   custom_dates: z.array(z.object({ date: isoDate, kind: z.enum(['body', 'deep']) })).min(1).max(400).optional(),
-});
+}).refine((x) => Boolean(x.weekly_pattern) !== Boolean(x.monthly), { message: 'Choose how many washes you want each month.', path: ['monthly'] });
 
 // Pay for a custom membership straight away. The database validates the plan, prices it from the rate card (every discount explicit)
 // and opens the pending payment; the server opens the Razorpay order for exactly that amount. The membership and its washes are
@@ -206,7 +209,16 @@ bookingsRouter.post(
   requirePhone,
   asyncHandler(async (req, res) => {
     const m = parse(membershipCheckoutSchema, req.body);
-    const intent = await req.db(async (c) =>
+    const intent = m.monthly
+      ? await req.db(async (c) =>
+          (
+            await c.query('SELECT public.start_monthly_membership_checkout($1, $2, $3, $4::integer[], $5, $6::public.time_slot, $7::date, $8, $9, $10, NULL, $11::jsonb) AS r', [
+              m.vehicle_id, m.monthly!.body, m.monthly!.deep, m.monthly!.weekdays, m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null,
+              m.custom_dates ? JSON.stringify(m.custom_dates) : null,
+            ])
+          ).rows[0].r
+        ).catch((err) => { throw monthlyNotInstalled(err) ?? err; })
+      : await req.db(async (c) =>
       (
         await (m.custom_dates
           ? c.query('SELECT public.start_membership_checkout($1, $2::jsonb, $3, $4::public.time_slot, $5::date, $6, $7, $8, NULL, $9::jsonb) AS r', [

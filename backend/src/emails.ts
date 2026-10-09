@@ -74,7 +74,7 @@ export function freeWashEmail(d: FreeWashEmail): { subject: string; html: string
     (where ? row('Where', esc(where) + (d.parking ? `<br><span style="font-weight:400;color:#475569">Parking: ${esc(d.parking)}</span>` : '')) : '') +
     `</table>` +
     p('<strong>What happens next:</strong> your specialist calls you before they arrive, washes the vehicle at your parking spot, and you will see the before and after photos in your WASHO account.') +
-    p(`Love it? For ${d.offer.days} days after your free wash, a WASHO membership is cheaper: ${pct(d.offer.bp1)} off for 1 wash per week, ${pct(d.offer.bp2)} off for 2, ${pct(d.offer.bp3)} off for 3 or more. It is applied for you at checkout.`);
+    p(`Love it? For ${d.offer.days} days after your free wash, a WASHO membership is cheaper: ${pct(d.offer.bp1)} off for 4 to 7 washes a month, ${pct(d.offer.bp2)} off for 8 to 11, ${pct(d.offer.bp3)} off for 12 or more. It is applied for you at checkout.`);
   return {
     subject: `Your free wash is booked: ${shortDate(d.date)}, ${SLOT_NAME[d.slot].toLowerCase()}`,
     html: layout({
@@ -98,27 +98,45 @@ export interface RenewalEmail {
   washesDone: number;
   washesTotal: number;
   perWeek: number | null;
+  /** Set for a plan chosen as washes in a month; then it is said that way instead of per week. */
+  perMonth?: number | null;
   months: number;
 }
 
-export function renewalEmail(d: RenewalEmail): { subject: string; html: string } {
+/** Which of the three renewal emails: a week before the end, the last days, or once it is over. */
+export type RenewalStage = 'week' | 'last' | 'ended';
+
+export function renewalEmail(d: RenewalEmail, stage: RenewalStage = 'week'): { subject: string; html: string } {
   const when = d.daysLeft <= 0 ? 'today' : d.daysLeft === 1 ? 'tomorrow' : `in ${d.daysLeft} days`;
-  const what = [d.perWeek ? `${d.perWeek} wash${d.perWeek > 1 ? 'es' : ''} per week` : null, `${d.months} month${d.months > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
+  const what = [d.perMonth ? `${d.perMonth} washes a month` : d.perWeek ? `${d.perWeek} wash${d.perWeek > 1 ? 'es' : ''} per week` : null, `${d.months} month${d.months > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
   const car = [d.vehicle, d.plate].filter(Boolean).join(' · ');
+  const left = Math.max(d.washesTotal - d.washesDone, 0);
+  const intro =
+    stage === 'ended'
+      ? p(`Hi ${esc(firstName(d.name))}, your WASHO membership${car ? ` for <strong>${esc(car)}</strong>` : ''} ended on ${esc(longDate(d.endDate))}, so your regular washes have stopped.`)
+      : stage === 'last'
+        ? p(`Hi ${esc(firstName(d.name))}, this is a quick last reminder: your WASHO membership${car ? ` for <strong>${esc(car)}</strong>` : ''} ends <strong>${esc(when)}</strong>, on ${esc(longDate(d.endDate))}. After that your regular washes stop${left > 0 ? `, and ${left} wash${left > 1 ? 'es are' : ' is'} still unused. Book them in before the last day` : ''}.`)
+        : p(`Hi ${esc(firstName(d.name))}, your WASHO membership${car ? ` for <strong>${esc(car)}</strong>` : ''} ends <strong>${esc(when)}</strong>, on ${esc(longDate(d.endDate))}.`);
   const body =
-    p(`Hi ${esc(firstName(d.name))}, your WASHO membership${car ? ` for <strong>${esc(car)}</strong>` : ''} ends <strong>${esc(when)}</strong>, on ${esc(longDate(d.endDate))}.`) +
+    intro +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 14px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0">` +
     row('Your plan', esc(what)) +
     row('Washes done', `${d.washesDone} of ${d.washesTotal}`) +
-    row('Ends', esc(longDate(d.endDate))) +
+    row(stage === 'ended' ? 'Ended' : 'Ends', esc(longDate(d.endDate))) +
     `</table>` +
-    p('To keep your vehicle shining without a gap, renew now. We have filled in your current plan: your days, your time and your vehicle. Change anything you like, then pay. Your new plan starts the day after this one ends.') +
+    p(stage === 'ended'
+      ? 'To get your vehicle back on a regular wash, renew now. We have filled in your last plan: your days, your time and your vehicle. Change anything you like, then pay. A new plan can start in as little as two days.'
+      : 'To keep your vehicle shining without a gap, renew now. We have filled in your current plan: your days, your time and your vehicle. Change anything you like, then pay. Your new plan starts the day after this one ends.') +
     p('Memberships of 3, 6 or 12 months get a bigger discount than a single month.');
+  const subject =
+    stage === 'ended' ? 'Your WASHO membership has ended: renew in one tap'
+    : stage === 'last' ? `Your WASHO membership ends ${when}: renew to keep your washes`
+    : `Your WASHO membership ends ${when}: renew in one tap`;
   return {
-    subject: `Your WASHO membership ends ${when}: renew in one tap`,
+    subject,
     html: layout({
-      preheader: `Ends ${shortDate(d.endDate)}. Renew with your plan already filled in.`,
-      heading: 'Time to renew your membership',
+      preheader: stage === 'ended' ? `Ended ${shortDate(d.endDate)}. Renew with your plan already filled in.` : `Ends ${shortDate(d.endDate)}. Renew with your plan already filled in.`,
+      heading: stage === 'ended' ? 'Your membership has ended' : stage === 'last' ? 'Your membership ends soon' : 'Time to renew your membership',
       body,
       cta: { label: 'Renew my membership', url: `${site()}/app/membership/new?renew=${d.membershipId}` },
       foot: 'Nothing renews on its own and nothing is charged unless you choose to pay. If you do not want to continue, you do not need to do anything.',

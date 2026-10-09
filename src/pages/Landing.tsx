@@ -15,7 +15,7 @@ import { audience } from '../lib/campaign';
 import { useCampaign, useCatalog } from '../lib/queries';
 
 const steps = [
-  { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, 1 to 7 washes per week, the days, and how long. The estimate updates as you go.' },
+  { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, how many washes you want each month (4 or more), the days, and how long. The estimate updates as you go.' },
   { icon: Wallet, title: 'Pay securely online', text: 'Pay with Razorpay. Your washes are scheduled as soon as the payment is verified.' },
   { icon: MessageSquareText, title: 'Your specialist calls ahead', text: 'We confirm with you before every wash, so you are never caught out.' },
   { icon: Camera, title: 'We wash at your parking spot', text: 'A specialist calls ahead, washes, and you see the before and after photos.' },
@@ -54,7 +54,7 @@ export default function Landing() {
               {reduceMotion ? <span className="block">Wake up to a spotless ride.</span> : <BlurText text="Wake up to a spotless ride." delay={90} animateBy="words" direction="top" className="flex-wrap" />}
               <RotatingLine className="mt-2 text-washo-300" phrases={['Washed at your doorstep.', 'Zero queues, zero effort.', 'Shine, delivered every week.', 'Done before your first coffee.']} />
             </div>
-            <p className="mt-5 max-w-xl text-lg text-mist">Doorstep car and bike washing in Kharadi, Pune. Pick 1 to 7 washes per week, on the days you choose. We call ahead, wash at your parking spot and send before and after photos.</p>
+            <p className="mt-5 max-w-xl text-lg text-mist">Doorstep car and bike washing in Kharadi, Pune. Choose how many washes you want each month (4 or more), on the days you choose. We call ahead, wash at your parking spot and send before and after photos.</p>
             <div className="mt-8 flex flex-wrap gap-3">
               {/* React Bits StarBorder: the primary call to action */}
               <StarBorder as={Link} to="/app/membership/new" color="#6a9cff" speed="5s" backgroundColor="#1248b8" borderColor="rgba(155,191,255,0.35)" className="rounded-2xl" aria-label="Build my membership">

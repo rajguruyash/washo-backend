@@ -138,9 +138,9 @@ export default function Offer() {
           <p className="mt-2 text-sm text-fog">Loved it? For {c.pack_offer.days} days after your free wash, a membership costs less:</p>
           <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
             {[
-              ['1 wash per week', c.pack_offer.bp_1],
-              ['2 per week', c.pack_offer.bp_2],
-              ['3 or more', c.pack_offer.bp_3plus],
+              ['4 to 7 washes a month', c.pack_offer.bp_1],
+              ['8 to 11 a month', c.pack_offer.bp_2],
+              ['12 or more a month', c.pack_offer.bp_3plus],
             ].map(([label, bp]) => (
               <div key={label as string} className="rounded-2xl border border-white/[0.09] bg-white/[0.04] p-3">
                 <dd className="font-display text-2xl font-extrabold text-offer">{percent(bp as number)}</dd>

@@ -84,7 +84,10 @@ export type RequestStatus = 'submitted' | 'quoted' | 'accepted' | 'active' | 're
 
 export interface QuoteBreakdown {
   washes_total: number;
-  lines: { code?: string; name: string; kind: WashKind; per_week: number; quantity: number; unit_cents: number; line_cents: number }[];
+  lines: { code?: string; name: string; kind: WashKind; per_week?: number; per_month?: number; quantity: number; unit_cents: number; line_cents: number }[];
+  /** Set for a plan chosen as washes in a month. */
+  washes_per_month?: number;
+  monthly?: { body: number; deep: number };
   subtotal_cents: number;
   frequency_discount: { bp: number; cents: number; label: string | null };
   duration_discount: { bp: number; cents: number; label: string | null };
@@ -112,6 +115,11 @@ export interface MembershipRequest {
   frequency_per_week: number;
   duration_months: number;
   weekly_pattern: PatternItem[];
+  /** Set when the plan was chosen as washes in a month (the weekly pattern is then empty). */
+  washes_per_month?: number | null;
+  monthly_body?: number | null;
+  monthly_deep?: number | null;
+  preferred_weekdays?: number[] | null;
   time_slot: SlotId;
   start_date: string;
   customer_notes: string | null;
@@ -161,6 +169,10 @@ export interface Membership {
   reference_code: string | null;
   frequency_per_week: number | null;
   weekly_pattern: PatternItem[] | null;
+  washes_per_month?: number | null;
+  monthly_body?: number | null;
+  monthly_deep?: number | null;
+  preferred_weekdays?: number[] | null;
   time_slot: SlotId | null;
   vehicle_id: string | null;
   vehicle_type: VehicleType | null;
@@ -335,6 +347,10 @@ export interface AdminRequest {
   frequency_per_week: number;
   duration_months: number;
   weekly_pattern: PatternItem[];
+  washes_per_month?: number | null;
+  monthly_body?: number | null;
+  monthly_deep?: number | null;
+  preferred_weekdays?: number[] | null;
   time_slot: SlotId;
   start_date: string;
   customer_notes: string | null;
@@ -405,6 +421,10 @@ export interface AdminMembership {
   reference_code: string | null;
   frequency_per_week: number | null;
   weekly_pattern: PatternItem[] | null;
+  washes_per_month?: number | null;
+  monthly_body?: number | null;
+  monthly_deep?: number | null;
+  preferred_weekdays?: number[] | null;
   time_slot: SlotId | null;
   customer_id: string;
   customer_name: string | null;

@@ -119,9 +119,9 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
         <fieldset className="space-y-3">
           <legend className="text-sm font-bold">Membership offer after the free wash</legend>
           <div className="grid gap-4 sm:grid-cols-4">
-            <Input label="1 wash per week (%)" inputMode="decimal" value={f.p1} error={errors.pack_bp_1} onChange={set('p1')} />
-            <Input label="2 per week (%)" inputMode="decimal" value={f.p2} error={errors.pack_bp_2} onChange={set('p2')} />
-            <Input label="3 or more (%)" inputMode="decimal" value={f.p3} error={errors.pack_bp_3plus} onChange={set('p3')} />
+            <Input label="4 to 7 washes a month (%)" inputMode="decimal" value={f.p1} error={errors.pack_bp_1} onChange={set('p1')} />
+            <Input label="8 to 11 a month (%)" inputMode="decimal" value={f.p2} error={errors.pack_bp_2} onChange={set('p2')} />
+            <Input label="12 or more a month (%)" inputMode="decimal" value={f.p3} error={errors.pack_bp_3plus} onChange={set('p3')} />
             <Input label="Open for (days)" inputMode="numeric" value={f.offerDays} error={errors.pack_offer_days} onChange={set('offerDays')} />
           </div>
           <p className="text-xs text-fog">Starts when their free wash is done. It replaces the normal frequency discount, never lowers it, and is applied for them at checkout.</p>
@@ -213,7 +213,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
           <Stat label="Memberships bought" value={c.packs_bought} />
           <Stat label="Membership sales" value={rupees(Number(c.packs_cents))} />
         </div>
-        <p className="mt-3 text-xs text-fog">Membership offer: {percent(c.pack_bp_1)} for 1 per week, {percent(c.pack_bp_2)} for 2, {percent(c.pack_bp_3plus)} for 3 or more, for {c.pack_offer_days} days after the free wash.</p>
+        <p className="mt-3 text-xs text-fog">Membership offer: {percent(c.pack_bp_1)} for 4 to 7 washes a month, {percent(c.pack_bp_2)} for 8 to 11, {percent(c.pack_bp_3plus)} for 12 or more, for {c.pack_offer_days} days after the free wash.</p>
       </div>
 
       <section>

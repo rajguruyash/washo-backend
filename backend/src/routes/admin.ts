@@ -178,7 +178,7 @@ adminRouter.get(
     const memberships = await req.db(async (c) =>
       (
         await c.query(`
-          SELECT m.id, m.status, m.duration_months, m.start_at, m.end_at, m.final_amount_cents, r.reference_code, r.frequency_per_week, r.weekly_pattern, r.time_slot::text AS time_slot,
+          SELECT m.id, m.status, m.duration_months, m.start_at, m.end_at, m.final_amount_cents, r.reference_code, r.frequency_per_week, r.weekly_pattern, (r.monthly_body + r.monthly_deep) AS washes_per_month, r.monthly_body, r.monthly_deep, r.preferred_weekdays, r.time_slot::text AS time_slot,
                  p.id AS customer_id, p.full_name AS customer_name, p.phone AS customer_phone,
                  v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number,
                  wp.id AS worker_id, wp.full_name AS worker_name,

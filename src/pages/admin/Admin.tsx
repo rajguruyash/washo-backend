@@ -34,6 +34,7 @@ import Settings from './Settings';
 import Support from './Support';
 import Team from './Team';
 import { Loading, errText } from './shared';
+import { monthlyDetail, planTitle } from '../../lib/plan';
 
 type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
@@ -149,12 +150,12 @@ function Requests() {
           {data.map((r) => (
             <div key={r.id} className="glass p-5">
               <div className="flex items-start justify-between gap-3">
-                <div><p className="eyebrow">{r.reference_code}</p><p className="mt-1 text-lg font-bold">{r.frequency_per_week} per week · {r.duration_months} mo</p></div>
+                <div><p className="eyebrow">{r.reference_code}</p><p className="mt-1 text-lg font-bold">{planTitle(r, { short: true })}</p></div>
                 <Badge tone={r.status === 'submitted' ? 'amber' : r.status === 'quoted' ? 'blue' : r.status === 'active' ? 'green' : 'slate'}>{r.status}</Badge>
               </div>
               <p className="mt-2 text-sm font-semibold">{r.customer.name} <a href={`tel:${r.customer.phone}`} className="font-normal text-washo-300">{prettyPhone(r.customer.phone)}</a></p>
               <p className="mt-1 text-sm text-fog">{r.vehicle.type.toUpperCase()} · {r.vehicle.model} · {r.vehicle.registration_number}</p>
-              <p className="mt-1 text-sm text-mist">{patternLabel(r.weekly_pattern)} · {slotLabel(r.time_slot)}</p>
+              <p className="mt-1 text-sm text-mist">{monthlyDetail(r, r.vehicle.type === 'bike') ?? patternLabel(r.weekly_pattern)} · {slotLabel(r.time_slot)}</p>
               <p className="text-xs text-fog">Start {fullDate(r.start_date)}{r.address ? ` · ${r.address.society}, ${r.address.block} ${r.address.flat}` : ''}</p>
               {r.customer_notes && <p className="mt-2 rounded-xl bg-white/[0.04] p-3 text-sm text-mist">“{r.customer_notes}”</p>}
               <div className="mt-3 flex items-center justify-between gap-3">
@@ -226,10 +227,12 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
   // Renewal reminders (an email a week before a membership ends) go out by themselves every hour. These two buttons are for checking and for sending at once.
   const reminders = async (dry: boolean) => {
     try {
-      const r = (await act.mutateAsync({ path: `reminders/run${dry ? '?dry=1' : ''}`, body: {} })) as { ready: boolean; due: number; sent: number; already: number; failed: number };
-      if (!r.ready) toast.error('Reminder emails are not set up yet: the email key or the latest database update is missing.');
-      else if (dry) toast.success(r.due ? `${r.due} membership${r.due > 1 ? 's end' : ' ends'} within a week and ${r.due > 1 ? 'have' : 'has'} not been reminded yet.` : 'Nobody needs a reminder right now.');
-      else toast.success(r.due ? `Reminders: ${r.sent} sent${r.failed ? `, ${r.failed} failed` : ''}${r.already ? `, ${r.already} already sent` : ''}.` : 'Nobody needs a reminder right now.');
+      const r = (await act.mutateAsync({ path: `reminders/run${dry ? '?dry=1' : ''}`, body: {} })) as { ready: boolean; due: number; sent: number; already: number; failed: number; stages?: { stage: 'week' | 'last' | 'ended'; due: number; sent: number }[] };
+      const names = { week: 'a week before the end', last: 'in the last days', ended: 'after it ended' } as const;
+      const split = (key: 'due' | 'sent') => (r.stages ?? []).filter((s) => s[key] > 0).map((s) => `${s[key]} ${names[s.stage]}`).join(', ');
+      if (!r.ready) toast.error('Renewal emails are not set up yet: the email key or the latest database update is missing.');
+      else if (dry) toast.success(r.due ? `${r.due} renewal email${r.due > 1 ? 's are' : ' is'} due (${split('due')}).` : 'Nobody needs a renewal email right now.');
+      else toast.success(r.due ? `Renewal emails: ${r.sent} sent${split('sent') ? ` (${split('sent')})` : ''}${r.failed ? `, ${r.failed} failed` : ''}${r.already ? `, ${r.already} already sent` : ''}.` : 'Nobody needs a renewal email right now.');
     } catch (e) { toast.error(errText(e)); }
   };
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
@@ -237,16 +240,16 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-xl text-sm text-fog">Customers get a renewal email a week before their membership ends, with their plan filled in. It goes out by itself; these buttons check or send it now.</p>
+        <p className="max-w-xl text-sm text-fog">Customers get a renewal email a week before their membership ends, again in its last days, and once more if it ended without being renewed, each time with their plan filled in. They go out by themselves (and the customer's own page shows a Renew card too); these buttons check or send them now.</p>
         <div className="flex gap-2"><Button size="sm" variant="glass" loading={act.isPending} onClick={() => void reminders(true)}>Who needs one?</Button><Button size="sm" loading={act.isPending} onClick={() => void reminders(false)}>Send reminders now</Button></div>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {data?.map((m) => (
           <div key={m.id} className="glass p-5">
-            <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{m.reference_code}</p><p className="mt-1 text-lg font-bold">{m.frequency_per_week} per week · {m.duration_months} mo · {rupees(m.final_amount_cents)}</p></div><Badge tone={m.status === 'active' ? 'green' : 'slate'}>{m.status}</Badge></div>
+            <div className="flex items-start justify-between gap-3"><div><p className="eyebrow">{m.reference_code}</p><p className="mt-1 text-lg font-bold">{planTitle(m, { short: true })} · {rupees(m.final_amount_cents)}</p></div><Badge tone={m.status === 'active' ? 'green' : 'slate'}>{m.status}</Badge></div>
             <p className="mt-2 text-sm font-semibold">{m.customer_name} <span className="font-normal text-fog">{prettyPhone(m.customer_phone)}</span></p>
             <p className="text-sm text-fog">{m.vehicle_type?.toUpperCase()} · {m.vehicle_model} · {m.registration_number}</p>
-            {m.weekly_pattern && <p className="mt-1 text-sm text-mist">{patternLabel(m.weekly_pattern)}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}
+            {(m.monthly_body != null || m.weekly_pattern) && <p className="mt-1 text-sm text-mist">{monthlyDetail(m, m.vehicle_type === 'bike') ?? patternLabel(m.weekly_pattern ?? [])}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p>}
             <p className="mt-1 text-xs text-fog">{m.washes_completed}/{m.washes_total} done · {fullDate(istDay(m.start_at))} to {fullDate(istDay(m.end_at))}{m.next_wash_date ? ` · next ${prettyDate(m.next_wash_date)}` : ''}</p>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm">Specialist: <span className="font-semibold">{m.worker_name ?? <span className="text-warn">none</span>}</span></p>

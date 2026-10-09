@@ -15,6 +15,7 @@ import { useMembership } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { isLive } from '../../lib/status';
 import type { MembershipWash } from '../../lib/types';
+import { monthlyDetail, planTitle } from '../../lib/plan';
 
 export default function MembershipDetail() {
   const { id } = useParams();
@@ -43,7 +44,7 @@ export default function MembershipDetail() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="eyebrow">{m.reference_code}</p>
-          <h1 className="mt-1 text-3xl font-extrabold">{m.frequency_per_week} wash{(m.frequency_per_week ?? 0) > 1 ? 'es' : ''} per week · {m.duration_months} month{m.duration_months > 1 ? 's' : ''}</h1>
+          <h1 className="mt-1 text-3xl font-extrabold">{planTitle(m)}</h1>
         </div>
         <Badge tone={m.status === 'active' ? 'green' : 'slate'} icon={<CheckCircle2 className="h-3.5 w-3.5" />}>{m.status === 'active' ? 'Active' : m.status}</Badge>
       </div>
@@ -52,7 +53,7 @@ export default function MembershipDetail() {
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           <div><p className="eyebrow">Vehicle</p><div className="mt-2 flex items-center gap-3"><p className="font-bold">{m.vehicle_model}</p>{m.registration_number && <Plate reg={m.registration_number} />}</div></div>
           <div><p className="eyebrow">Services</p><p className="mt-1 text-sm">{services.join(' · ')}</p></div>
-          <div><p className="eyebrow">Weekly schedule</p><p className="mt-1 text-sm">{m.weekly_pattern ? patternLabel(m.weekly_pattern) : '—'}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p></div>
+          <div><p className="eyebrow">{m.monthly_body != null ? 'Your plan' : 'Weekly schedule'}</p><p className="mt-1 text-sm">{monthlyDetail(m, m.vehicle_type === 'bike') ?? (m.weekly_pattern ? patternLabel(m.weekly_pattern) : '—')}{m.time_slot ? ` · ${slotLabel(m.time_slot)}` : ''}</p></div>
           <div><p className="eyebrow">Term</p><p className="mt-1 text-sm">{fullDate(istDay(m.start_at))} to {fullDate(endDate)}</p></div>
         </div>
         <div className="p-5">
