@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles, Tag, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
@@ -14,10 +14,10 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { TextArea } from '../../components/ui/Field';
+import { Input, TextArea } from '../../components/ui/Field';
 import { cn } from '../../lib/cn';
 import { addDays, duration, istDay, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
-import { ApiError } from '../../lib/http';
+import { ApiError, post } from '../../lib/http';
 import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, usePublicSettings, useStartMembershipPayment, useVehicles } from '../../lib/queries';
 import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
@@ -27,8 +27,8 @@ import { SlideToPay } from '../../components/SlideToPay';
 import { addressBlocker, pausedBlocker, phoneBlocker, type Blocker } from '../../lib/payBlockers';
 import { slotLabel } from '../../lib/slots';
 import { exactDatesProblem } from '../../lib/schedule';
-import { MAX_PER_MONTH, MIN_PER_MONTH, dayNames, daysNeeded, minWashesMessage, perWeekCap } from '../../lib/plan';
-import type { ExactDate, Membership, SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
+import { MAX_PER_MONTH, MIN_PER_MONTH, dayNames, daysNeeded, minWashesMessage } from '../../lib/plan';
+import type { ExactDate, Membership, PriceEstimate, SlotId, Vehicle, VehicleType, WashKind } from '../../lib/types';
 
 const STEPS = ['Vehicle', 'Washes a month', 'Your days', 'Length', 'Start & time', 'Review & pay'] as const;
 const MONTHS = [1, 3, 6, 12] as const;
@@ -104,6 +104,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   });
   const [days, setDays] = useState<number[]>(renewDays);
   const [info, setInfo] = useState<WashKind | null>(null);
+  const [daysInfo, setDaysInfo] = useState(false);
   // The two steps that need something before they go on show it in red when Continue is pressed too early.
   const [minTried, setMinTried] = useState(0);
   const [daysTried, setDaysTried] = useState(0);
@@ -118,6 +119,12 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const [notes, setNotes] = useState('');
   const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
+  // A coupon the customer typed on the last step: checked by the server (it says if the code cannot be used), then part of the price.
+  const [couponOpen, setCouponOpen] = useState(false);
+  const [couponText, setCouponText] = useState('');
+  const [coupon, setCoupon] = useState<string | null>(null);
+  const [couponError, setCouponError] = useState('');
+  const [couponBusy, setCouponBusy] = useState(false);
 
   // Preselect from ?vehicle= (Vehicles page) or the only vehicle.
   useEffect(() => {
@@ -154,8 +161,10 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const earliest = addDays(todayIST(), minLeadDays);
   const termEnd = preview.data?.end_date;
   const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4);
-  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }, perWeek: perWeekCap(perMonth), minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
-  const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months } : null);
+  const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }, minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
+  const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, ...(coupon ? { coupon } : {}) } : null);
+  // A coupon that stopped working after it was applied (it ran out, or the plan changed to one it cannot go with): say so and let it be removed.
+  const couponStopped = coupon && chosenEstimate.isError ? (chosenEstimate.error instanceof ApiError ? chosenEstimate.error.message : 'That coupon cannot be used now.') : '';
 
   const serviceName = (kind: WashKind) => {
     const code = catalog?.membership_options.find((o) => o.vehicle_type === vehicle?.vehicle_type && o.wash_kind === kind)?.service_code;
@@ -198,6 +207,22 @@ function Wizard({ renewing }: { renewing?: Membership }) {
     setStep(step + 1);
   };
 
+  const applyCoupon = async () => {
+    const text = couponText.trim();
+    if (!text || !vtype || !months) return;
+    setCouponError('');
+    setCouponBusy(true);
+    try {
+      const r = (await post<{ estimate: PriceEstimate }>('/membership-estimate', { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, coupon: text })).estimate;
+      setCoupon(r.coupon?.code ?? text.toUpperCase());
+      setCouponText('');
+      setCouponOpen(false);
+    } catch (err) {
+      setCouponError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    } finally { setCouponBusy(false); }
+  };
+  const removeCoupon = () => { setCoupon(null); setCouponError(''); setCouponText(''); };
+
   // Pay now: the server prices the plan from the rate card and opens the Razorpay order; the membership and its washes are
   // created only once the payment is verified.
   // Slide to pay: resolves only when the payment is verified (the handle then shows "Paid"); throws if it was not, so the handle springs back.
@@ -218,6 +243,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           parking_location: address?.parking_location,
           customer_notes: notes.trim() || undefined,
           custom_dates: customActive ?? undefined,
+          coupon: coupon ?? undefined,
         }),
         `WASHO membership · ${perMonth} washes a month · ${months} month${months > 1 ? 's' : ''}`
       );
@@ -241,7 +267,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
     ...pausedBlocker(paused),
     ...addressBlocker(Boolean(addressId)),
     ...phoneBlocker(needsPhone),
-    ...(chosenEstimate.data ? [] : [{ label: 'Price is still loading' }]),
+    ...(couponStopped ? [{ label: 'Remove the coupon first', target: 'pay-coupon' }] : chosenEstimate.data ? [] : [{ label: 'Price is still loading' }]),
   ];
   const slide = stepMotion(dir);
 
@@ -264,7 +290,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
         {step === 1 && (
           <motion.section key="s1" {...slide}>
             <h1 className="text-3xl font-extrabold">How many washes a month?</h1>
-            <p className="mt-1.5 mb-6 text-fog">Choose how many {bike ? 'bike washes' : 'Body washes and Deep cleans'} you want in a month, <strong className="text-white">at least {MIN_PER_MONTH} in all</strong>, any mix you like (for example 2 Body and 2 Deep, or 4 Body and 1 Deep). Tap <Info className="inline h-3.5 w-3.5 align-text-top" /> to see what each one includes.</p>
+            <p className="mt-1.5 mb-6 text-fog">Pick your mix. Tap <Info className="inline h-3.5 w-3.5 align-text-top" /> to see what each one includes.</p>
 
             <div className="space-y-3">
               <CountRow
@@ -290,19 +316,12 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               />
             </div>
 
-            {tooFew && (
-              <p key={minTried} id="min-washes-error" role="alert" className={cn('mt-4 flex items-start gap-2 rounded-2xl border border-bad/40 bg-bad/10 p-4 text-sm font-semibold text-bad', minTried > 0 && 'animate-shake')}>
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {minWashesMessage(perMonth)} Add {MIN_PER_MONTH - perMonth} more to carry on.
-              </p>
-            )}
+            {tooFew && <p key={minTried} id="min-washes-error" role="alert" className={cn('mt-3 text-sm font-semibold text-bad', minTried > 0 && 'animate-shake')}>{minWashesMessage()}</p>}
 
             <div className="glass mt-5 p-5" aria-live="polite">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className={cn('text-lg font-bold', tooFew && 'text-bad')}>{perMonth} wash{perMonth === 1 ? '' : 'es'} a month</p>
-                  <p className="mt-1 text-sm text-fog">
-                    {[counts.body > 0 && `${counts.body} × ${bike ? 'Bike wash' : 'Body wash'}`, counts.deep > 0 && `${counts.deep} × Deep clean`].filter(Boolean).join(' + ') || 'Nothing chosen yet'}
-                  </p>
                   {!tooFew && discount('frequency', freqKey) > 0 && <Badge tone="yellow" className="mt-3" icon={<Sparkles className="h-3 w-3" />}>{percent(discount('frequency', freqKey))} off for {perMonth} washes a month{offerApplies(freqKey) ? ` · welcome offer, until ${shortDayIST(offer!.expires_at)}` : ''}</Badge>}
                 </div>
                 <div className="text-right">
@@ -310,17 +329,16 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                   <p className="font-display text-3xl font-extrabold tabular-nums">{!tooFew && monthly.data ? rupees(monthly.data.final_cents) : '—'}<span className="ml-1 text-sm font-medium text-fog">/ month</span></p>
                 </div>
               </div>
-              <p className="mt-4 border-t border-white/[0.07] pt-3 text-xs text-fog">
-                Price per wash{vehicle ? ` for your ${vehicle.vehicle_type === 'suv' ? 'SUV' : vehicle.vehicle_type}` : ''}: {bike ? `Bike wash ${rupees(basePrice('body'))}` : `Body wash ${rupees(basePrice('body'))} · Deep clean ${rupees(basePrice('deep'))}`}. Minimum {MIN_PER_MONTH} washes a month, up to {MAX_PER_MONTH}.
-              </p>
             </div>
           </motion.section>
         )}
 
         {step === 2 && (
           <motion.section key="s2" {...slide}>
-            <h1 className="text-3xl font-extrabold">Pick your days</h1>
-            <p className="mt-1.5 mb-6 text-fog">Choose the days of the week that suit you. We spread your {perMonth} washes evenly through every month on those days and take care of the rest, so you do not have to plan the whole month.</p>
+            <div className="mb-6 flex items-center gap-2.5">
+              <h1 className="text-3xl font-extrabold">Pick your days</h1>
+              <button type="button" onClick={() => setDaysInfo(true)} aria-label="How your days work" className="grid h-7 w-7 place-items-center rounded-full border border-white/20 text-fog transition-colors hover:border-washo-400/60 hover:text-white"><Info className="h-4 w-4" /></button>
+            </div>
 
             <div className="grid grid-cols-7 gap-2" role="group" aria-label="Weekdays">
               {WEEK_ORDER.map((id) => {
@@ -335,16 +353,9 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 );
               })}
             </div>
-            <p className={cn('mt-3 text-sm', daysOk ? 'text-ok' : 'text-fog')}>
-              {days.length ? `${dayNames(days)} · ` : ''}{daysOk ? `${days.length} day${days.length > 1 ? 's' : ''} chosen. Enough for ${perMonth} washes a month.` : `Pick at least ${needDays} day${needDays > 1 ? 's' : ''} so ${perMonth} washes a month fit (a day of the week comes round about 4 times a month, and a vehicle is washed once a day).`}
-            </p>
-            {!daysOk && daysTried > 0 && (
-              <p key={daysTried} id="days-error" role="alert" className="mt-3 flex items-start gap-2 rounded-2xl border border-bad/40 bg-bad/10 p-4 text-sm font-semibold text-bad animate-shake">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> Pick at least {needDays} day{needDays > 1 ? 's' : ''} of the week.
-              </p>
-            )}
+            <p className={cn('mt-3 text-sm', daysOk ? 'text-ok' : 'text-fog')}>{daysOk ? dayNames(days) : `Pick at least ${needDays} day${needDays > 1 ? 's' : ''}.`}</p>
+            {!daysOk && daysTried > 0 && <p key={daysTried} id="days-error" role="alert" className="mt-2 animate-shake text-sm font-semibold text-bad">Pick at least {needDays} day{needDays > 1 ? 's' : ''} of the week.</p>}
             {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Price for this plan: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
-            <p className="mt-2 text-xs text-fog">Want every date your own way? You can pick exact dates on the Start step.</p>
           </motion.section>
         )}
 
@@ -405,7 +416,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                     <div className="border-t border-white/[0.07] p-4">
                       {customActive && termEnd ? (
                         <ExactDatesCalendar
-                          start={start} end={termEnd} minDate={[start, earliest].sort().at(-1)!} need={{ body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }} perWeek={perWeekCap(perMonth)}
+                          start={start} end={termEnd} minDate={[start, earliest].sort().at(-1)!} need={{ body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }} 
                           value={customActive} onChange={(dates) => setCustom({ key: planKey, dates })} crowd={crowd} slot={slot}
                           onReset={() => { setCustom(null); setExactOpen(false); }}
                         />
@@ -433,7 +444,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
         {step === 5 && vehicle && planReady && months && slot && start && (
           <motion.section key="s5" {...slide}>
             <h1 className="text-3xl font-extrabold">Review and pay</h1>
-            <p className="mt-1.5 mb-6 text-fog">Check your plan, then pay securely. Your washes are scheduled as soon as the payment is verified.</p>
+            <div className="mb-6" />
             <div className="glass divide-y divide-white/[0.07]">
               <div className="flex items-center justify-between gap-4 p-5"><div><p className="eyebrow">Vehicle</p><p className="mt-1 font-bold">{vehicle.make ? `${vehicle.make} ` : ''}{vehicle.model}</p></div><Plate reg={vehicle.registration_number} /></div>
               <div className="p-5">
@@ -450,7 +461,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 <div><p className="eyebrow">Starting</p><p className="mt-1 font-semibold">{prettyDate(start)}</p></div>
                 <div>
                   <p className="eyebrow">Discounts</p>
-                  <p className="mt-1 font-semibold">{[discount('frequency', freqKey) ? `${percent(discount('frequency', freqKey))} ${offerApplies(freqKey) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
+                  <p className="mt-1 font-semibold">{[discount('frequency', freqKey) ? `${percent(discount('frequency', freqKey))} ${offerApplies(freqKey) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : '', chosenEstimate.data?.coupon ? `${percent(chosenEstimate.data.coupon.bp)} coupon` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
                 </div>
               </div>
               <div id="pay-address" className="p-5">
@@ -480,13 +491,29 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 {(customActive ?? preview.data!.dates).length > 12 && <button type="button" onClick={() => setShowAllDates(!showAllDates)} className="mt-2 text-sm font-semibold text-washo-300 hover:text-white">{showAllDates ? 'Show fewer' : `Show all ${(customActive ?? preview.data!.dates).length}`}</button>}
               </div>
             )}
+            <div id="pay-coupon" className="glass mt-5 p-5">
+              {coupon ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 text-sm"><Tag className="h-4 w-4 text-ok" aria-hidden /> <span className="font-bold">{coupon}</span> <span className="text-ok">{chosenEstimate.data?.coupon ? `${percent(chosenEstimate.data.coupon.bp)} extra off applied` : couponStopped ? '' : 'applied'}</span></p>
+                  <button type="button" onClick={removeCoupon} className="inline-flex items-center gap-1 text-sm font-semibold text-washo-300 hover:text-white"><X className="h-4 w-4" aria-hidden /> Remove</button>
+                </div>
+              ) : couponOpen ? (
+                <form onSubmit={(e) => { e.preventDefault(); void applyCoupon(); }} className="flex items-start gap-2">
+                  <Input label="Coupon code" className="min-w-0 flex-1" value={couponText} onChange={(e) => { setCouponText(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)); setCouponError(''); }}
+                    autoCapitalize="characters" autoComplete="off" spellCheck={false} placeholder="For example EXTRA5" error={couponError || undefined} />
+                  <Button type="submit" variant="glass" className="mt-[1.65rem]" loading={couponBusy} disabled={couponText.trim().length < 3}>Apply</Button>
+                </form>
+              ) : (
+                <button type="button" onClick={() => setCouponOpen(true)} className="inline-flex items-center gap-2 text-sm font-semibold text-washo-300 hover:text-white"><Tag className="h-4 w-4" aria-hidden /> Have a coupon?</button>
+              )}
+              {couponStopped && <p role="alert" className="mt-2 text-sm text-bad">{couponStopped}</p>}
+            </div>
             {chosenEstimate.data && (
               <div className="glass mt-5 p-5">
                 <div className="mb-1 flex items-center justify-between gap-3"><h2 className="font-bold">Your price</h2></div>
                 <QuoteBreakdownView q={{ ...chosenEstimate.data, adjustment: { cents: 0, reason: null } }} />
               </div>
             )}
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-washo-500/25 bg-washo-500/10 p-4 text-sm text-mist"><Info className="mt-0.5 h-4 w-4 shrink-0 text-washo-300" /> You pay once, now, with Razorpay. Your membership and every wash are created when the payment is verified.</div>
             <PayPhoneGate />
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
           </motion.section>
@@ -517,6 +544,13 @@ function Wizard({ renewing }: { renewing?: Membership }) {
             {vehicle?.vehicle_type === 'suv' && <p className="text-xs text-fog">For an SUV the Body wash is the car Body wash and the Deep clean is the SUV Deep clean, so the Deep clean costs more.</p>}
           </div>
         )}
+      </Sheet>
+      <Sheet open={daysInfo} onClose={() => setDaysInfo(false)} size="sm" title="How your days work" footer={<Button full variant="glass" onClick={() => setDaysInfo(false)}>Got it</Button>}>
+        <div className="space-y-3 text-sm text-mist">
+          <p>Choose the days of the week that suit you. We spread your {perMonth} washes evenly through every month on those days, and keep clear of the busiest days where we can, so you do not have to plan the whole month.</p>
+          <p>Pick at least {needDays} day{needDays > 1 ? 's' : ''} so {perMonth} washes a month fit: a day of the week comes round about 4 times a month, and a vehicle is washed once a day.</p>
+          <p>Want every date your own way, even washes on days one after another? You can pick exact dates on the Start step.</p>
+        </div>
       </Sheet>
       <AddressSheet open={addrOpen} onClose={() => setAddrOpen(false)} onSaved={(a) => setAddressId(a.id)} />
     </div>

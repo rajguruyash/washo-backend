@@ -15,7 +15,11 @@ beforeAll(async () => {
   ({ setMailTransport } = await import('../src/notify')); // after boot: the server's configuration is read the first time it is loaded
 });
 afterAll(shutdown);
-beforeEach(() => { sent = []; setMailTransport(recorder); });
+// The renewal settings live in the database and these tests share it: every test starts from the defaults, with sending allowed at any hour (so none of them depends on
+// what time it is when they run). The tests of the sending hours change that themselves.
+const OPEN_ALL_DAY = { on: true, week: { on: true, days: 7 }, last: { on: true, days: 2 }, ended: { on: true, days: 3 }, from_hour: 0, to_hour: 24 };
+const setRenewalSettings = (v: unknown) => fake.admin.query(`insert into public.app_settings (key, value) values ('renewal_emails', $1::jsonb) on conflict (key) do update set value = excluded.value`, [JSON.stringify(v)]);
+beforeEach(async () => { sent = []; setMailTransport(recorder); await setRenewalSettings(OPEN_ALL_DAY); });
 
 const dbRows = async (sql: string, params: unknown[] = []) => (await fake.admin.query(sql, params)).rows;
 const uniqEmail = () => `mail-${crypto.randomBytes(4).toString('hex')}@example.com`;
@@ -210,5 +214,208 @@ describe('membership renewal reminders', () => {
     const ok = await c.req('POST', '/api/cron/reminders', {}, { headers: { authorization: 'Bearer test-cron-secret-0123456789' } });
     expect(ok.status).toBe(200);
     expect(sent.filter((x) => x.to === m.email)).toHaveLength(1);
+  });
+});
+
+describe('the renewal email controls (Admin -> Memberships)', () => {
+  async function endingIn(days: number, o: { email?: boolean } = {}) {
+    const m = await activeMembership({ type: 'car', pattern: PATTERN_3, months: 1 });
+    const email = uniqEmail();
+    if (o.email !== false) expectOk(await m.c.put('/api/me', { full_name: 'Asha Kulkarni', email }));
+    else {
+      await fake.admin.query(`update public.profiles set email = null where id = (select customer_profile_id from public.memberships where id = $1)`, [m.membershipId]);
+      await fake.admin.query(`update auth.users set email = null where id = (select p.auth_user_id from public.profiles p join public.memberships x on x.customer_profile_id = p.id where x.id = $1)`, [m.membershipId]);
+    }
+    await fake.admin.query('alter table public.memberships disable trigger user');
+    await fake.admin.query(
+      `update public.memberships
+          set start_at = (date_trunc('day', now() at time zone 'Asia/Kolkata') + $2 * interval '1 day' - interval '1 month' + interval '1 day') at time zone 'Asia/Kolkata',
+              end_at   = (date_trunc('day', now() at time zone 'Asia/Kolkata') + $2 * interval '1 day') at time zone 'Asia/Kolkata'
+        where id = $1`,
+      [m.membershipId, days]
+    );
+    await fake.admin.query('alter table public.memberships enable trigger user');
+    return { ...m, email };
+  }
+  const mails = (m: { email: string }) => sent.filter((x) => x.to === m.email);
+  const cron = (c: Client) => c.req('POST', '/api/cron/reminders', {}, { headers: { authorization: 'Bearer test-cron-secret-0123456789' } });
+  const staff = (access: 'super_admin' | 'operations' | 'finance' | 'marketing' | 'support') => staffClient('admin', { access });
+  const istHourNow = () => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  /** Sending hours that do not include the hour it is right now. */
+  const hoursWithoutNow = () => { const h = istHourNow(); return h < 23 ? { from_hour: h + 1, to_hour: h + 2 } : { from_hour: 0, to_hour: 1 }; };
+
+  it('the page gets the settings, who is coming up with what each email did, and the latest emails; roles decide who may look and who may change', async () => {
+    const m = await endingIn(3);
+    const ops = await staff('operations');
+    expectOk(await ops.c.post('/api/admin/reminders/run'));
+    const r = expectOk(await ops.c.get('/api/admin/renewals')).body;
+    expect(r.settings).toEqual(OPEN_ALL_DAY);
+    expect(r.mail_ready).toBe(true);
+    const row = r.upcoming.find((u: any) => u.membership_id === m.membershipId);
+    expect(row).toMatchObject({ days_left: 3, renewed: false, steps: { week: { status: 'sent' }, last: null, ended: null } });
+    expect(r.recent.some((x: any) => x.membership_id === m.membershipId && x.kind === 'membership_renewal_reminder' && x.status === 'sent')).toBe(true);
+
+    // finance and support can look; they cannot change anything or send
+    for (const role of ['finance', 'support'] as const) {
+      const a = await staff(role);
+      expectOk(await a.c.get('/api/admin/renewals'));
+      expect((await a.c.put('/api/admin/renewals/settings', OPEN_ALL_DAY)).status).toBe(403);
+      expect((await a.c.post(`/api/admin/renewals/${m.membershipId}/send`, { step: 'last' })).status).toBe(403);
+    }
+    // marketing, a customer, a visitor: nothing
+    const marketing = await staff('marketing');
+    expect((await marketing.c.get('/api/admin/renewals')).status).toBe(403);
+    expect((await marketing.c.put('/api/admin/renewals/settings', OPEN_ALL_DAY)).status).toBe(403);
+    expect((await m.c.get('/api/admin/renewals')).status).toBe(403);
+    expect((await new Client().get('/api/admin/renewals')).status).toBe(401);
+    expect((await new Client().put('/api/admin/renewals/settings', OPEN_ALL_DAY)).status).toBe(401);
+  });
+
+  it('saving changes what the next run does, is checked, and is written to the activity log', async () => {
+    const ops = await staff('operations');
+    const next = { on: true, week: { on: true, days: 3 }, last: { on: false, days: 2 }, ended: { on: true, days: 5 }, from_hour: 8, to_hour: 21 };
+    const saved = expectOk(await ops.c.put('/api/admin/renewals/settings', next)).body;
+    expect(saved.settings).toEqual(next);
+    expect(expectOk(await ops.c.get('/api/admin/renewals')).body.settings).toEqual(next);
+    const log = await dbRows(`select metadata from public.audit_events where event_type = 'renewal_settings_changed' order by created_at desc limit 1`);
+    expect(log[0].metadata).toEqual({ from: OPEN_ALL_DAY, to: next });
+
+    // refused, with a message a person can read; nothing is saved
+    const refused = [
+      [{ ...next, week: { on: true, days: 0 } }, /1 to 14/],
+      [{ ...next, week: { on: true, days: 30 } }, /./],
+      [{ ...next, from_hour: 20, to_hour: 9 }, /start before they end/],
+      [{ ...next, on: 'yes' }, /./],
+      [{ ...next, last: undefined }, /./],
+      [{ on: true }, /./],
+    ] as const;
+    for (const [body, msg] of refused) {
+      const r = await ops.c.put('/api/admin/renewals/settings', body);
+      expect([400, 422], JSON.stringify(body)).toContain(r.status);
+      expect(JSON.stringify(r.body)).toMatch(msg);
+    }
+    expect(expectOk(await ops.c.get('/api/admin/renewals')).body.settings).toEqual(next);
+  });
+
+  it('a step that is switched off is never sent, and the days each step covers follow the setting', async () => {
+    const week = await endingIn(5);
+    const ended = await endingIn(-4);
+    const admin = await staff('operations');
+    // week: only 3 days ahead; ended: switched off
+    await setRenewalSettings({ ...OPEN_ALL_DAY, week: { on: true, days: 3 }, ended: { on: false, days: 3 } });
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(mails(week)).toHaveLength(0); // 5 days is outside "3 days before"
+    expect(mails(ended)).toHaveLength(0); // switched off
+
+    // widen the week and let "ended" reach 5 days back
+    await setRenewalSettings({ ...OPEN_ALL_DAY, week: { on: true, days: 6 }, ended: { on: true, days: 5 } });
+    const run = expectOk(await admin.c.post('/api/admin/reminders/run')).body;
+    expect(mails(week)).toHaveLength(1);
+    expect(mails(ended)).toHaveLength(1);
+    expect(run.stages.map((s: any) => s.stage)).toEqual(['week', 'last', 'ended']);
+    // with every step off there is nothing to do, and a dry run says so
+    await setRenewalSettings({ ...OPEN_ALL_DAY, week: { on: false, days: 7 }, last: { on: false, days: 2 }, ended: { on: false, days: 3 } });
+    const none = expectOk(await admin.c.post('/api/admin/reminders/run?dry=1')).body;
+    expect(none).toMatchObject({ due: 0, stages: [] });
+  });
+
+  it('with the first email switched off, the last-days email no longer waits for it', async () => {
+    const m = await endingIn(1);
+    const admin = await staff('operations');
+    expectOk(await admin.c.post('/api/admin/reminders/run')); // week + last both on: the first goes out now (ends in 1 day), the last waits two days after it
+    expect(mails(m)).toHaveLength(1);
+    expect(mails(m)[0].subject).not.toMatch(/last reminder/i);
+    // A fresh membership, first email off: the last-days email goes straight out
+    const m2 = await endingIn(1);
+    await setRenewalSettings({ ...OPEN_ALL_DAY, week: { on: false, days: 7 } });
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(mails(m2)).toHaveLength(1);
+    expect(mails(m2)[0].html).toContain('last reminder');
+  });
+
+  it('the master switch and the sending hours hold back the automatic job, not a person pressing the button', async () => {
+    const m = await endingIn(3);
+    const admin = await staff('operations');
+    const c = new Client();
+
+    await setRenewalSettings({ ...OPEN_ALL_DAY, on: false });
+    const off = (await cron(c)).body;
+    expect(off).toMatchObject({ success: true, paused: 'switched_off', sent: 0, due: 0 });
+    expect(mails(m)).toHaveLength(0);
+
+    await setRenewalSettings({ ...OPEN_ALL_DAY, ...hoursWithoutNow() });
+    const late = (await cron(c)).body;
+    expect(late).toMatchObject({ paused: 'outside_hours', sent: 0 });
+    expect(mails(m)).toHaveLength(0);
+
+    // a person asking for it right now is not held back by either
+    const dry = expectOk(await admin.c.post('/api/admin/reminders/run?dry=1')).body;
+    expect(dry.paused).toBeUndefined();
+    expect(dry.would.some((w: any) => w.membership_id === m.membershipId)).toBe(true);
+    await setRenewalSettings({ ...OPEN_ALL_DAY, on: false, ...hoursWithoutNow() });
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(mails(m)).toHaveLength(1);
+
+    // and switched back on and inside the hours, the automatic job runs again
+    const m2 = await endingIn(2);
+    await setRenewalSettings(OPEN_ALL_DAY);
+    expect((await cron(c)).body.paused).toBeUndefined();
+    expect(mails(m2)).toHaveLength(1);
+  });
+
+  it('"Send now" sends one step to one membership whatever its dates, once, and says why when it cannot', async () => {
+    const m = await endingIn(25);
+    const admin = await staff('operations');
+    const url = `/api/admin/renewals/${m.membershipId}/send`;
+    expect((await admin.c.post(url, { step: 'spam' })).status).toBe(400);
+    expect((await admin.c.post(url, {})).status).toBe(400);
+    expect((await admin.c.post('/api/admin/renewals/not-an-id/send', { step: 'week' })).status).toBe(400);
+
+    expectOk(await admin.c.post(url, { step: 'week' }));
+    expect(mails(m)).toHaveLength(1);
+    expect(mails(m)[0].subject).toMatch(/membership ends in 25 days/);
+    expect(await dbRows(`select status from public.email_log where kind='membership_renewal_reminder' and ref_id=$1`, [m.membershipId])).toEqual([{ status: 'sent' }]);
+
+    const again = await admin.c.post(url, { step: 'week' });
+    expect(again.status).toBe(409);
+    expect(JSON.stringify(again.body)).toMatch(/already gone/);
+    expect(mails(m)).toHaveLength(1);
+
+    // a step that is switched off cannot be sent by hand either
+    await setRenewalSettings({ ...OPEN_ALL_DAY, last: { on: false, days: 2 } });
+    const off = await admin.c.post(url, { step: 'last' });
+    expect(off.status).toBe(409);
+    expect(JSON.stringify(off.body)).toMatch(/switched off/);
+    // the master switch (for the automatic job) does not stop a person
+    await setRenewalSettings({ ...OPEN_ALL_DAY, on: false });
+    expectOk(await admin.c.post(url, { step: 'last' }));
+    expect(mails(m)).toHaveLength(2);
+  });
+
+  it('"Send now": no email address, email not set up, and a membership that does not exist', async () => {
+    const noMail = await endingIn(2, { email: false });
+    const admin = await staff('operations');
+    const none = await admin.c.post(`/api/admin/renewals/${noMail.membershipId}/send`, { step: 'week' });
+    expect(none.status).toBe(422);
+    expect(JSON.stringify(none.body)).toMatch(/no email address/);
+
+    const gone = await admin.c.post(`/api/admin/renewals/${crypto.randomUUID()}/send`, { step: 'week' });
+    expect(gone.status).toBeGreaterThanOrEqual(400);
+    expect(gone.status).toBeLessThan(500);
+
+    const m = await endingIn(2);
+    setMailTransport(null);
+    const down = await admin.c.post(`/api/admin/renewals/${m.membershipId}/send`, { step: 'week' });
+    expect(down.status).toBe(503);
+    expect(expectOk(await admin.c.get('/api/admin/renewals')).body.mail_ready).toBe(false);
+
+    // a mail that fails is recorded, says so, and the automatic job will try again
+    setMailTransport(async () => { throw new Error('Resend is down'); });
+    const failed = await admin.c.post(`/api/admin/renewals/${m.membershipId}/send`, { step: 'week' });
+    expect(failed.status).toBe(502);
+    expect(await dbRows(`select status, attempts from public.email_log where kind='membership_renewal_reminder' and ref_id=$1`, [m.membershipId])).toEqual([{ status: 'failed', attempts: 1 }]);
+    setMailTransport(recorder);
+    expectOk(await admin.c.post('/api/admin/reminders/run'));
+    expect(mails(m)).toHaveLength(1);
   });
 });

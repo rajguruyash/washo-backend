@@ -359,7 +359,7 @@ describe('picking every date by hand', () => {
       expect((await washesOf(s, settled.membership_id)).map((w: any) => [w.d, w.kind])).toEqual(dates.map((d) => [d.date, d.kind]));
     }));
 
-  it('refuses the wrong counts, two on one day, a day outside the term, too many in a week, and a day the vehicle already has a wash', async () =>
+  it('refuses the wrong counts, two on one day, a day outside the term, and a day the vehicle already has a wash; washes on days one after another are fine', async () =>
     inTx(async (s) => {
       const c = await customer(s);
       const dates = await monthDates(s, c, 2, 2, 1);
@@ -369,10 +369,8 @@ describe('picking every date by hand', () => {
       expect(await go(dates.slice(0, 3))).toMatch(/Choose exactly 2 Body washes and 2 Deep cleans for this plan \(you have 1 and 2\)|Choose exactly 2 Body/);
       expect(await go([...dates.slice(0, 3), { date: dates[2].date, kind: 'deep' }])).toMatch(/same day/);
       expect(await go([...dates.slice(0, 3), { date: addDays(dates[3].date, 60), kind: dates[3].kind }])).toMatch(/Every wash must be between/);
-      expect(await go([{ date: addDays(start, 1), kind: 'body' }, { date: addDays(start, 2), kind: 'body' }, { date: addDays(start, 3), kind: 'deep' }, { date: addDays(start, 4), kind: 'deep' }])).toMatch(/Every wash must be between|No more than 1 wash in one week/);
-      // at most ceil(4/4) = 1 a week for a 4-a-month plan
-      const mon = (n: number) => { let d = addDays(start, 2); while (dow(d) !== 1) d = addDays(d, 1); return addDays(d, 7 * n); };
-      expect(await go([{ date: mon(0), kind: 'body' }, { date: addDays(mon(0), 1), kind: 'body' }, { date: mon(1), kind: 'deep' }, { date: mon(2), kind: 'deep' }])).toMatch(/No more than 1 wash in one week/);
+      // one wash a day is the only rule: four washes on four days in a row, all in the same week, are fine (no "no more than N a week")
+      expect(await go([{ date: addDays(start, 1), kind: 'body' }, { date: addDays(start, 2), kind: 'body' }, { date: addDays(start, 3), kind: 'deep' }, { date: addDays(start, 4), kind: 'deep' }])).toBeNull();
       await s.as('postgres');
       await s.q(`insert into public.bookings (customer_profile_id,vehicle_id,service_id,booking_type,scheduled_date,time_slot,status,address_id,parking_location)
                  values ($1,$2,(select id from public.services where code='car-body-wash'),'on_demand',$3::date,'morning','confirmed',$4,'P1')`, [c.u.profileId, c.veh, dates[0].date, c.addr]);

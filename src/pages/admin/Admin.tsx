@@ -29,14 +29,16 @@ import Export from './Export';
 import Campaigns from './Campaigns';
 import History from './History';
 import People from './People';
+import Discounts from './Discounts';
 import ServicesAdmin from './ServicesAdmin';
+import Renewals from './Renewals';
 import Settings from './Settings';
 import Support from './Support';
 import Team from './Team';
 import { Loading, errText } from './shared';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
 const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
   { value: 'overview', label: 'Dashboard', area: 'overview' },
@@ -46,6 +48,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'requests', label: 'Requests', area: 'requests' },
   { value: 'history', label: 'History', area: 'history' },
   { value: 'services', label: 'Services & prices', area: 'services' },
+  { value: 'discounts', label: 'Discounts', area: (a) => canDo(a, 'services') || canDo(a, 'campaigns') },
   { value: 'campaigns', label: 'Campaigns', area: 'campaigns' },
   { value: 'capacity', label: 'Capacity', area: 'capacity' },
   { value: 'attention', label: 'Payments & refunds', area: 'payments' },
@@ -56,7 +59,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'settings', label: 'Settings', area: 'settings' },
 ];
 /** The area a tab's content is governed by (used to say "view only"). */
-const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', requests: 'requests', history: 'history', services: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
@@ -212,7 +215,7 @@ function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: 
 }
 
 // ───────────────────────── memberships ─────────────────────────
-function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
+function Memberships({ showWashes, canManage }: { showWashes: (id: string) => void; canManage: boolean }) {
   const { data, isLoading, isError, refetch } = useAdminMemberships();
   const workers = useAdminWorkers();
   const act = useAdminAction();
@@ -224,25 +227,11 @@ function Memberships({ showWashes }: { showWashes: (id: string) => void }) {
     if (!open) return;
     try { await act.mutateAsync({ path: `memberships/${open.id}/assign-worker`, body: { worker_profile_id: worker || null } }); toast.success(worker ? 'Specialist assigned to every remaining wash' : 'Washes released to the pool'); setOpen(null); } catch (e) { toast.error(errText(e)); }
   };
-  // Renewal reminders (an email a week before a membership ends) go out by themselves every hour. These two buttons are for checking and for sending at once.
-  const reminders = async (dry: boolean) => {
-    try {
-      const r = (await act.mutateAsync({ path: `reminders/run${dry ? '?dry=1' : ''}`, body: {} })) as { ready: boolean; due: number; sent: number; already: number; failed: number; stages?: { stage: 'week' | 'last' | 'ended'; due: number; sent: number }[] };
-      const names = { week: 'a week before the end', last: 'in the last days', ended: 'after it ended' } as const;
-      const split = (key: 'due' | 'sent') => (r.stages ?? []).filter((s) => s[key] > 0).map((s) => `${s[key]} ${names[s.stage]}`).join(', ');
-      if (!r.ready) toast.error('Renewal emails are not set up yet: the email key or the latest database update is missing.');
-      else if (dry) toast.success(r.due ? `${r.due} renewal email${r.due > 1 ? 's are' : ' is'} due (${split('due')}).` : 'Nobody needs a renewal email right now.');
-      else toast.success(r.due ? `Renewal emails: ${r.sent} sent${split('sent') ? ` (${split('sent')})` : ''}${r.failed ? `, ${r.failed} failed` : ''}${r.already ? `, ${r.already} already sent` : ''}.` : 'Nobody needs a renewal email right now.');
-    } catch (e) { toast.error(errText(e)); }
-  };
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading) return <Loading />;
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-xl text-sm text-fog">Customers get a renewal email a week before their membership ends, again in its last days, and once more if it ended without being renewed, each time with their plan filled in. They go out by themselves (and the customer's own page shows a Renew card too); these buttons check or send them now.</p>
-        <div className="flex gap-2"><Button size="sm" variant="glass" loading={act.isPending} onClick={() => void reminders(true)}>Who needs one?</Button><Button size="sm" loading={act.isPending} onClick={() => void reminders(false)}>Send reminders now</Button></div>
-      </div>
+      <Renewals canEdit={canManage} />
       <div className="grid gap-4 lg:grid-cols-2">
         {data?.map((m) => (
           <div key={m.id} className="glass p-5">
@@ -390,9 +379,10 @@ export default function Admin() {
           {tab === 'requests' && <Requests />}
           {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} canAdd={canDo(access, 'bookings', 'manage')} onAdd={() => setAdding({ customerId: null })} /></>)}
           {tab === 'history' && <History />}
-          {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} />}
+          {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} canManage={canDo(access, 'memberships', 'manage')} />}
           {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
           {tab === 'services' && <ServicesAdmin />}
+          {tab === 'discounts' && <Discounts rules={canDo(access, 'services')} editRules={canDo(access, 'services', 'manage')} coupons={canDo(access, 'campaigns')} editCoupons={canDo(access, 'campaigns', 'manage')} />}
           {tab === 'campaigns' && <Campaigns />}
           {tab === 'capacity' && <Capacity />}
           {tab === 'attention' && <Attention />}

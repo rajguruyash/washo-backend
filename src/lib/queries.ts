@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
-  ActivityEvent, Address, AdminAddress, AdminBooking, AdminDashboard, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, CouponUse, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -51,7 +51,7 @@ export type PreviewInput = { vehicle_id: string; duration_months: number; time_s
 export const usePlanPreview = (input: PreviewInput | null) =>
   useQuery({ queryKey: ['plan-preview', input], queryFn: () => post<PlanPreview & { success: boolean }>('/membership-preview', input), enabled: Boolean(input), staleTime: 30_000, retry: false, placeholderData: keepPreviousData });
 
-export type EstimateInput = { vehicle_type: VehicleType; duration_months: number } & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: { body: number; deep: number }; weekly_pattern?: never });
+export type EstimateInput = { vehicle_type: VehicleType; duration_months: number; /** a coupon the customer typed (washes-in-a-month plans, signed in) */ coupon?: string } & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: { body: number; deep: number }; weekly_pattern?: never });
 
 /** Live price estimate from the rate card (the database runs the calculator). Null input = nothing to price yet. */
 export const useEstimate = (input: EstimateInput | null) => {
@@ -192,6 +192,8 @@ export type MembershipRequestInput = {
   customer_notes?: string;
   /** Exact dates for every wash, instead of letting the plan land on its weekdays. */
   custom_dates?: ExactDate[];
+  /** A coupon the customer typed on the last step (washes-in-a-month plans). */
+  coupon?: string;
 } & ({ weekly_pattern: PatternItem[]; monthly?: never } | { monthly: MonthlyPlan; weekly_pattern?: never });
 
 /** Pay for a custom membership straight away: the server prices it from the rate card and opens the Razorpay order. */
@@ -422,6 +424,9 @@ export const useAdminSupportTicket = (id: string | null) =>
   useQuery({ queryKey: keys.admin('support-ticket', id), queryFn: () => get<SupportThread & { success: boolean }>(`/admin/support/${id}`), enabled: Boolean(id) });
 
 export const useAdminSettings = () => useQuery({ queryKey: keys.admin('settings'), queryFn: () => get<{ settings: AdminSettings; security: AdminSecurity }>('/admin/settings') });
+export const useAdminRenewals = () => useQuery({ queryKey: keys.admin('renewals'), queryFn: () => get<AdminRenewals & { success: boolean }>('/admin/renewals') });
+export const useAdminCoupons = () => useQuery({ queryKey: keys.admin('coupons'), queryFn: async () => (await get<{ coupons: AdminCoupon[] }>('/admin/coupons')).coupons });
+export const useAdminCouponUses = (id: string | null) => useQuery({ queryKey: keys.admin('coupon-uses', id), queryFn: async () => (await get<{ uses: CouponUse[] }>(`/admin/coupons/${id}/uses`)).uses, enabled: Boolean(id) });
 export const useAdminTeam = () => useQuery({ queryKey: keys.admin('team'), queryFn: async () => (await get<{ team: TeamMember[] }>('/admin/team')).team });
 
 /** Is the site paused for maintenance? Anyone may ask. */

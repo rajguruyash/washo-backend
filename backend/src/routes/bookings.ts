@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { campaignNames } from '../campaigns';
+import { withCouponGuard } from '../couponGuard';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
 import { monthlyNotInstalled, monthlyPlanSchema } from '../plan';
@@ -198,6 +199,8 @@ const membershipCheckoutSchema = z.object({
   customer_notes: z.string().trim().max(500).optional(),
   // Exact dates, instead of letting the plan land on its weekdays. The database checks every rule again.
   custom_dates: z.array(z.object({ date: isoDate, kind: z.enum(['body', 'deep']) })).min(1).max(400).optional(),
+  // A coupon the customer typed on the last step (a plan chosen as washes in a month). The database prices it and says if it cannot be used.
+  coupon: z.string().trim().max(30).optional(),
 }).refine((x) => Boolean(x.weekly_pattern) !== Boolean(x.monthly), { message: 'Choose how many washes you want each month.', path: ['monthly'] });
 
 // Pay for a custom membership straight away. The database validates the plan, prices it from the rate card (every discount explicit)
@@ -209,15 +212,18 @@ bookingsRouter.post(
   requirePhone,
   asyncHandler(async (req, res) => {
     const m = parse(membershipCheckoutSchema, req.body);
+    if (m.coupon && !m.monthly) throw new HttpError(400, 'coupon_plan', 'A coupon is for a membership chosen as washes in a month.');
+    // With no coupon the call is exactly the one the database has always had (so a database that has not been updated yet still works); with one, the coupon rides along.
+    const startMonthly = () =>
+      req.db(async (c) => {
+        const args = [m.vehicle_id, m.monthly!.body, m.monthly!.deep, m.monthly!.weekdays, m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null, m.custom_dates ? JSON.stringify(m.custom_dates) : null];
+        const sql = m.coupon
+          ? 'SELECT public.start_monthly_membership_checkout($1, $2, $3, $4::integer[], $5, $6::public.time_slot, $7::date, $8, $9, $10, NULL, $11::jsonb, $12) AS r'
+          : 'SELECT public.start_monthly_membership_checkout($1, $2, $3, $4::integer[], $5, $6::public.time_slot, $7::date, $8, $9, $10, NULL, $11::jsonb) AS r';
+        return (await c.query(sql, m.coupon ? [...args, m.coupon] : args)).rows[0].r;
+      });
     const intent = m.monthly
-      ? await req.db(async (c) =>
-          (
-            await c.query('SELECT public.start_monthly_membership_checkout($1, $2, $3, $4::integer[], $5, $6::public.time_slot, $7::date, $8, $9, $10, NULL, $11::jsonb) AS r', [
-              m.vehicle_id, m.monthly!.body, m.monthly!.deep, m.monthly!.weekdays, m.duration_months, m.time_slot, m.start_date, m.address_id ?? null, m.parking_location ?? null, m.customer_notes ?? null,
-              m.custom_dates ? JSON.stringify(m.custom_dates) : null,
-            ])
-          ).rows[0].r
-        ).catch((err) => { throw monthlyNotInstalled(err) ?? err; })
+      ? await (m.coupon ? withCouponGuard(req.session!.claims.sub, startMonthly) : startMonthly()).catch((err) => { throw monthlyNotInstalled(err) ?? err; })
       : await req.db(async (c) =>
       (
         await (m.custom_dates

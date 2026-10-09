@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { parse } from '../errors';
+import { HttpError, parse } from '../errors';
 import { withAnon } from '../db';
 import { asyncHandler, optionalSession } from '../middleware/http';
+import { withCouponGuard } from '../couponGuard';
 import { monthlyNotInstalled, monthlyPlanSchema } from '../plan';
 import { cached } from '../publicCache';
 
@@ -45,9 +46,20 @@ catalogRouter.post(
         weekly_pattern: z.array(z.object({ weekday: z.number().int().min(0).max(6), kind: z.enum(['body', 'deep']) })).min(1).max(7).optional(),
         monthly: monthlyPlanSchema.pick({ body: true, deep: true }).optional(),
         duration_months: z.number().int().refine((n) => [1, 3, 6, 12].includes(n), 'Choose 1, 3, 6 or 12 months.'),
+        // A coupon the customer typed (only for a plan chosen as washes in a month, and only for a signed-in customer: it is checked against who is asking)
+        coupon: z.string().trim().max(30).optional(),
       }).refine((x) => Boolean(x.weekly_pattern) !== Boolean(x.monthly), 'Send either a weekly pattern or the washes in a month.'),
       req.body
     );
+    const coupon = b.coupon ? b.coupon : null;
+    if (coupon) {
+      if (!b.monthly) throw new HttpError(400, 'coupon_plan', 'A coupon is for a membership chosen as washes in a month.');
+      if (!req.session) throw new HttpError(401, 'sign_in', 'Sign in to use a coupon.');
+      const estimate = await withCouponGuard(req.session.claims.sub, () =>
+        req.db(async (c) => (await c.query('SELECT public.estimate_monthly_price_with_coupon($1::public.vehicle_type, $2, $3, $4, $5) AS q', [b.vehicle_type, b.monthly!.body, b.monthly!.deep, b.duration_months, coupon])).rows[0].q)
+      );
+      return res.json({ success: true, estimate });
+    }
     const ask = (run: typeof withAnon) =>
       run(async (c) =>
         b.monthly

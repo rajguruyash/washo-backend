@@ -92,6 +92,8 @@ export interface QuoteBreakdown {
   frequency_discount: { bp: number; cents: number; label: string | null };
   duration_discount: { bp: number; cents: number; label: string | null };
   cap: { max_bp: number; applied: boolean; adjustment_cents: number };
+  /** An extra percentage off the plan price, from a coupon the customer typed. Already part of total_discount_cents and final_cents. */
+  coupon?: { id: string; code: string; bp: number; cents: number };
   total_discount_cents: number;
   adjustment: { cents: number; reason: string | null };
   final_cents: number;
@@ -694,6 +696,45 @@ export interface AdminSettings {
   maintenance_message: string;
   big_refund_threshold_cents: number;
 }
+export interface AdminCoupon {
+  id: string;
+  code: string;
+  discount_bp: number;
+  label: string | null;
+  is_active: boolean;
+  expires_on: string | null;
+  max_uses: number | null;
+  once_per_customer: boolean;
+  created_at: string;
+  uses: number;
+  saved_cents: number;
+  last_used_at: string | null;
+  status: 'live' | 'off' | 'expired' | 'used_up';
+}
+export interface CouponUse { id: string; at: string; customer_name: string | null; customer_phone: string | null; reference_code: string | null; discount_cents: number; membership_id: string; plan_cents: number }
+
+export type RenewalStep = 'week' | 'last' | 'ended';
+export interface RenewalStepSetting { on: boolean; days: number }
+export interface RenewalSettings { on: boolean; week: RenewalStepSetting; last: RenewalStepSetting; ended: RenewalStepSetting; from_hour: number; to_hour: number }
+export interface RenewalStepStatus { status: 'sent' | 'sending' | 'failed' | 'skipped'; at: string; attempts: number; error: string | null }
+export interface RenewalUpcoming {
+  membership_id: string;
+  reference_code: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  email: string | null;
+  vehicle_model: string | null;
+  registration_number: string | null;
+  end_date: string;
+  days_left: number;
+  plan_washes_a_month: number | null;
+  plan_washes_a_week: number | null;
+  duration_months: number;
+  renewed: boolean;
+  steps: Record<RenewalStep, RenewalStepStatus | null>;
+}
+export interface RenewalSent { id: string; kind: string; membership_id: string; reference_code: string | null; customer_name: string | null; to_email: string; status: RenewalStepStatus['status']; attempts: number; error: string | null; at: string }
+export interface AdminRenewals { settings: RenewalSettings; upcoming: RenewalUpcoming[]; recent: RenewalSent[]; mail_ready: boolean }
 export interface AdminSecurity { two_step: boolean; two_step_ready: boolean; idle_minutes: number; super_admin_email: string }
 export interface PublicSettings { maintenance_mode: boolean; maintenance_message: string }
 

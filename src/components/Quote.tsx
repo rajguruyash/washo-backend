@@ -31,6 +31,7 @@ export function QuoteBreakdownView({ q }: { q: QuoteBreakdown }) {
       {q.cap.applied && (
         <Row label={`Discount cap (max ${percent(q.cap.max_bp)})`} sub="Combined discounts never exceed this" value={`+${rupees(q.cap.adjustment_cents)}`} tone="warn" />
       )}
+      {q.coupon && <Row label={`Coupon ${q.coupon.code} (${percent(q.coupon.bp)})`} sub="Extra off the plan price" value={`−${rupees(q.coupon.cents)}`} tone="ok" />}
       {q.adjustment.cents !== 0 && (
         <Row
           label="Adjustment by WASHO"

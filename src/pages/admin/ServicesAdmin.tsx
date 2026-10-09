@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Pencil, Plus, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
 import { Badge } from '../../components/ui/Badge';
@@ -10,7 +10,7 @@ import { duration, rupees, vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminPricing, useAdminServices } from '../../lib/queries';
 import type { AdminService, VehicleType } from '../../lib/types';
-import { ConfirmSheet, Loading, errText, percentToBp, rupeesToCents } from './shared';
+import { ConfirmSheet, Loading, errText, rupeesToCents } from './shared';
 
 // ───────────────────────── a service ─────────────────────────
 function ServiceSheet({ open, service, onClose }: { open: boolean; service: AdminService | null; onClose: () => void }) {
@@ -156,9 +156,9 @@ function Services() {
   );
 }
 
-// ───────────────────────── discounts and settings ─────────────────────────
-const SETTING_LABELS: Record<string, { label: string; unit: string; percent?: boolean }> = {
-  max_total_discount_bp: { label: 'Biggest total membership discount', unit: '%', percent: true },
+// ───────────────────────── pricing rules ─────────────────────────
+// (The membership discounts and the biggest total discount live on the Discounts tab.)
+const SETTING_LABELS: Record<string, { label: string; unit: string }> = {
   weeks_per_month: { label: 'A membership month is billed as', unit: 'weeks' },
   quote_validity_days: { label: 'An old quote can be accepted for', unit: 'days' },
   membership_min_lead_days: { label: 'A membership can start from', unit: 'days from today' },
@@ -166,80 +166,36 @@ const SETTING_LABELS: Record<string, { label: string; unit: string; percent?: bo
   payment_intent_minutes: { label: 'A started payment stays open for', unit: 'minutes' },
 };
 
-function Discounts() {
+function PricingRules() {
   const { data, isLoading, isError, refetch } = useAdminPricing();
   const act = useAdminAction();
   const toast = useToast();
-  const [edits, setEdits] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<Record<string, string>>({});
-  const [adding, setAdding] = useState(false);
-  const [nd, setNd] = useState({ kind: 'frequency' as 'frequency' | 'duration', key: '', pct: '', label: '' });
   useEffect(() => {
-    if (!data) return;
-    setEdits(Object.fromEntries(data.discounts.map((d) => [`${d.kind}:${d.key}`, String(d.discount_bp / 100)])));
-    setSettings(Object.fromEntries(data.settings.map((s) => [s.key, String(SETTING_LABELS[s.key]?.percent ? s.value / 100 : s.value)])));
+    if (data) setSettings(Object.fromEntries(data.settings.map((s) => [s.key, String(s.value)])));
   }, [data]);
-
   const run = async (fn: () => Promise<unknown>, ok: string) => { try { await fn(); toast.success(ok); } catch (err) { toast.error(errText(err)); } };
-  const saveDiscount = (kind: 'frequency' | 'duration', key: number, label: string, pct: string) => {
-    const bp = percentToBp(pct);
-    if (bp == null) return toast.error('Enter a percentage.');
-    return run(() => act.mutateAsync({ method: 'PUT', path: 'discounts', body: { kind, key, discount_bp: bp, label } }), 'Discount saved. New memberships use it from now on.');
-  };
 
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
-  const group = (kind: 'frequency' | 'duration') => data.discounts.filter((d) => d.kind === kind);
+  const rules = data.settings.filter((s) => s.key !== 'max_total_discount_bp');
 
   return (
-    <section className="space-y-6">
-      <h2 className="text-lg font-bold">Membership discounts</h2>
-      <p className="-mt-4 text-sm text-fog">Every discount is shown to the customer as its own line. Together they never go past the cap below. Existing memberships keep the price they paid.</p>
-      {(['frequency', 'duration'] as const).map((kind) => (
-        <div key={kind} className="space-y-2">
-          <h3 className="text-sm font-bold text-mist">{kind === 'frequency' ? 'By washes in a month' : 'By membership length'}</h3>
-          {group(kind).map((d) => (
-            <div key={`${d.kind}:${d.key}`} className="panel flex flex-wrap items-center gap-3 p-3">
-              <div className="min-w-0 flex-1 text-sm"><p className="font-semibold">{d.label}</p><p className="text-xs text-fog">{kind === 'frequency' ? `${d.key === 7 ? '28' : `${4 * d.key} to ${4 * d.key + 3}`} washes a month (${d.key} a week)` : `${d.key} month${d.key > 1 ? 's' : ''}`}</p></div>
-              <div className="w-28"><Input label="Percent" aria-label={`${d.label} percent`} inputMode="decimal" value={edits[`${d.kind}:${d.key}`] ?? ''} onChange={(e) => setEdits({ ...edits, [`${d.kind}:${d.key}`]: e.target.value })} /></div>
-              <Button size="sm" loading={act.isPending} disabled={percentToBp(edits[`${d.kind}:${d.key}`] ?? '') === d.discount_bp} onClick={() => void saveDiscount(d.kind, d.key, d.label, edits[`${d.kind}:${d.key}`] ?? '')}>Save</Button>
-              <Button size="sm" variant="ghost" aria-label={`Remove ${d.label}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => void run(() => act.mutateAsync({ path: 'discounts/remove', body: { kind: d.kind, key: d.key } }), 'Discount removed')} />
-            </div>
-          ))}
-          {!group(kind).length && <p className="panel p-3 text-center text-sm text-fog">None.</p>}
-        </div>
-      ))}
-      <Button size="sm" variant="glass" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>Add a discount</Button>
-
-      <div className="space-y-3 border-t border-white/10 pt-6">
-        <h2 className="text-lg font-bold">Pricing rules</h2>
-        {data.settings.map((s) => {
-          const meta = SETTING_LABELS[s.key] ?? { label: s.key, unit: '' };
-          const raw = settings[s.key] ?? '';
-          const value = meta.percent ? percentToBp(raw) : raw.trim() === '' ? null : Math.round(Number(raw));
-          return (
-            <div key={s.key} className="panel flex flex-wrap items-center gap-3 p-3">
-              <div className="min-w-0 flex-1 text-sm"><p className="font-semibold">{meta.label}</p><p className="text-xs text-fog">{s.description}</p></div>
-              <div className="w-28"><Input label={meta.unit || 'Value'} aria-label={meta.label} inputMode="decimal" value={raw} onChange={(e) => setSettings({ ...settings, [s.key]: e.target.value })} /></div>
-              <Button size="sm" loading={act.isPending} disabled={value == null || Number.isNaN(value) || value === s.value} onClick={() => void run(() => act.mutateAsync({ method: 'PUT', path: 'pricing-settings', body: { key: s.key, value } }), 'Saved')}>Save</Button>
-            </div>
-          );
-        })}
-      </div>
-
-      <Sheet open={adding} onClose={() => setAdding(false)} size="sm" title="Add a discount" description="Adding one for a number that already has a discount replaces it (the old one stays on record)."
-        footer={<Button full size="lg" loading={act.isPending} disabled={!nd.key || percentToBp(nd.pct) == null || nd.label.trim().length < 2}
-          onClick={async () => { await saveDiscount(nd.kind, Number(nd.key), nd.label.trim(), nd.pct); setAdding(false); setNd({ kind: 'frequency', key: '', pct: '', label: '' }); }}>Save discount</Button>}>
-        <div className="space-y-4">
-          <Select label="Applies to" value={nd.kind} onChange={(e) => setNd({ ...nd, kind: e.target.value as 'frequency' | 'duration' })}>
-            <option value="frequency">Washes in a month</option>
-            <option value="duration">Membership length</option>
-          </Select>
-          <Input label={nd.kind === 'frequency' ? 'Washes a week equivalent (1 to 7: 4 a month = 1, 8 = 2, 12 = 3 ... 28 = 7)' : 'Months (1, 3, 6 or 12)'} inputMode="numeric" value={nd.key} onChange={(e) => setNd({ ...nd, key: e.target.value.replace(/\D/g, '') })} />
-          <Input label="Percent off" inputMode="decimal" value={nd.pct} onChange={(e) => setNd({ ...nd, pct: e.target.value })} hint="Up to 50." />
-          <Input label="Label the customer sees" value={nd.label} onChange={(e) => setNd({ ...nd, label: e.target.value })} maxLength={60} />
-        </div>
-      </Sheet>
+    <section className="space-y-3">
+      <h2 className="text-lg font-bold">Pricing rules</h2>
+      <p className="-mt-1 text-sm text-fog">Discounts and coupons are on the Discounts tab.</p>
+      {rules.map((s) => {
+        const meta = SETTING_LABELS[s.key] ?? { label: s.key, unit: '' };
+        const raw = settings[s.key] ?? '';
+        const value = raw.trim() === '' ? null : Math.round(Number(raw));
+        return (
+          <div key={s.key} className="panel flex flex-wrap items-center gap-3 p-3">
+            <div className="min-w-0 flex-1 text-sm"><p className="font-semibold">{meta.label}</p><p className="text-xs text-fog">{s.description}</p></div>
+            <div className="w-28"><Input label={meta.unit || 'Value'} aria-label={meta.label} inputMode="decimal" value={raw} onChange={(e) => setSettings({ ...settings, [s.key]: e.target.value })} /></div>
+            <Button size="sm" loading={act.isPending} disabled={value == null || Number.isNaN(value) || value === s.value} onClick={() => void run(() => act.mutateAsync({ method: 'PUT', path: 'pricing-settings', body: { key: s.key, value } }), 'Saved')}>Save</Button>
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -248,7 +204,7 @@ export default function ServicesAdmin() {
   return (
     <div className="space-y-12">
       <Services />
-      <Discounts />
+      <PricingRules />
     </div>
   );
 }

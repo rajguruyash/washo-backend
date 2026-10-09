@@ -2,7 +2,7 @@ import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../lib/cn';
 import { RUSH_NOTE } from '../lib/crowd';
-import { exactDatesProblem, weekKey, type Need } from '../lib/schedule';
+import { exactDatesProblem, type Need } from '../lib/schedule';
 import type { CapacityDay, ExactDate, SlotId, WashKind } from '../lib/types';
 
 const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -13,18 +13,17 @@ const longDay = (date: string) => new Intl.DateTimeFormat('en-IN', { weekday: 's
 /**
  * Every wash of the membership on a calendar, picked by hand. Body washes are blue and Deep cleans yellow; choose a kind, then tap days.
  * Busy days are marked amber and rush days red (with a note about a slight delay), but any of them can be picked; nothing before the earliest start (not today or tomorrow) and
- * nothing after the term can be chosen; one wash a day; no more in a week than the plan's washes per week. The database checks all of it again before payment.
+ * nothing after the term can be chosen; one wash a day (any days, even one after another). The database checks all of it again before payment.
  */
-export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, onChange, onReset, crowd, slot }: {
-  start: string; end: string; minDate: string; need: Need; perWeek: number; value: ExactDate[]; onChange: (v: ExactDate[]) => void; onReset: () => void; crowd?: Record<string, CapacityDay>; slot: SlotId | null;
+export function ExactDatesCalendar({ start, end, minDate, need, value, onChange, onReset, crowd, slot }: {
+  start: string; end: string; minDate: string; need: Need; value: ExactDate[]; onChange: (v: ExactDate[]) => void; onReset: () => void; crowd?: Record<string, CapacityDay>; slot: SlotId | null;
 }) {
   const [mode, setMode] = useState<WashKind>(need.body > 0 ? 'body' : 'deep');
   const [note, setNote] = useState('');
   const kindOf = useMemo(() => new Map(value.map((v) => [v.date, v.kind])), [value]);
   const have = { body: value.filter((v) => v.kind === 'body').length, deep: value.filter((v) => v.kind === 'deep').length };
   const left = { body: need.body - have.body, deep: need.deep - have.deep };
-  const perWeekCount = useMemo(() => { const m = new Map<string, number>(); for (const v of value) m.set(weekKey(v.date), (m.get(weekKey(v.date)) ?? 0) + 1); return m; }, [value]);
-  const problem = exactDatesProblem({ value, need, perWeek, minDate, end });
+  const problem = exactDatesProblem({ value, need, minDate, end });
   const stateOf = (date: string) => (slot ? crowd?.[date]?.slots[slot]?.state : crowd?.[date]?.state);
   const rushChosen = value.filter((v) => stateOf(v.date) === 'full').length;
 
@@ -55,7 +54,6 @@ export function ExactDatesCalendar({ start, end, minDate, need, perWeek, value, 
       else setNote('All your washes are placed. Tap a chosen day to move it.');
       return;
     }
-    if ((perWeekCount.get(weekKey(date)) ?? 0) >= perWeek) { setNote(`No more than ${perWeek} wash${perWeek > 1 ? 'es' : ''} in one week.`); return; }
     onChange([...value, { date, kind: mode }]);
     if (left[mode] - 1 === 0 && left[mode === 'body' ? 'deep' : 'body'] > 0) setMode(mode === 'body' ? 'deep' : 'body');
   };

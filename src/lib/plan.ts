@@ -7,10 +7,7 @@ export const MAX_PER_MONTH = 28;
 /** Weekdays a month needs so that many washes fit: a weekday comes round at least 4 times a month, and a vehicle is washed once a day. */
 export const daysNeeded = (washesPerMonth: number) => Math.max(1, Math.ceil(washesPerMonth / 4));
 
-/** Most washes allowed in one week for a plan of that many a month (used by the exact-dates calendar). */
-export const perWeekCap = daysNeeded;
-
-export const minWashesMessage = (n: number) => `Choose at least ${MIN_PER_MONTH} washes a month${n > 0 ? ` (you have ${n})` : ''}.`;
+export const minWashesMessage = () => `Choose at least a total of ${MIN_PER_MONTH} washes.`;
 
 /** The weekday names of a set of days (Mon · Thu), Monday first. */
 export const dayNames = (days: number[] | null | undefined) =>

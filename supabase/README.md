@@ -212,3 +212,28 @@ Production dry run (rolled back): data fingerprint unchanged; 3 a week x 3 month
 
 `20261004000029_membership_renewal_stages.sql`, additive. `svc_membership_renewals_due(kind, from_days, to_days, requires_kind, requires_days, limit)` lists who is due for one of three emails (`membership_renewal_reminder`: ends in 1-7 days; `membership_renewal_last_call`: ends in 0-2 days, only after the first went out 2+ days earlier; `membership_renewal_ended`: ended 1-3 days ago). A plan's last day is the day its washes stop, so "0 days" is the last day itself.
 Excluded: already renewed, archived, no email, cancelled; once per kind per membership (`email_log`); never two renewal emails within 24 hours. Only the service role and the website's database role can call it. `svc_membership_reminders_due()` (first step only) is kept.
+
+## Admin controls for the renewal emails (migration 30)
+
+`20261004000030_renewal_email_controls.sql`, additive and re-runnable. One new row in `app_settings` (`renewal_emails`, defaults = exactly what the emails always did: automatic on, heads-up 7 days, last reminder 2 days, after-it-ended 3 days, sending 9 to 20 Pune time) and these functions:
+- `svc_renewal_settings()` (service role / the website's database role only): what the job reads. `app_private.renewal_settings()` fills any missing part from the defaults, so a half-written row cannot break the job.
+- `admin_get_renewal_settings()` (needs to VIEW Memberships), `admin_set_renewal_settings(jsonb)` (needs to MANAGE Memberships: Operations, super admin): checked (switches are true/false; days heads-up 1-14, last 0-7, ended 1-14; hours 0-23 before 1-24; whole numbers only) and audited as `renewal_settings_changed`.
+- `admin_renewals_overview()`: memberships ending within 14 days or ended within 7 with what each email did, whether they renewed, and the 30 latest emails. `admin_renewal_row(uuid)`: one membership in the shape the email needs, for "Send now".
+Production dry run (rolled back, production checked untouched afterwards): data fingerprint unchanged; the job and the Admin page read the defaults; the owner saved a change (audited) and bad settings were refused; anon is refused.
+
+## Exact dates with one wash a day, and a spread that keeps clear of the rush (migration 31)
+
+`20261004000031_exact_dates_any_days_and_rush_aware_spread.sql`, additive and re-runnable; no table and no stored row is touched.
+- `app_private.check_custom_dates_counts` (replaced, same arguments): the "no more than N washes in one week" rule is gone. What remains: exactly the plan's Body and Deep counts for the term, one wash a day, inside the term, not before the earliest start, never on a day the vehicle already has a wash. (`p_per_week` is no longer used. A plan chosen the older way, washes a week, keeps its own rules.)
+- `app_private.day_load(date)` (new): how full a day is as a share of what that day can take (weekend vs weekday limits from `capacity_rules`); only used to rank days.
+- `app_private.plan_monthly_washes` (replaced, same arguments and result): each month's candidate days are cut into as many equal parts as there are washes, one wash per part, as before; inside its part a wash takes the quietest day, and among equally quiet days the one that was always picked, so with no rush the dates are unchanged. Used by the preview and when the payment is verified.
+
+## Coupons (migration 32)
+
+`20261004000032_coupons.sql`, additive. **The shared database already has a `public.coupons` table that the mobile app uses (`discount_pct`, `validate_coupon`); it is not touched.** New tables `membership_coupons` (code A-Z0-9 3 to 20, `discount_bp` 1 to 5000, `is_active`, optional `expires_on` and `max_uses`, `once_per_customer`) and `membership_coupon_redemptions` (one row per paid membership that used a coupon, unique per membership); both are closed to everyone but the functions.
+- `app_private.apply_coupon(quote, code, customer)` puts a coupon on a price quote: extra percentage of the subtotal, added to `total_discount_cents`, `final_cents` lowered, and a `coupon` object `{id, code, bp, cents}` in the quote. Refuses with a plain message (not valid, expired, used up, already used). `public.estimate_monthly_price_with_coupon(...)` is the review step (signed-in customers only).
+- `create_monthly_membership_request` and `start_monthly_membership_checkout` (replaced; a new last argument `p_coupon text DEFAULT NULL`, so a call without it behaves exactly as before). A retry of the same plan with the same coupon returns the same payment; a different coupon (or none) replaces the open checkout.
+- A trigger on `memberships` records the redemption when a paid membership's `pricing_snapshot` carries a coupon, so `fulfil_membership` is untouched and the use is counted at payment, never at checkout.
+- Admin (Campaigns area): `admin_list_coupons`, `admin_save_coupon` (create or change; the code never changes), `admin_set_coupon_active`, `admin_coupon_uses`. Audited as `coupon_created`, `coupon_changed`, `coupon_switched_on`, `coupon_switched_off`.
+Production dry run (rolled back, production checked untouched afterwards): see the commit message.
+

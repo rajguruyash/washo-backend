@@ -40,3 +40,15 @@ export function percentToBp(input: string): number | null {
   const v = Number(input.replace(/[^0-9.]/g, ''));
   return input.trim() !== '' && Number.isFinite(v) ? Math.round(v * 100) : null;
 }
+
+/** An on/off switch (a real button with role=switch, so it works with a keyboard and a screen reader). */
+export function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
+      className={`relative h-7 w-12 shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${on ? 'border-ok/40 bg-ok/70' : 'border-white/15 bg-white/10'}`}
+    >
+      <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${on ? 'left-[1.375rem]' : 'left-0.5'}`} />
+    </button>
+  );
+}
