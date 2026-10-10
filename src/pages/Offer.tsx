@@ -53,7 +53,7 @@ function ClaimButton({ campaign, size = 'lg' }: { campaign: Campaign; size?: 'md
 }
 
 const steps = [
-  { icon: Smartphone, title: 'Sign in with your phone', text: 'Your mobile number and a password. That is your claim: one free wash per number.' },
+  { icon: Smartphone, title: 'Sign in with your phone', text: 'A one-time code to your mobile number. That is your claim: one free wash per number.' },
   { icon: UserPlus, title: 'Add your vehicle and address', text: 'Your society and parking spot, and your bike, car or SUV. It takes a minute.' },
   { icon: Check, title: 'Slide to claim', text: 'No payment, no card. That is all you do: there is no date to pick.' },
   { icon: CalendarCheck, title: 'We choose the day and time', text: 'We place your wash on the earliest day with room, tell you straight away, and a specialist calls ahead.' },

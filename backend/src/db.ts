@@ -35,8 +35,6 @@ export interface Claims {
   sub: string;
   phone?: string;
   email?: string;
-  /** How the session was signed in (the token's own `amr` claim), so a sensitive step can ask for a recent code. */
-  amr?: { method: string; timestamp: number }[];
 }
 
 /**

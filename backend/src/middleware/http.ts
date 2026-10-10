@@ -92,7 +92,7 @@ export const requireSession = asyncHandler(async (req, res, next) => {
     throw new HttpError(401, 'unauthenticated', 'Please sign in to continue.');
   }
 
-  const claims: Claims = { sub: verified.sub, phone: verified.phone, email: verified.email, amr: verified.amr };
+  const claims: Claims = { sub: verified.sub, phone: verified.phone, email: verified.email };
   let profile: Profile;
   try {
     profile = await profileFor(claims);

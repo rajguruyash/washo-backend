@@ -8,7 +8,7 @@ import { config } from '../config';
 import { HttpError, parse } from '../errors';
 import { ACCESS_COOKIE, asyncHandler, authLimiter, clearSessionCookies, readCookie, requireRole, requireSession, setSessionCookies } from '../middleware/http';
 import { Claims, withUser } from '../db';
-import { phoneLoginEmail, phoneSchema } from '../phone';
+import { phoneSchema } from '../phone';
 import { Profile, forgetProfile, needsProfile, profileFor, profileForOrRepair } from '../profile';
 import { adminSignInCodeEmail } from '../emails';
 import { customerPassword, strongPassword } from '../password';
@@ -270,111 +270,6 @@ authRouter.post(
     if (!adminStep.secondStepAvailable() || !mailConfigured()) throw new HttpError(503, 'two_step_unavailable', 'We cannot email codes right now. Please try again shortly.');
     const sentTo = await sendAdminCode(res, { sub: step.sub, email: step.email });
     res.json({ success: true, email_hint: maskEmail(sentTo), resend_in_seconds: 30 });
-  })
-);
-
-// ───────────────────────── mobile number + password ─────────────────────────
-// How customers sign in on the website: a mobile number and a password, no code and no SMS (a code only helps if the phone company delivers it, and it
-// costs every time). The password belongs to a login Supabase keeps under an address derived from the number (see phone.ts); the typed number is attached to it
-// UNCONFIRMED and saved on the profile the same way "add your number" does, so it never links or merges with an account by itself and a number another account
-// already has is refused. The session is a normal Supabase one in the usual httpOnly cookies, and stays for 30 days of use (see middleware/http.ts).
-// If the same person ever signs in with a code on that number (the code link on the sign-in page), they land in this same account.
-const mobileSignupBody = z.object({ phone: phoneSchema, password: customerPassword, name: z.string().trim().min(2, 'Enter your name.').max(80).optional(), source: sourceSchema });
-const mobileLoginBody = z.object({ phone: phoneSchema, password: z.string().min(1, 'Enter your password.').max(200) });
-
-authRouter.post(
-  '/auth/mobile/signup',
-  authLimiter,
-  signupLimiter,
-  asyncHandler(async (req, res) => {
-    const { phone, password, name, source } = parse(mobileSignupBody, req.body);
-    const loginEmail = phoneLoginEmail(phone);
-    await gotrueAdmin.createPhoneAccount(loginEmail, password, phone, name); // refuses a number that already has an account; creates nothing in that case
-    const session = await gotrue.passwordLogin(loginEmail, password);
-    const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    let profile: Profile;
-    try {
-      profile = await profileForOrRepair(claims);
-    } catch (err) {
-      await gotrue.logout(session.access_token);
-      throw err;
-    }
-    if (profile.role !== 'customer') {
-      await gotrue.logout(session.access_token);
-      throw new HttpError(403, 'not_customer', 'That number cannot be used to sign up.');
-    }
-    // The number goes on the profile in the standard +91 form, as "add your number" does it. A refusal (another profile already has it) must not undo the sign-up.
-    await withUser(claims, (c) => c.query('SELECT public.set_my_phone($1)', [phone])).catch((err) => console.warn('The number could not be saved on the new profile:', (err as Error).message));
-    forgetProfile(claims.sub);
-    setSessionCookies(res, session);
-    await recordSource(claims, source);
-    const fresh = await profileFor(claims, { fresh: true }).catch(() => profile);
-    res.status(201).json({ success: true, role: fresh.role, needs_profile: needsProfile(fresh) });
-  })
-);
-
-authRouter.post(
-  '/auth/mobile/login',
-  authLimiter,
-  asyncHandler(async (req, res) => {
-    const { phone, password } = parse(mobileLoginBody, req.body);
-    const key = `mobile:${phone}`;
-    const wrong = () => new HttpError(401, 'bad_credentials', 'Mobile number or password is incorrect.');
-    if (lockedOut(key)) throw new HttpError(429, 'login_limit', 'Too many wrong passwords for this number. Please wait 15 minutes.');
-    let session;
-    try {
-      session = await gotrue.passwordLogin(phoneLoginEmail(phone), password);
-    } catch (err) {
-      if (!(err instanceof HttpError && err.code === 'bad_credentials')) throw err;
-      // Not an account made this way: a number a code has confirmed and a password has been set on (by the person, or for them by WASHO).
-      try {
-        session = await gotrue.passwordLoginPhone(phone, password);
-      } catch (err2) {
-        if (err2 instanceof HttpError && err2.code === 'bad_credentials') {
-          noteFailure(key);
-          throw wrong();
-        }
-        throw err2;
-      }
-    }
-    failures.delete(key);
-    const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
-    let profile: Profile;
-    try {
-      profile = await profileForOrRepair(claims);
-    } catch (err) {
-      await gotrue.logout(session.access_token);
-      throw err;
-    }
-    // Staff and admins sign in with their email (an admin also needs the emailed code): a number and a password never open their consoles.
-    if (profile.role !== 'customer') {
-      await gotrue.logout(session.access_token);
-      throw new HttpError(403, 'use_email', 'Specialists and admins sign in with their email and password. Choose "Continue with Email".');
-    }
-    setSessionCookies(res, session);
-    res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
-  })
-);
-
-// A forgotten password: sign in with a code ("Get a code instead"), then choose a new password WITHOUT the old one. Only for ~15 minutes after a code sign-in:
-// the session's own token says how it was signed in (amr), so a session that came from a password or has been open for days cannot do this. Anyone who can
-// receive the code at that number may set the password; that is what a code is for.
-const CODE_FRESH_SECONDS = 15 * 60;
-authRouter.post(
-  '/auth/mobile/password',
-  authLimiter,
-  requireSession,
-  requireRole('customer'),
-  asyncHandler(async (req, res) => {
-    const { password } = parse(z.object({ password: customerPassword }), req.body);
-    const s = req.session!;
-    const now = Math.floor(Date.now() / 1000);
-    const fresh = (s.claims.amr ?? []).some((a) => a.method === 'otp' && now - a.timestamp <= CODE_FRESH_SECONDS);
-    if (!fresh) {
-      throw new HttpError(403, 'code_needed', 'To choose a new password without the old one, sign out and sign in with a code first ("Get a code instead").');
-    }
-    await gotrue.updatePassword(s.accessToken, password);
-    res.json({ success: true });
   })
 );
 

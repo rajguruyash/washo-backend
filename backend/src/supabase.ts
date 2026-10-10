@@ -94,19 +94,6 @@ export const gotrue = {
   },
 
   /**
-   * Password sign-in with a mobile number as Supabase itself understands it: only for a number that a code has CONFIRMED and that someone has set a password on.
-   * (Accounts made with "mobile number + password" on the website are signed in through passwordLogin with their derived address instead.)
-   */
-  async passwordLoginPhone(phone: string, password: string): Promise<AuthSession> {
-    const { status, body } = await auth('/token?grant_type=password', { method: 'POST', body: JSON.stringify({ phone, password }) });
-    if (status < 300 && body.access_token) return body as AuthSession;
-    if (isBanned(body)) throw archivedError();
-    if (status === 429) throw new HttpError(429, 'login_limit', 'Too many attempts. Please wait a few minutes.');
-    if (status >= 500) throw new HttpError(503, 'auth_unavailable', 'Sign-in is unavailable right now. Please try again shortly.');
-    throw new HttpError(401, 'bad_credentials', 'Mobile number or password is incorrect.');
-  },
-
-  /**
    * Where to send the browser for "Continue with Google". PKCE: Supabase hands back a one-time code, which only the holder of
    * the matching verifier (kept in an httpOnly cookie on this server) can exchange. No token ever appears in a URL.
    */
@@ -216,26 +203,6 @@ export const gotrueAdmin = {
     }
     if (code === 'weak_password' || status === 422) throw new HttpError(400, 'weak_password', String(body.msg || 'That password is not allowed. Try a longer one.'));
     console.error('Creating an email account failed:', status, code, body.msg || body.message);
-    throw new HttpError(502, 'create_failed', 'We could not create the account. Please try again.');
-  },
-
-  /**
-   * An account for "mobile number + password": the derived login address (see phoneLoginEmail) with the password, confirmed straight away, and the number
-   * attached UNCONFIRMED (no text message or call is sent) in the same call, so Supabase itself refuses a number another login already has and nothing
-   * half-made is left behind. If the same person later signs in with that number by a code, they land in this same account.
-   */
-  async createPhoneAccount(loginEmail: string, password: string, phone: string, fullName?: string): Promise<{ id: string }> {
-    const { status, body } = await authAdmin('/users', {
-      method: 'POST',
-      body: { email: loginEmail, password, email_confirm: true, phone, phone_confirm: false, ...(fullName ? { user_metadata: { full_name: fullName } } : {}) },
-    });
-    if (status < 300 && body.id) return { id: body.id as string };
-    const code = String(body.error_code || '');
-    if (code === 'phone_exists' || code === 'email_exists' || code === 'user_already_exists' || /already (been )?registered|already exists/i.test(String(body.msg || body.message || ''))) {
-      throw new HttpError(409, 'phone_taken', 'That mobile number already has a WASHO account. Sign in with it instead.');
-    }
-    if (code === 'weak_password' || status === 422) throw new HttpError(400, 'weak_password', String(body.msg || 'That password is not allowed. Try a longer one.'));
-    console.error('Creating a mobile-number account failed:', status, code, body.msg || body.message);
     throw new HttpError(502, 'create_failed', 'We could not create the account. Please try again.');
   },
 

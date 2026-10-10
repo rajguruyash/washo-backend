@@ -7,8 +7,6 @@ export interface VerifiedToken {
   email?: string;
   exp: number;
   role?: string;
-  /** How this session was signed in (Supabase's `amr` claim): "password", "otp" (a code), "oauth"... with the time of each. It survives a token refresh. */
-  amr?: { method: string; timestamp: number }[];
 }
 
 const b64 = (s: string) => Buffer.from(s, 'base64url');
@@ -55,10 +53,7 @@ export async function verifyAccessToken(token: string): Promise<VerifiedToken | 
     const p = JSON.parse(b64(parts[1]).toString()) as Record<string, unknown>;
     if (typeof p.exp !== 'number' || p.exp * 1000 <= Date.now()) return null;
     if (p.aud !== 'authenticated' || p.role !== 'authenticated' || typeof p.sub !== 'string') return null;
-    const amr = Array.isArray(p.amr)
-      ? (p.amr as unknown[]).flatMap((a) => (a && typeof a === 'object' && typeof (a as { method?: unknown }).method === 'string' && typeof (a as { timestamp?: unknown }).timestamp === 'number' ? [{ method: (a as { method: string }).method, timestamp: (a as { timestamp: number }).timestamp }] : []))
-      : [];
-    return { sub: p.sub, exp: p.exp, role: p.role as string, phone: typeof p.phone === 'string' ? p.phone : undefined, email: typeof p.email === 'string' ? p.email : undefined, amr };
+    return { sub: p.sub, exp: p.exp, role: p.role as string, phone: typeof p.phone === 'string' ? p.phone : undefined, email: typeof p.email === 'string' ? p.email : undefined };
   } catch {
     return null;
   }
