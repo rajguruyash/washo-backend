@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
-  ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, CouponUse, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -207,6 +207,17 @@ export const useDeclineQuote = () => {
   return useMutation({ mutationFn: (id: string) => post(`/membership-requests/${id}/decline`), onSuccess: () => refresh() });
 };
 
+/** A single wash priced for this customer, with the coupon they typed if there is one. */
+export interface SingleWashEstimate { list_cents: number; final_cents: number; coupon?: { id: string; code: string; bp: number; cents: number } }
+export const useSingleWashEstimate = (input: { vehicle_id: string; service_id: string; coupon: string } | null) =>
+  useQuery({
+    queryKey: ['estimate', 'single', input],
+    queryFn: async () => (await post<{ estimate: SingleWashEstimate }>('/booking-estimate', input)).estimate,
+    enabled: Boolean(input),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
 export interface OnDemandInput {
   vehicle_id: string;
   service_id: string;
@@ -214,10 +225,30 @@ export interface OnDemandInput {
   time_slot: SlotId;
   address_id?: string | null;
   parking_location?: string;
+  /** A coupon the customer typed on the review step. */
+  coupon?: string;
 }
 
 export const useStartOnDemandPayment = () =>
   useMutation({ mutationFn: async (body: OnDemandInput) => (await post<{ order: Order }>('/payments/on-demand', body)).order });
+
+/** Rate a finished wash (1 to 5 stars), with or without a review; sending it again changes it. */
+export const useRateWash = () => {
+  const refresh = useRefreshAll();
+  return useMutation({
+    mutationFn: ({ id, rating, review }: { id: string; rating: number; review?: string }) => post<{ review: WashReview }>(`/bookings/${id}/review`, { rating, review: review?.trim() || null }),
+    onSuccess: () => refresh(),
+  });
+};
+
+/** Clear a finished wash from the customer's own Washes tab (nothing is deleted), or bring it back. */
+export const useHideWash = () => {
+  const refresh = useRefreshAll();
+  return useMutation({
+    mutationFn: ({ id, undo = false }: { id: string; undo?: boolean }) => post(`/bookings/${id}/${undo ? 'unhide' : 'hide'}`, {}),
+    onSuccess: () => refresh(),
+  });
+};
 
 export const useCancelBooking = () => {
   const refresh = useRefreshAll();
@@ -373,7 +404,7 @@ export const useAdminHistory = (f: AdminHistoryFilter) =>
 export const useAdminBooking = (id: string | undefined) =>
   useQuery({
     queryKey: keys.admin('booking', id ?? ''),
-    queryFn: () => get<{ booking: AdminBooking; events: AdminEvent[]; photos: Photo[] }>(`/admin/bookings/${id}`),
+    queryFn: () => get<{ booking: AdminBooking; events: AdminEvent[]; photos: Photo[]; review: WashReview | null }>(`/admin/bookings/${id}`),
     enabled: Boolean(id),
   });
 
@@ -427,6 +458,7 @@ export const useAdminSettings = () => useQuery({ queryKey: keys.admin('settings'
 export const useAdminRenewals = () => useQuery({ queryKey: keys.admin('renewals'), queryFn: () => get<AdminRenewals & { success: boolean }>('/admin/renewals') });
 export const useAdminCoupons = () => useQuery({ queryKey: keys.admin('coupons'), queryFn: async () => (await get<{ coupons: AdminCoupon[] }>('/admin/coupons')).coupons });
 export const useAdminCouponUses = (id: string | null) => useQuery({ queryKey: keys.admin('coupon-uses', id), queryFn: async () => (await get<{ uses: CouponUse[] }>(`/admin/coupons/${id}/uses`)).uses, enabled: Boolean(id) });
+export const useAdminReviews = (max: number | null) => useQuery({ queryKey: keys.admin('reviews', max), queryFn: async () => { const { summary, reviews } = await get<AdminReviews & { success: boolean }>(`/admin/reviews${max ? `?max=${max}` : ''}`); return { summary, reviews } as AdminReviews; } });
 export const useAdminTeam = () => useQuery({ queryKey: keys.admin('team'), queryFn: async () => (await get<{ team: TeamMember[] }>('/admin/team')).team });
 
 /** Is the site paused for maintenance? Anyone may ask. */

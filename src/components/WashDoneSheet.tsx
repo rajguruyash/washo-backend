@@ -5,6 +5,7 @@ import { usePhotos } from '../lib/queries';
 import { slotLabel, slotWindow } from '../lib/slots';
 import type { MembershipWash } from '../lib/types';
 import { PhotoGrid } from './PhotoGrid';
+import { WashRatingSection } from './WashRating';
 import { Badge } from './ui/Badge';
 import { Sheet } from './ui/Sheet';
 
@@ -32,6 +33,7 @@ export function WashDoneSheet({ wash, onClose }: { wash: MembershipWash | null; 
           {!photos.isLoading && !photos.data?.length && (
             <p className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-fog"><Camera className="h-4 w-4 shrink-0" /> No photos were saved for this wash.</p>
           )}
+          <WashRatingSection wash={wash} />
         </div>
       )}
     </Sheet>

@@ -2,24 +2,29 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
+/** A button on the toast ("Undo"): pressing it runs `onClick` and closes the toast. */
+export interface ToastAction { label: string; onClick: () => void }
+
 interface ToastItem {
   id: number;
   tone: 'ok' | 'error';
   text: string;
+  action?: ToastAction;
 }
 
-const ToastContext = createContext<{ success: (t: string) => void; error: (t: string) => void } | null>(null);
+const ToastContext = createContext<{ success: (t: string, action?: ToastAction) => void; error: (t: string) => void } | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
 
-  const push = useCallback((tone: ToastItem['tone'], text: string) => {
+  const close = useCallback((id: number) => setItems((cur) => cur.filter((i) => i.id !== id)), []);
+  const push = useCallback((tone: ToastItem['tone'], text: string, action?: ToastAction) => {
     const id = Date.now() + Math.random();
-    setItems((cur) => [...cur.slice(-2), { id, tone, text }]);
-    setTimeout(() => setItems((cur) => cur.filter((i) => i.id !== id)), 4200);
+    setItems((cur) => [...cur.slice(-2), { id, tone, text, action }]);
+    setTimeout(() => setItems((cur) => cur.filter((i) => i.id !== id)), action ? 7000 : 4200); // a toast with a button stays a little longer
   }, []);
 
-  const api = useMemo(() => ({ success: (t: string) => push('ok', t), error: (t: string) => push('error', t) }), [push]);
+  const api = useMemo(() => ({ success: (t: string, action?: ToastAction) => push('ok', t, action), error: (t: string) => push('error', t) }), [push]);
 
   return (
     <ToastContext.Provider value={api}>
@@ -37,7 +42,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               role={t.tone === 'error' ? 'alert' : 'status'}
             >
               {t.tone === 'ok' ? <CheckCircle2 className="h-5 w-5 shrink-0 text-ok" /> : <AlertCircle className="h-5 w-5 shrink-0 text-bad" />}
-              {t.text}
+              <span className="min-w-0 flex-1">{t.text}</span>
+              {t.action && <button type="button" onClick={() => { t.action!.onClick(); close(t.id); }} className="shrink-0 rounded-lg px-2 py-1 text-sm font-bold text-washo-300 hover:bg-white/10 hover:text-white">{t.action.label}</button>}
             </motion.div>
           ))}
         </AnimatePresence>

@@ -237,3 +237,20 @@ Production dry run (rolled back, production checked untouched afterwards): data 
 - Admin (Campaigns area): `admin_list_coupons`, `admin_save_coupon` (create or change; the code never changes), `admin_set_coupon_active`, `admin_coupon_uses`. Audited as `coupon_created`, `coupon_changed`, `coupon_switched_on`, `coupon_switched_off`.
 Production dry run (rolled back, production checked untouched afterwards): see the commit message.
 
+## Coupons on single washes (migration 33)
+
+`20261004000033_coupons_single_wash.sql`, additive. `membership_coupons.applies_to` (`membership` | `single` | `both`; coupons made before this keep working on memberships only) and redemptions can now be a `booking_id` instead of a `membership_id` (exactly one of the two). `app_private.check_coupon(code, customer, kind)` is the one place that decides whether a customer may use a code for a membership or a single wash (on, not expired, not used up, not used before by them when "once per customer", meant for this kind); `apply_coupon` (memberships) asks it, and so does `coupon_for_single`.
+- `estimate_single_wash_with_coupon(vehicle, service, code)`: the review step's price (signed-in customers only).
+- `create_booking_payment_intent_with_coupon(...)`: CALLS the existing `create_booking_payment_intent` (untouched: the mobile app may use it) and then lowers that pending payment's amount and writes the coupon into its `intent`, so settlement, the booking's `price_cents` and refunds all use the discounted amount. A coupon that cannot be used raises and undoes the payment it just made. With no coupon it is exactly the old function.
+- A trigger on `payments` (only for `on_demand` payments that get a `booking_id` and carry a coupon) records the use when the wash is PAID for.
+- `admin_save_coupon` (replaced; a new last argument `p_applies_to` defaulting to `membership`, so a call from the website that is live today still works), `coupon_json` and `admin_coupon_uses` say what a coupon works on and whether each use was a membership or a single wash.
+
+## Ratings and reviews (migration 34)
+
+`20261004000034_wash_reviews.sql`, additive; the shared database had no review or rating table or function. `wash_reviews` (one per `booking_id`, rating 1-5, optional review up to 1000 characters, the specialist who did the wash; closed to everyone but the functions). `rate_wash(booking, rating, review)` (the customer's own completed wash; saves or changes; audited as `wash_rated` / `wash_rating_changed`), `my_wash_reviews(ids)` (their own), `admin_wash_review(booking)` and `admin_list_reviews(max_rating, limit)` (Washes area: Operations, Finance, Support, super admin; the list carries the average and a count per star).
+
+## Clearing finished washes (migration 35)
+
+`20261004000035_hide_finished_washes.sql`, additive. `customer_hidden_washes` (a customer reads only their own rows), `hide_my_wash(booking)` (done, cancelled, refunded or missed washes only) and `unhide_my_wash(booking)`. Nothing is deleted.
+Production dry run (rolled back, production checked untouched afterwards): see the commit message.
+

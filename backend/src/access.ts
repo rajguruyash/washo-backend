@@ -48,7 +48,7 @@ export async function adminAccessFor(claims: Claims): Promise<AdminAccess | null
 const AREA_OF: Record<string, string> = {
   overview: 'overview', dashboard: 'overview',
   'membership-requests': 'requests',
-  bookings: 'bookings',
+  bookings: 'bookings', reviews: 'bookings',
   memberships: 'memberships', reminders: 'memberships', renewals: 'memberships',
   attention: 'payments', payments: 'payments', refunds: 'payments',
   workers: 'people', customers: 'people', vehicles: 'people', addresses: 'people',

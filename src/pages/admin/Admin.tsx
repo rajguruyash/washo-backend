@@ -32,19 +32,21 @@ import People from './People';
 import Discounts from './Discounts';
 import ServicesAdmin from './ServicesAdmin';
 import Renewals from './Renewals';
+import Reviews from './Reviews';
 import Settings from './Settings';
 import Support from './Support';
 import Team from './Team';
 import { Loading, errText } from './shared';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
 const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
   { value: 'overview', label: 'Dashboard', area: 'overview' },
   { value: 'bookings', label: 'Washes', area: 'bookings' },
   { value: 'memberships', label: 'Memberships', area: 'memberships' },
   { value: 'people', label: 'People', area: 'people' },
+  { value: 'reviews', label: 'Reviews', area: 'bookings' },
   { value: 'requests', label: 'Requests', area: 'requests' },
   { value: 'history', label: 'History', area: 'history' },
   { value: 'services', label: 'Services & prices', area: 'services' },
@@ -59,7 +61,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'settings', label: 'Settings', area: 'settings' },
 ];
 /** The area a tab's content is governed by (used to say "view only"). */
-const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
@@ -380,6 +382,7 @@ export default function Admin() {
           {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} canAdd={canDo(access, 'bookings', 'manage')} onAdd={() => setAdding({ customerId: null })} /></>)}
           {tab === 'history' && <History />}
           {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} canManage={canDo(access, 'memberships', 'manage')} />}
+          {tab === 'reviews' && <Reviews />}
           {tab === 'people' && <People onBook={(customerId) => setAdding({ customerId })} />}
           {tab === 'services' && <ServicesAdmin />}
           {tab === 'discounts' && <Discounts rules={canDo(access, 'services')} editRules={canDo(access, 'services', 'manage')} coupons={canDo(access, 'campaigns')} editCoupons={canDo(access, 'campaigns', 'manage')} />}

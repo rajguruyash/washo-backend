@@ -6,6 +6,7 @@ import { Plate } from '../../components/brand/Plate';
 import { ErrorState } from '../../components/EmptyState';
 import { PackOfferCard } from '../../components/PackOfferCard';
 import { PhotoGrid } from '../../components/PhotoGrid';
+import { WashRatingSection } from '../../components/WashRating';
 import { RescheduleSheet } from '../../components/RescheduleSheet';
 import { CustomerStatus } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
@@ -120,6 +121,8 @@ export default function BookingDetail() {
       {b.status === 'completed' && b.campaign_name && offer && <PackOfferCard offer={offer} className="mt-5" />}
 
       {b.status === 'completed' && <section className="mt-8"><h2 className="mb-3 text-lg font-bold">Before and after</h2><PhotoGrid bookingId={b.id} /></section>}
+
+      <WashRatingSection wash={b} className="mt-8" />
 
       <section className="mt-8">
         <h2 className="mb-3 text-lg font-bold">Timeline</h2>

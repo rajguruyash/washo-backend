@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { campaignNames } from '../campaigns';
+import { withReviews } from '../reviews';
 import { withCouponGuard } from '../couponGuard';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
@@ -11,7 +12,7 @@ import { openOrder, reconcileOrder, verifyAndSettle } from '../razorpay';
 import { photoStorage } from '../supabase';
 
 export const bookingsRouter = Router();
-bookingsRouter.use(['/bookings', '/payments'], requireSession);
+bookingsRouter.use(['/bookings', '/payments', '/booking-estimate'], requireSession);
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a date.');
@@ -35,16 +36,20 @@ bookingsRouter.get(
   requireRole('customer'),
   asyncHandler(async (req, res) => {
     const scope = parse(z.enum(['upcoming', 'past', 'all']).catch('all'), req.query.scope);
-    const bookings = await req.db(async (c) => {
-      const where =
-        scope === 'upcoming'
-          ? `WHERE b.status IN ${LIVE} ORDER BY b.scheduled_date, b.time_slot`
-          : scope === 'past'
-            ? `WHERE b.status NOT IN ${LIVE} ORDER BY b.scheduled_date DESC, b.created_at DESC`
-            : `ORDER BY b.scheduled_date DESC, b.time_slot`;
-      return (await c.query(`${BOOKING_SQL} ${where} LIMIT 200`)).rows;
-    });
-    res.json({ success: true, bookings });
+    // Washes the customer cleared from their own list (swipe to remove) are left out of "past". A database without that table yet simply has none cleared.
+    const list = (cleared: boolean) =>
+      req.db(async (c) => {
+        const hidden = cleared ? 'AND NOT EXISTS (SELECT 1 FROM public.customer_hidden_washes h WHERE h.booking_id = b.id)' : '';
+        const where =
+          scope === 'upcoming'
+            ? `WHERE b.status IN ${LIVE} ORDER BY b.scheduled_date, b.time_slot`
+            : scope === 'past'
+              ? `WHERE b.status NOT IN ${LIVE} ${hidden} ORDER BY b.scheduled_date DESC, b.created_at DESC`
+              : `ORDER BY b.scheduled_date DESC, b.time_slot`;
+        return (await c.query(`${BOOKING_SQL} ${where} LIMIT 200`)).rows;
+      });
+    const bookings = scope === 'past' ? await list(true).catch((err) => { if ((err as { code?: string }).code === '42P01') return list(false); throw err; }) : await list(false);
+    res.json({ success: true, bookings: await withReviews(req.db, bookings) });
   })
 );
 
@@ -78,9 +83,35 @@ bookingsRouter.get(
     });
     if (!out) throw new HttpError(404, 'not_found', 'Booking not found');
     const names = await campaignNames(req.db, [id]); // a free-wash campaign wash says so (tolerant: not every database has campaigns yet)
-    res.json({ success: true, ...out, booking: { ...out.booking, campaign_name: names.get(id) ?? null } });
+    const [booking] = await withReviews(req.db, [{ ...out.booking, campaign_name: names.get(id) ?? null }]); // the customer's own rating (tolerant too)
+    res.json({ success: true, ...out, booking });
   })
 );
+
+// Rate a completed wash (1 to 5 stars), with a review or without one. Sending it again changes it. Only the customer who had the wash, only once it is done: the database decides.
+bookingsRouter.post(
+  '/bookings/:id/review',
+  requireRole('customer'),
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const b = parse(z.object({ rating: z.number({ error: 'Choose 1 to 5 stars.' }).int('Choose 1 to 5 stars.').min(1, 'Choose 1 to 5 stars.').max(5, 'Choose 1 to 5 stars.'), review: z.string().trim().max(1000, 'Please keep the review under 1000 characters.').nullish() }), req.body);
+    const review = await req.db(async (c) => (await c.query('SELECT public.rate_wash($1, $2, $3) AS r', [id, b.rating, b.review || null])).rows[0].r);
+    res.json({ success: true, review });
+  })
+);
+
+// Clear a finished wash from the customer's own Washes tab, or bring it back. Nothing is deleted (the database says which washes may be cleared).
+for (const [path, fn] of [['hide', 'hide_my_wash'], ['unhide', 'unhide_my_wash']] as const) {
+  bookingsRouter.post(
+    `/bookings/:id/${path}`,
+    requireRole('customer'),
+    asyncHandler(async (req, res) => {
+      const id = parse(uuid, req.params.id);
+      await req.db((c) => c.query(`SELECT public.${fn}($1)`, [id]));
+      res.json({ success: true });
+    })
+  );
+}
 
 bookingsRouter.post(
   '/bookings/:id/cancel',
@@ -166,7 +197,21 @@ const onDemandSchema = z.object({
   address_id: z.string().uuid().nullish(),
   parking_location: z.string().trim().max(160).optional(),
   target_completion_time: z.string().trim().max(40).optional(),
+  // A coupon the customer typed on the review step. The database prices it and says if it cannot be used.
+  coupon: z.string().trim().max(30).optional(),
 });
+
+// "What does this single wash cost with this coupon?" The database knows who is asking (a coupon can be used once per customer, and may be meant for memberships only).
+bookingsRouter.post(
+  '/booking-estimate',
+  requireRole('customer'),
+  asyncHandler(async (req, res) => {
+    const b = parse(z.object({ vehicle_id: z.string().uuid('Choose a vehicle.'), service_id: z.string().uuid('Choose a service.'), coupon: z.string().trim().max(30).optional() }), req.body);
+    const ask = () => req.db(async (c) => (await c.query('SELECT public.estimate_single_wash_with_coupon($1, $2, $3) AS q', [b.vehicle_id, b.service_id, b.coupon || null])).rows[0].q);
+    const estimate = b.coupon ? await withCouponGuard(req.session!.claims.sub, ask) : await ask();
+    res.json({ success: true, estimate });
+  })
+);
 
 // The amount is decided by the database from the rate card. This route accepts no amount at all.
 bookingsRouter.post(
@@ -175,13 +220,17 @@ bookingsRouter.post(
   requirePhone,
   asyncHandler(async (req, res) => {
     const b = parse(onDemandSchema, req.body);
-    const intent = await req.db(async (c) =>
-      (
-        await c.query('SELECT public.create_booking_payment_intent($1, $2, $3::date, $4::public.time_slot, $5, $6, $7, $8) AS r', [
-          b.vehicle_id, b.service_id, b.scheduled_date, b.time_slot, b.address_id ?? null, b.parking_location ?? null, b.target_completion_time ?? null, 'website',
-        ])
-      ).rows[0].r
-    );
+    // With no coupon this is the call the database has always had (so a database that has not been updated yet still works); with one, the coupon rides along.
+    const args = [b.vehicle_id, b.service_id, b.scheduled_date, b.time_slot, b.address_id ?? null, b.parking_location ?? null, b.target_completion_time ?? null, 'website'];
+    const start = () =>
+      req.db(async (c) =>
+        (
+          await (b.coupon
+            ? c.query('SELECT public.create_booking_payment_intent_with_coupon($1, $2, $3::date, $4::public.time_slot, $5, $6, $7, $8, $9) AS r', [...args, b.coupon])
+            : c.query('SELECT public.create_booking_payment_intent($1, $2, $3::date, $4::public.time_slot, $5, $6, $7, $8) AS r', args))
+        ).rows[0].r
+      );
+    const intent = await (b.coupon ? withCouponGuard(req.session!.claims.sub, start) : start());
     res.json({ success: true, order: await openOrder(req.session!.profile, intent) });
   })
 );

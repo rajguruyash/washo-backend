@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles, Tag, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
@@ -14,7 +14,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { Input, TextArea } from '../../components/ui/Field';
+import { TextArea } from '../../components/ui/Field';
 import { cn } from '../../lib/cn';
 import { addDays, duration, istDay, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError, post } from '../../lib/http';
@@ -22,6 +22,7 @@ import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMem
 import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
+import { CouponBox } from '../../components/CouponBox';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
 import { SlideToPay } from '../../components/SlideToPay';
 import { addressBlocker, pausedBlocker, phoneBlocker, type Blocker } from '../../lib/payBlockers';
@@ -120,11 +121,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
   // A coupon the customer typed on the last step: checked by the server (it says if the code cannot be used), then part of the price.
-  const [couponOpen, setCouponOpen] = useState(false);
-  const [couponText, setCouponText] = useState('');
   const [coupon, setCoupon] = useState<string | null>(null);
-  const [couponError, setCouponError] = useState('');
-  const [couponBusy, setCouponBusy] = useState(false);
 
   // Preselect from ?vehicle= (Vehicles page) or the only vehicle.
   useEffect(() => {
@@ -207,21 +204,10 @@ function Wizard({ renewing }: { renewing?: Membership }) {
     setStep(step + 1);
   };
 
-  const applyCoupon = async () => {
-    const text = couponText.trim();
-    if (!text || !vtype || !months) return;
-    setCouponError('');
-    setCouponBusy(true);
-    try {
-      const r = (await post<{ estimate: PriceEstimate }>('/membership-estimate', { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, coupon: text })).estimate;
-      setCoupon(r.coupon?.code ?? text.toUpperCase());
-      setCouponText('');
-      setCouponOpen(false);
-    } catch (err) {
-      setCouponError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-    } finally { setCouponBusy(false); }
+  const checkCoupon = async (code: string) => {
+    const r = (await post<{ estimate: PriceEstimate }>('/membership-estimate', { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, coupon: code })).estimate;
+    return { code: r.coupon?.code ?? code.toUpperCase(), bp: r.coupon?.bp ?? null };
   };
-  const removeCoupon = () => { setCoupon(null); setCouponError(''); setCouponText(''); };
 
   // Pay now: the server prices the plan from the rate card and opens the Razorpay order; the membership and its washes are
   // created only once the payment is verified.
@@ -491,23 +477,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 {(customActive ?? preview.data!.dates).length > 12 && <button type="button" onClick={() => setShowAllDates(!showAllDates)} className="mt-2 text-sm font-semibold text-washo-300 hover:text-white">{showAllDates ? 'Show fewer' : `Show all ${(customActive ?? preview.data!.dates).length}`}</button>}
               </div>
             )}
-            <div id="pay-coupon" className="glass mt-5 p-5">
-              {coupon ? (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="flex items-center gap-2 text-sm"><Tag className="h-4 w-4 text-ok" aria-hidden /> <span className="font-bold">{coupon}</span> <span className="text-ok">{chosenEstimate.data?.coupon ? `${percent(chosenEstimate.data.coupon.bp)} extra off applied` : couponStopped ? '' : 'applied'}</span></p>
-                  <button type="button" onClick={removeCoupon} className="inline-flex items-center gap-1 text-sm font-semibold text-washo-300 hover:text-white"><X className="h-4 w-4" aria-hidden /> Remove</button>
-                </div>
-              ) : couponOpen ? (
-                <form onSubmit={(e) => { e.preventDefault(); void applyCoupon(); }} className="flex items-start gap-2">
-                  <Input label="Coupon code" className="min-w-0 flex-1" value={couponText} onChange={(e) => { setCouponText(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)); setCouponError(''); }}
-                    autoCapitalize="characters" autoComplete="off" spellCheck={false} placeholder="For example EXTRA5" error={couponError || undefined} />
-                  <Button type="submit" variant="glass" className="mt-[1.65rem]" loading={couponBusy} disabled={couponText.trim().length < 3}>Apply</Button>
-                </form>
-              ) : (
-                <button type="button" onClick={() => setCouponOpen(true)} className="inline-flex items-center gap-2 text-sm font-semibold text-washo-300 hover:text-white"><Tag className="h-4 w-4" aria-hidden /> Have a coupon?</button>
-              )}
-              {couponStopped && <p role="alert" className="mt-2 text-sm text-bad">{couponStopped}</p>}
-            </div>
+            <CouponBox applied={coupon ? { code: coupon, bp: chosenEstimate.data?.coupon?.bp } : null} stopped={couponStopped} check={checkCoupon} onApply={setCoupon} onRemove={() => setCoupon(null)} />
             {chosenEstimate.data && (
               <div className="glass mt-5 p-5">
                 <div className="mb-1 flex items-center justify-between gap-3"><h2 className="font-bold">Your price</h2></div>

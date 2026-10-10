@@ -1,4 +1,5 @@
-import { ArrowRight, BadgeCheck, CalendarDays, Camera, Car, Clock, Gift, Plus } from 'lucide-react';
+import { ArrowRight, BadgeCheck, CalendarDays, Camera, Car, Clock, Droplets, Gift, Plus } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plate } from '../../components/brand/Plate';
 import { CampaignGlare } from '../../components/CampaignGlare';
@@ -9,6 +10,8 @@ import { EmptyState, PageHeader } from '../../components/EmptyState';
 import { BookingCard } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
 import { ButtonLink } from '../../components/ui/Button';
+import { VehicleSheet } from '../../components/VehicleSheet';
+import { cn } from '../../lib/cn';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { audience, claimView, dayOf } from '../../lib/campaign';
 import { prettyDate } from '../../lib/format';
@@ -17,7 +20,27 @@ import { slotLabel } from '../../lib/slots';
 import { useAuth } from '../../state/auth';
 import { planTitle } from '../../lib/plan';
 
+/** The three things a customer comes here to do, all in view at once. */
+function QuickActions({ onAddVehicle }: { onAddVehicle: () => void }) {
+  const tile = 'group glass flex min-w-0 flex-col items-center gap-2 px-2 py-4 text-center transition-all hover:-translate-y-0.5 hover:border-washo-400/50 sm:gap-3 sm:px-4 sm:py-5';
+  const icon = 'grid h-11 w-11 place-items-center rounded-2xl sm:h-12 sm:w-12';
+  const body = (Icon: typeof Plus, name: string, hint: string, accent: string) => (
+    <>
+      <span className={cn(icon, accent)}><Icon className="h-6 w-6" aria-hidden /></span>
+      <span className="min-w-0"><span className="block text-sm font-bold leading-tight sm:text-base">{name}</span><span className="mt-0.5 block text-[11px] leading-tight text-fog sm:text-xs">{hint}</span></span>
+    </>
+  );
+  return (
+    <nav aria-label="What would you like to do?" className="mb-8 grid grid-cols-3 gap-3">
+      <Link to="/app/membership/new" className={cn(tile, 'border-washo-400/40 bg-washo-500/10')}>{body(CalendarDays, 'Build a membership', 'Washes every month', 'bg-washo-500 text-white shadow-[0_0_24px_-8px_rgb(63_124_255/0.8)]')}</Link>
+      <Link to="/app/book" className={tile}>{body(Droplets, 'Book a single wash', 'One wash, pay now', 'bg-white/[0.08] text-washo-300')}</Link>
+      <button type="button" onClick={onAddVehicle} className={tile}>{body(Car, 'Add a vehicle', 'Bike, car or SUV', 'bg-white/[0.08] text-washo-300')}</button>
+    </nav>
+  );
+}
+
 export default function Dashboard() {
+  const [addingVehicle, setAddingVehicle] = useState(false);
   const { user } = useAuth();
   const memberships = useMemberships();
   const requests = useRequests();
@@ -35,7 +58,9 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title={first ? `Hi, ${first}` : 'Welcome'} subtitle="Your washes, memberships and requests in one place." action={<ButtonLink to="/app/membership/new" icon={<Plus className="h-4 w-4" />}>Start a membership</ButtonLink>} />
+      <PageHeader title={first ? `Hi, ${first}` : 'Welcome'} subtitle="Your washes, memberships and requests in one place." />
+      <QuickActions onAddVehicle={() => setAddingVehicle(true)} />
+      <VehicleSheet open={addingVehicle} onClose={() => setAddingVehicle(false)} />
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /></div>
@@ -103,14 +128,14 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : !open.length ? (
-              <EmptyState title="Start your WASHO membership" text="Choose how many Body washes and Deep cleans you want each week, pick your days, and pay once. Every wash of your plan is scheduled for you." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
+              <EmptyState title="Start your WASHO membership" text="Choose how many Body washes and Deep cleans you want each month, pick your days, and pay once. Every wash of your plan is scheduled for you." action={<ButtonLink to="/app/membership/new">Build my plan</ButtonLink>} />
             ) : null}
           </section>}
 
           <section aria-labelledby="up">
             <div className="mb-3 flex items-center justify-between"><h2 id="up" className="text-lg font-bold">Upcoming washes</h2><Link to="/app/bookings" className="text-sm font-semibold text-washo-300 hover:text-white">See all</Link></div>
             {upcoming.data?.length ? (
-              <div className="space-y-3">{upcoming.data.slice(0, 4).map((b, i) => <BookingCard key={b.id} booking={b} index={i} />)}</div>
+              <div>{upcoming.data.slice(0, 4).map((b, i) => <BookingCard key={b.id} booking={b} index={i} />)}</div>
             ) : (
               <div className="panel flex items-center gap-3 p-5 text-sm text-fog"><CalendarDays className="h-5 w-5" /> Nothing scheduled yet.</div>
             )}
@@ -119,7 +144,7 @@ export default function Dashboard() {
           {completed.length > 0 && (
             <section aria-labelledby="done">
               <h2 id="done" className="mb-3 text-lg font-bold">Recently completed</h2>
-              <div className="space-y-3">{completed.map((b, i) => <BookingCard key={b.id} booking={b} index={i} />)}</div>
+              <div>{completed.map((b, i) => <BookingCard key={b.id} booking={b} index={i} />)}</div>
             </section>
           )}
 

@@ -149,8 +149,23 @@ A membership's price is the rate card times the washes, then these, each its own
 - The percentage is taken from the plan price (the subtotal): "extra 5%" on a ₹1,800 plan is ₹90, whatever the other discounts are.
 - It is frozen into the price when the checkout starts. A use is counted only when the membership is **paid for** (an abandoned checkout uses nothing), and a customer who had already started paying is never refused because the coupon ran out meanwhile.
 - A coupon is switched off, never deleted: every use stays on record (Admin → Discounts → Who used it). Making, changing and switching a coupon is in the activity log.
-- Coupons are for memberships chosen as washes in a month, for a signed-in customer. Single washes and free-wash claims have no discounts, so no coupon box. Wrong codes are slowed down: after 10 that did not work in 15 minutes the customer waits.
+- A coupon **works on** memberships, on single washes, or on both (the admin chooses when making it; migration 33). The box is on the last step of both (Review and pay): a membership takes the extra percentage off the plan price on top of the other discounts; a single wash takes it off the rate-card price, so the Razorpay amount and the booking's price are the discounted amount. A coupon meant for the other kind says so in plain words ("That coupon is for memberships only"). "Each customer can use it once" counts across both kinds. Free-wash claims have no coupon box (they are free). For a single wash the coupon is taken off the payment AFTER the existing `create_booking_payment_intent` has made it (that function is left exactly as it is, because the mobile app may use it): `create_booking_payment_intent_with_coupon`, and a payment that is already taken is never refused. Wrong codes are slowed down: after 10 that did not work in 15 minutes the customer waits.
 - The shared database already has a `coupons` table that the mobile app uses for its own first-wash offers (`FREEFIRSTWASH`, `WASHOFREE`). The website's coupons are separate tables (`membership_coupons`, `membership_coupon_redemptions`) and never read or change that one; typing a mobile-app code on the website says it is not valid.
+
+## Ratings and reviews (migration 34)
+
+Every wash that has been done can be rated, single, membership or free wash alike. On the customer's **Washes** tab (Completed & past) each finished wash carries five stars: tap one and a sheet opens with a review box (optional: **the stars can be sent alone**), then **Submit rating** (or **Submit review** when words were typed). The same block is on the wash's own page and in the membership page's finished-wash sheet. It can be changed later (stars and words); there is one rating per wash. Only the customer who had the wash, and only once it is `completed` (the database decides: `rate_wash`). `wash_reviews` is closed to everyone but its functions; the specialist who did the wash is remembered with each rating.
+The admin sees it in two places (Washes area, so Operations, Finance, Support and the super admin): on the wash's sheet ("What the customer said") and on the **Reviews** tab (average, how many of each star, the latest ratings, and a filter for 3 stars or less).
+
+## Clearing finished washes from the Washes tab (migration 35)
+
+A finished wash (done, cancelled, refunded or missed) can be **swiped left** (React Bits Swipe Row) to clear it from the customer's own list, with an **Undo** on the toast. Nothing is deleted: the wash, photos, rating and payment stay, WASHO and the specialist still see it, and it still opens from a link (`customer_hidden_washes`, `hide_my_wash`, `unhide_my_wash`). A wash that is coming up, or has a refund waiting, cannot be cleared. A database without the migration just has nothing cleared.
+
+## The home screen and the landing page
+
+- **Home** (`/app`): "Hi, name", then three tiles side by side so everything is in view at once: **Build a membership**, **Book a single wash**, **Add a vehicle** (opens the vehicle sheet right there).
+- **Landing**: the turning ring of service photos is gone (here and on `/services`). **Or book one wash** is four plain cards with their prices. The page ends with a **WASHO member card** (React Bits Holo Card: a WebGL foil that follows the pointer, still image where WebGL2 is not available, loaded after everything else). Lanyard was not used: it needs a 3D engine and physics (several hundred KB) for one decoration.
+- **Steps**: the membership wizard, the single-wash wizard and the free-wash claim all show their progress as the React Bits Stepper (numbered circles joined by lines that fill, a tick that draws itself).
 
 ## Speed
 

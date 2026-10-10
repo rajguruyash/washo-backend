@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { ArrowRight, CalendarCheck, Camera, Droplets, Gift, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
 import { AvatarFull } from '../components/brand/Avatar';
 import { Badge } from '../components/ui/Badge';
@@ -7,12 +8,17 @@ import SplitFlapText from '../components/reactbits/SplitFlapText';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
 import { RotatingLine } from '../components/RotatingLine';
-import { ServiceCarousel } from '../components/ServiceCarousel';
+import { ServicePhoto } from '../components/ServicePhoto';
+import cardArt from '../assets/brand/washo-card.webp';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
 import { audience } from '../lib/campaign';
+import { rupees } from '../lib/format';
 import { useCampaign, useCatalog } from '../lib/queries';
+
+// The holographic card is WebGL, so it is its own piece of the page's code: it loads after everything else and never delays the first paint.
+const HoloCard = lazy(() => import('../components/reactbits/HoloCard'));
 
 const steps = [
   { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, how many washes you want each month (4 or more), the days, and how long. The estimate updates as you go.' },
@@ -104,7 +110,7 @@ export default function Landing() {
             <p className="eyebrow">Custom membership</p>
             <h2 className="mt-2 text-3xl font-extrabold md:text-4xl">You design it. We take care of the rest.</h2>
             <ul className="mt-6 space-y-3 text-mist">
-              <li><strong className="text-white">Body washes and Deep cleans:</strong> choose how many of each you want every week, up to 7 in total.</li>
+              <li><strong className="text-white">Body washes and Deep cleans:</strong> choose how many of each you want every month, any mix, at least 4 in all.</li>
               <li><strong className="text-white">Your days:</strong> tell us which days suit you for each, and we manage your whole month accordingly.</li>
               <li><strong className="text-white">1, 3, 6 or 12 months.</strong> Reschedule any wash anytime.</li>
             </ul>
@@ -119,7 +125,22 @@ export default function Landing() {
 
       <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
         <Reveal><p className="eyebrow">Single washes</p><h2 className="mt-2 text-3xl font-extrabold md:text-4xl">Or book one wash</h2></Reveal>
-        <div className="mt-6">{isLoading || !catalog ? <Skeleton className="h-[560px]" /> : <ServiceCarousel services={catalog.services} />}</div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {isLoading || !catalog ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64" />) : catalog.services.map((s, i) => {
+            const price = s.unit_prices?.find((p) => p.vehicle_type === s.vehicle_type)?.price_cents;
+            return (
+              <Reveal key={s.id} delay={i * 0.04} className="glass overflow-hidden">
+                <Link to="/app/book" className="group block">
+                  <ServicePhoto code={s.code} name={s.name} className="aspect-[4/3] w-full" />
+                  <div className="flex items-end justify-between gap-3 p-4">
+                    <div className="min-w-0"><p className="truncate font-bold">{s.name}</p><p className="truncate text-xs text-fog">{s.tagline ?? ''}</p></div>
+                    {price != null && <p className="font-display text-xl font-extrabold tabular-nums">{rupees(price)}</p>}
+                  </div>
+                </Link>
+              </Reveal>
+            );
+          })}
+        </div>
         <p className="mt-4 text-xs text-fog">SUVs use the car Body wash rate and the SUV Deep cleaning rate.</p>
       </section>
 
@@ -129,6 +150,22 @@ export default function Landing() {
           {why.map((w, i) => (
             <Reveal key={w.title} delay={i * 0.04} className="panel p-6"><w.icon className="h-6 w-6 text-washo-300" /><h3 className="mt-3 font-bold">{w.title}</h3><p className="mt-1.5 text-sm text-fog">{w.text}</p></Reveal>
           ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-4 pb-28 sm:px-6 lg:px-8" aria-labelledby="card-title">
+        <div className="glass grid items-center gap-10 overflow-hidden p-6 md:p-10 lg:grid-cols-[1fr_auto]">
+          <Reveal>
+            <p className="eyebrow">Your WASHO card</p>
+            <h2 id="card-title" className="mt-2 text-3xl font-extrabold md:text-4xl">Clean today, shine every day.</h2>
+            <p className="mt-4 max-w-md text-mist">Build a plan once and your washes are scheduled for you: your days, your slot, a call before every wash and before and after photos. Tilt the card, then start yours.</p>
+            <ButtonLink to="/app/membership/new" className="mt-8" iconRight={<ArrowRight className="h-5 w-5" />}>Build my plan</ButtonLink>
+          </Reveal>
+          <div className="mx-auto w-full max-w-[320px] justify-self-center lg:mx-0">
+            <Suspense fallback={<img src={cardArt} alt="WASHO member card" width={320} height={447} className="w-full rounded-[14px]" />}>
+              <HoloCard image={cardArt} alt="WASHO member card. Tilt it to see the foil shine." preset="rainbow" width={320} radius={18} tiltMax={16} intensity={0.75} glare={0.55} edgeSparkle={0.55} frame={3} foilColor="#cfe0ff" />
+            </Suspense>
+          </div>
         </div>
       </section>
     </>

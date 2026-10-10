@@ -9,7 +9,7 @@ import { useToast } from '../../components/ui/Toast';
 import { fullDate, istDay, percent, relativeTime, rupees, todayIST } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminCouponUses, useAdminCoupons, useAdminPricing } from '../../lib/queries';
-import type { AdminCoupon } from '../../lib/types';
+import type { AdminCoupon, CouponKind } from '../../lib/types';
 import { Loading, Switch, errText, percentToBp } from './shared';
 
 const CAP_KEY = 'max_total_discount_bp';
@@ -104,8 +104,10 @@ const STATUS: Record<AdminCoupon['status'], { text: string; tone: 'green' | 'sla
   used_up: { text: 'Used up', tone: 'amber' },
 };
 
-interface CouponForm { code: string; pct: string; label: string; expires: string; max: string; once: boolean }
-const blank: CouponForm = { code: '', pct: '5', label: '', expires: '', max: '', once: true };
+const WORKS_ON: Record<CouponKind, string> = { both: 'Memberships and single washes', membership: 'Memberships only', single: 'Single washes only' };
+
+interface CouponForm { code: string; pct: string; label: string; expires: string; max: string; once: boolean; applies: CouponKind }
+const blank: CouponForm = { code: '', pct: '5', label: '', expires: '', max: '', once: true, applies: 'both' };
 
 function CouponSheet({ open, coupon, onClose }: { open: boolean; coupon: AdminCoupon | null; onClose: () => void }) {
   const act = useAdminAction();
@@ -114,7 +116,7 @@ function CouponSheet({ open, coupon, onClose }: { open: boolean; coupon: AdminCo
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     setErrors({});
-    setF(coupon ? { code: coupon.code, pct: String(coupon.discount_bp / 100), label: coupon.label ?? '', expires: coupon.expires_on ?? '', max: coupon.max_uses ? String(coupon.max_uses) : '', once: coupon.once_per_customer } : blank);
+    setF(coupon ? { code: coupon.code, pct: String(coupon.discount_bp / 100), label: coupon.label ?? '', expires: coupon.expires_on ?? '', max: coupon.max_uses ? String(coupon.max_uses) : '', once: coupon.once_per_customer, applies: coupon.applies_to } : blank);
   }, [coupon, open]);
 
   const bp = percentToBp(f.pct);
@@ -123,7 +125,7 @@ function CouponSheet({ open, coupon, onClose }: { open: boolean; coupon: AdminCo
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
-    const body = { code: coupon ? undefined : f.code.trim(), discount_bp: bp, label: f.label.trim() || null, expires_on: f.expires || null, max_uses: f.max.trim() ? Number(f.max) : null, once_per_customer: f.once };
+    const body = { code: coupon ? undefined : f.code.trim(), discount_bp: bp, label: f.label.trim() || null, expires_on: f.expires || null, max_uses: f.max.trim() ? Number(f.max) : null, once_per_customer: f.once, applies_to: f.applies };
     try {
       await act.mutateAsync(coupon ? { method: 'PUT', path: `coupons/${coupon.id}`, body } : { path: 'coupons', body });
       toast.success(coupon ? 'Coupon saved' : `Coupon ${f.code.trim().toUpperCase()} is live. Tell people to type it on the last step.`);
@@ -135,12 +137,15 @@ function CouponSheet({ open, coupon, onClose }: { open: boolean; coupon: AdminCo
   };
 
   return (
-    <Sheet open={open} onClose={onClose} size="sm" title={coupon ? `Change ${coupon.code}` : 'Make a coupon'} description={coupon ? 'The code itself cannot change: make a new coupon for a new code.' : 'People type the code on the last step and get the extra percentage off the plan price, on top of the other discounts.'}
+    <Sheet open={open} onClose={onClose} size="sm" title={coupon ? `Change ${coupon.code}` : 'Make a coupon'} description={coupon ? 'The code itself cannot change: make a new coupon for a new code.' : 'People type the code on the last step and get that percentage off the price. On a membership it comes on top of the other discounts.'}
       footer={<Button full size="lg" loading={act.isPending} disabled={!pctOk || !codeOk} onClick={(e) => void submit(e as unknown as React.FormEvent)}>{coupon ? 'Save' : 'Make the coupon'}</Button>}>
       <form onSubmit={(e) => void submit(e)} className="space-y-4" noValidate>
         <Input label="Code" value={f.code} disabled={Boolean(coupon)} maxLength={20} autoCapitalize="characters" autoComplete="off" spellCheck={false} placeholder="For example EXTRA5"
           onChange={(e) => setF({ ...f, code: e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase() })} error={errors.code} hint={coupon ? undefined : '3 to 20 letters and numbers. Capitals do not matter when people type it.'} />
-        <Input label="Percent off the plan price" inputMode="decimal" value={f.pct} onChange={(e) => setF({ ...f, pct: e.target.value })} error={errors.discount_bp ?? (f.pct && !pctOk ? 'Between 0.01 and 50' : undefined)}
+        <Select label="Works on" value={f.applies} onChange={(e) => setF({ ...f, applies: e.target.value as CouponKind })} error={errors.applies_to} hint="Where a customer can type it: on a membership, on a single wash, or on both.">
+          {(Object.keys(WORKS_ON) as CouponKind[]).map((k) => <option key={k} value={k}>{WORKS_ON[k]}</option>)}
+        </Select>
+        <Input label="Percent off the price" inputMode="decimal" value={f.pct} onChange={(e) => setF({ ...f, pct: e.target.value })} error={errors.discount_bp ?? (f.pct && !pctOk ? 'Between 0.01 and 50' : undefined)}
           hint={pctOk ? `For a ₹1,000 plan that is ${rupees(Math.round(1000_00 * (bp as number) / 10000))} off, extra.` : undefined} />
         <Input label="Note for yourself" optional value={f.label} maxLength={60} onChange={(e) => setF({ ...f, label: e.target.value })} error={errors.label} placeholder="For example Word of mouth, Navratri" />
         <Input label="Last day" optional type="date" min={todayIST()} value={f.expires} onChange={(e) => setF({ ...f, expires: e.target.value })} error={errors.expires_on} hint="Leave empty for no end date." />
@@ -158,13 +163,13 @@ function CouponSheet({ open, coupon, onClose }: { open: boolean; coupon: AdminCo
 function UsesSheet({ coupon, onClose }: { coupon: AdminCoupon | null; onClose: () => void }) {
   const { data, isLoading, isError } = useAdminCouponUses(coupon?.id ?? null);
   return (
-    <Sheet open={Boolean(coupon)} onClose={onClose} size="md" title={coupon ? `Who used ${coupon.code}` : ''} description={coupon ? `${coupon.uses} membership${coupon.uses === 1 ? '' : 's'} paid for with it, ${rupees(coupon.saved_cents)} off in all. The latest 50 are shown.` : undefined}
+    <Sheet open={Boolean(coupon)} onClose={onClose} size="md" title={coupon ? `Who used ${coupon.code}` : ''} description={coupon ? `${coupon.uses} purchase${coupon.uses === 1 ? '' : 's'} paid for with it, ${rupees(coupon.saved_cents)} off in all. The latest 50 are shown.` : undefined}
       footer={<Button full variant="glass" onClick={onClose}>Close</Button>}>
       {isError ? <p className="text-sm text-bad">Could not load this.</p> : isLoading ? <Loading /> : !data?.length ? <p className="text-sm text-fog">Nobody has paid with this coupon yet.</p> : (
         <ul className="divide-y divide-white/5 rounded-2xl border border-white/10 bg-white/[0.03]">
           {data.map((u) => (
             <li key={u.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm">
-              <div className="min-w-0"><p className="truncate font-semibold">{u.customer_name ?? 'Customer'}</p><p className="truncate text-xs text-fog">{u.reference_code ?? 'Membership'} · paid {rupees(u.plan_cents)}</p></div>
+              <div className="min-w-0"><p className="truncate font-semibold">{u.customer_name ?? 'Customer'}</p><p className="truncate text-xs text-fog">{u.kind === 'single' ? 'Single wash' : 'Membership'} · {u.reference_code ?? ''} · paid {rupees(u.plan_cents)}</p></div>
               <div className="text-right"><p className="font-semibold text-ok">−{rupees(u.discount_cents)}</p><p className="text-xs text-fog">{relativeTime(u.at)}</p></div>
             </li>
           ))}
@@ -190,7 +195,7 @@ function Coupons({ canEdit }: { canEdit: boolean }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-bold"><Tag className="h-5 w-5 text-washo-300" /> Coupons</h2>
-          <p className="mt-1 max-w-2xl text-sm text-fog">Make a code (for example EXTRA5 worth 5%), tell people, and they type it on the last step of a membership to get that much more off the plan price. It shows as its own line and comes on top of the automatic discounts. Nothing is ever deleted: switch a coupon off and every use stays on record.</p>
+          <p className="mt-1 max-w-2xl text-sm text-fog">Make a code (for example EXTRA5 worth 5%), choose whether it works on memberships, single washes or both, tell people, and they type it on the last step to get that much off. It shows as its own line (on a membership it comes on top of the automatic discounts). Nothing is ever deleted: switch a coupon off and every use stays on record.</p>
         </div>
         {canEdit && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setMaking(true)}>Make a coupon</Button>}
       </div>
@@ -206,6 +211,8 @@ function Coupons({ canEdit }: { canEdit: boolean }) {
                   {c.label && <p className="truncate text-sm text-fog">{c.label}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-2"><span className="font-display text-2xl font-extrabold tabular-nums">{percent(c.discount_bp)}</span><Badge tone={STATUS[c.status].tone}>{STATUS[c.status].text}</Badge></div>
+              </div>
+              <div className="mt-2"><Badge tone="blue">{WORKS_ON[c.applies_to]}</Badge>
               </div>
               <p className="mt-3 text-sm text-mist">
                 Used <strong className="text-white">{c.uses}</strong> time{c.uses === 1 ? '' : 's'}{c.max_uses ? ` of ${c.max_uses}` : ''} · {rupees(c.saved_cents)} off in all{c.last_used_at ? ` · last ${relativeTime(c.last_used_at)}` : ''}

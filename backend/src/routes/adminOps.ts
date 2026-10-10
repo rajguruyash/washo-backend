@@ -34,6 +34,16 @@ adminOpsRouter.get(
   })
 );
 
+// ───────────────────────── customers' ratings of washes ─────────────────────────
+// Washes area: whoever may look at washes may read what customers said about them.
+adminOpsRouter.get(
+  '/admin/reviews',
+  asyncHandler(async (req, res) => {
+    const q = parse(z.object({ max: z.coerce.number().int().min(1).max(5).optional(), limit: z.coerce.number().int().min(1).max(300).default(100) }), req.query);
+    res.json({ success: true, ...(await one<{ summary: unknown; reviews: unknown[] }>(req, 'SELECT public.admin_list_reviews($1, $2) AS r', [q.max ?? null, q.limit])) });
+  })
+);
+
 // ───────────────────────── activity log ─────────────────────────
 adminOpsRouter.get(
   '/admin/activity',

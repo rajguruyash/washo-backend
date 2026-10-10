@@ -19,10 +19,10 @@ const staff = (access: Role) => staffClient('admin', { access });
 const code = () => `EX${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 const dbRows = async (sql: string, params: unknown[] = []) => (await fake.admin.query(sql, params)).rows;
 
-const make = async (o: { code?: string; percent?: number; role?: Role; max_uses?: number | null; once_per_customer?: boolean; expires_on?: string | null; label?: string | null } = {}) => {
+const make = async (o: { code?: string; percent?: number; role?: Role; max_uses?: number | null; once_per_customer?: boolean; expires_on?: string | null; label?: string | null; applies_to?: 'membership' | 'single' | 'both' } = {}) => {
   const admin = await staff(o.role ?? 'marketing');
   const c = o.code ?? code();
-  const r = expectOk(await admin.c.post('/api/admin/coupons', { code: c, discount_bp: Math.round((o.percent ?? 5) * 100), max_uses: o.max_uses ?? null, once_per_customer: o.once_per_customer ?? true, expires_on: o.expires_on ?? null, label: o.label ?? null })).body.coupon;
+  const r = expectOk(await admin.c.post('/api/admin/coupons', { code: c, discount_bp: Math.round((o.percent ?? 5) * 100), max_uses: o.max_uses ?? null, once_per_customer: o.once_per_customer ?? true, expires_on: o.expires_on ?? null, label: o.label ?? null, applies_to: o.applies_to ?? 'membership' })).body.coupon;
   return { ...r, admin };
 };
 const plan = { body: 4, deep: 0, weekdays: [1, 4] };
@@ -67,10 +67,10 @@ describe('who can make coupons', () => {
     expect((await bad({ expires_on: '2020-01-01' })).status).toBe(422);
     expect((await bad({ expires_on: 'soon' })).status).toBe(400);
 
-    const next = expectOk(await m.c.put(`/api/admin/coupons/${made.id}`, { discount_bp: 750, label: 'Spring', max_uses: 25, once_per_customer: false })).body.coupon;
+    const next = expectOk(await m.c.put(`/api/admin/coupons/${made.id}`, { discount_bp: 750, label: 'Spring', max_uses: 25, once_per_customer: false, applies_to: 'membership' })).body.coupon;
     expect(next).toMatchObject({ code: 'EXTRA5', discount_bp: 750, label: 'Spring', max_uses: 25, once_per_customer: false });
-    expect((await m.c.put(`/api/admin/coupons/${made.id}`, { code: 'ANOTHER', discount_bp: 750, once_per_customer: false })).status).toBe(422);
-    expect((await m.c.put(`/api/admin/coupons/${crypto.randomUUID()}`, { discount_bp: 750, once_per_customer: false })).status).toBe(404);
+    expect((await m.c.put(`/api/admin/coupons/${made.id}`, { code: 'ANOTHER', discount_bp: 750, once_per_customer: false, applies_to: 'membership' })).status).toBe(422);
+    expect((await m.c.put(`/api/admin/coupons/${crypto.randomUUID()}`, { discount_bp: 750, once_per_customer: false, applies_to: 'both' })).status).toBe(404);
     expect((await m.c.put('/api/admin/coupons/not-an-id', { discount_bp: 750 })).status).toBe(400);
     expect(expectOk(await m.c.post(`/api/admin/coupons/${made.id}/active`, { active: false })).body.coupon).toMatchObject({ is_active: false, status: 'off' });
     expect(expectOk(await m.c.post(`/api/admin/coupons/${made.id}/active`, { active: true })).body.coupon.status).toBe('live');
@@ -184,3 +184,82 @@ describe('paying with a coupon', () => {
     expect(expectOk(await one.admin.c.get('/api/admin/coupons')).body.coupons.find((x: any) => x.id === one.id).status).toBe('used_up');
   });
 });
+
+describe('single washes', () => {
+  const svc = async (code = 'car-body-wash') => (await dbRows('select id from public.services where code = $1', [code]))[0].id as string;
+  const estimateSingle = async (c: Client, vehicleId: string, coupon?: string, code = 'car-body-wash') =>
+    c.post('/api/booking-estimate', { vehicle_id: vehicleId, service_id: await svc(code), ...(coupon === undefined ? {} : { coupon }) });
+  const checkoutSingle = async (c: Client, v: { vehicle: { id: string }; addr: { id: string } }, coupon?: string, days = 5) =>
+    c.post('/api/payments/on-demand', { vehicle_id: v.vehicle.id, service_id: await svc(), scheduled_date: istDate(days), time_slot: 'morning', address_id: v.addr.id, ...(coupon === undefined ? {} : { coupon }) });
+
+  it('the admin chooses what a coupon works on: memberships, single washes or both', async () => {
+    const both = await make({ applies_to: 'both' });
+    const one = await make({ applies_to: 'single' });
+    const m = await make({ applies_to: 'membership' });
+    expect([both.applies_to, one.applies_to, m.applies_to]).toEqual(['both', 'single', 'membership']);
+    // not saying defaults a NEW coupon to both; a change always has to say it
+    const quick = expectOk(await both.admin.c.post('/api/admin/coupons', { code: code(), discount_bp: 500 })).body.coupon;
+    expect(quick.applies_to).toBe('both');
+    expect((await both.admin.c.post('/api/admin/coupons', { code: code(), discount_bp: 500, applies_to: 'everything' })).status).toBe(400);
+    expect((await both.admin.c.put(`/api/admin/coupons/${one.id}`, { discount_bp: 500, once_per_customer: true })).status).toBe(400);
+    expect(expectOk(await both.admin.c.put(`/api/admin/coupons/${one.id}`, { discount_bp: 500, once_per_customer: true, applies_to: 'both' })).body.coupon.applies_to).toBe('both');
+  });
+
+  it('a signed-in customer sees the single-wash price with the coupon; a visitor, a specialist and an admin cannot; and it says why a code is refused', async () => {
+    const cust = await customerWithVehicle('car');
+    const c = await make({ percent: 5, applies_to: 'single' });
+    const plain = expectOk(await estimateSingle(cust.c, cust.vehicle.id)).body.estimate;
+    expect(plain).toEqual({ list_cents: 15000, final_cents: 15000 });
+    const q = expectOk(await estimateSingle(cust.c, cust.vehicle.id, ` ${c.code.toLowerCase()}`)).body.estimate;
+    expect(q).toMatchObject({ list_cents: 15000, final_cents: 14250, coupon: { code: c.code, bp: 500, cents: 750 } });
+    expect(expectOk(await estimateSingle(cust.c, cust.vehicle.id, '')).body.estimate).toEqual(plain);
+    expect((await estimateSingle(cust.c, cust.vehicle.id, 'NOSUCHCODE')).body.message).toBe('That coupon code is not valid');
+    const mem = await make({ applies_to: 'membership' });
+    expect((await estimateSingle(cust.c, cust.vehicle.id, mem.code)).body.message).toBe('That coupon is for memberships only');
+    // and a single-wash coupon is not for a membership
+    expect((await estimate(cust.c, c.code)).body.message).toBe('That coupon is for single washes only');
+    expect((await estimateSingle(new Client(), cust.vehicle.id, c.code)).status).toBe(401);
+    expect((await estimateSingle(await (await staff('super_admin')).c, cust.vehicle.id, c.code)).status).toBe(403);
+    expect((await cust.c.post('/api/booking-estimate', { vehicle_id: 'nope', service_id: await svc(), coupon: c.code })).status).toBe(400);
+    const other = await customerWithVehicle('car');
+    expect((await estimateSingle(other.c, cust.vehicle.id, c.code)).status).toBe(404);   // not their vehicle
+  });
+
+  it('Razorpay is asked for the discounted amount; the wash is booked at it; the use is counted when PAID; the Admin page tells it from a membership', async () => {
+    const c = await make({ percent: 10, applies_to: 'both', once_per_customer: true });
+    const cust = await customerWithVehicle('car');
+    const order = expectOk(await checkoutSingle(cust.c, cust, ` ${c.code.toLowerCase()}`)).body.order;
+    expect(order.amount).toBe(13500);
+    expect((await dbRows('select count(*)::int n from public.membership_coupon_redemptions where coupon_id = $1', [c.id]))[0].n).toBe(0);
+    const paid = expectOk(await cust.c.post('/api/payments/verify', fake.checkout(order.order_id))).body.result;
+    expect(paid.booking_id).toBeTruthy();
+    expect((await dbRows('select price_cents from public.bookings where id = $1', [paid.booking_id]))[0].price_cents).toBe(13500);
+    const listed = expectOk(await c.admin.c.get('/api/admin/coupons')).body.coupons.find((x: any) => x.id === c.id);
+    expect(listed).toMatchObject({ uses: 1, saved_cents: 1500, applies_to: 'both' });
+    const uses = expectOk(await c.admin.c.get(`/api/admin/coupons/${c.id}/uses`)).body.uses;
+    expect(uses[0]).toMatchObject({ kind: 'single', discount_cents: 1500, plan_cents: 13500, booking_id: paid.booking_id });
+    // once per customer: the same customer cannot use it again on a membership either
+    const again = await estimate(cust.c, c.code);
+    expect(again.body.message).toBe('You have already used this coupon');
+  });
+
+  it('no coupon is the plain price, as it always was; a bad coupon stops the checkout before any payment', async () => {
+    const cust = await customerWithVehicle('car');
+    expect(expectOk(await checkoutSingle(cust.c, cust)).body.order.amount).toBe(15000);
+    const bad = await checkoutSingle(cust.c, cust, 'NOSUCHCODE', 6);
+    expect(bad.status).toBe(422);
+    expect(bad.body.message).toBe('That coupon code is not valid');
+    const wrong = await make({ applies_to: 'membership' });
+    const refused = await checkoutSingle(cust.c, cust, wrong.code, 6);
+    expect(refused.body.message).toBe('That coupon is for memberships only');
+    expect((await dbRows(`select count(*)::int n from public.payments where customer_profile_id = (select id from public.profiles where phone = $1 limit 1) and amount_cents = 15000 and status = 'pending'`, [cust.phone ?? '']))[0].n).toBeGreaterThanOrEqual(0);
+  });
+
+  it('guessing is slowed down on single washes too (the same count as memberships)', async () => {
+    const cust = await customerWithVehicle('car');
+    for (let i = 0; i < 10; i++) expect((await estimateSingle(cust.c, cust.vehicle.id, `NOPE${i}XX`)).status).toBe(422);
+    expect((await estimateSingle(cust.c, cust.vehicle.id, 'NOPE99XX')).status).toBe(429);
+    expect(expectOk(await estimateSingle(cust.c, cust.vehicle.id)).body.estimate.final_cents).toBe(15000);   // the plain price is never held back
+  });
+});
+

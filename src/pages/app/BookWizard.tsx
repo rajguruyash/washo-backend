@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
+import { CouponBox } from '../../components/CouponBox';
 import { ServicePhoto } from '../../components/ServicePhoto';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
@@ -15,8 +16,9 @@ import { stepMotion, useStepDirection } from '../../lib/stepMotion';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { cn } from '../../lib/cn';
-import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
-import { useAddresses, useCapacity, useCatalog, usePublicSettings, useStartOnDemandPayment, useVehicles } from '../../lib/queries';
+import { addDays, percent, prettyDate, rupees, todayIST } from '../../lib/format';
+import { ApiError, post } from '../../lib/http';
+import { useAddresses, useCapacity, useCatalog, usePublicSettings, useSingleWashEstimate, useStartOnDemandPayment, useVehicles, type SingleWashEstimate } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import type { SlotId, Vehicle } from '../../lib/types';
 import { usePay } from '../../lib/usePay';
@@ -38,6 +40,8 @@ export default function BookWizard() {
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
+  // A coupon typed on the review step: checked by the server for this customer and this wash, then part of the price.
+  const [coupon, setCoupon] = useState<string | null>(null);
 
   useEffect(() => {
     if (vehicle || !vehicles?.length) return;
@@ -53,6 +57,13 @@ export default function BookWizard() {
       .filter((s) => s.price != null);
   }, [vehicle, catalog]);
   const service = options.find((s) => s.id === serviceId);
+  const priced = useSingleWashEstimate(coupon && vehicle && service ? { vehicle_id: vehicle.id, service_id: service.id, coupon } : null);
+  const total = coupon && priced.data ? priced.data.final_cents : service?.price ?? 0;
+  const couponStopped = coupon && priced.isError ? (priced.error instanceof ApiError ? priced.error.message : 'That coupon cannot be used now.') : '';
+  const checkCoupon = async (code: string) => {
+    const r = (await post<{ estimate: SingleWashEstimate }>('/booking-estimate', { vehicle_id: vehicle!.id, service_id: service!.id, coupon: code })).estimate;
+    return { code: r.coupon?.code ?? code.toUpperCase(), bp: r.coupon?.bp ?? null };
+  };
   const address = addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
   const ok = [Boolean(vehicle), Boolean(service), Boolean(date && slot), true][step];
   const dir = useStepDirection(step);
@@ -65,7 +76,7 @@ export default function BookWizard() {
   const submit = async () => {
     if (!vehicle || !service || !date || !slot) throw new Error('incomplete');
     const result = await pay(
-      () => start.mutateAsync({ vehicle_id: vehicle.id, service_id: service.id, scheduled_date: date, time_slot: slot, address_id: address?.id, parking_location: address?.parking_location }),
+      () => start.mutateAsync({ vehicle_id: vehicle.id, service_id: service.id, scheduled_date: date, time_slot: slot, address_id: address?.id, parking_location: address?.parking_location, coupon: coupon ?? undefined }),
       `${service.name} · ${prettyDate(date)}`
     );
     if (!result?.booking_id) throw new Error('not paid');
@@ -82,7 +93,7 @@ export default function BookWizard() {
 
       <AnimatePresence mode="wait" initial={false} custom={dir}>
 
-      {step === 0 && <motion.section key="s0" {...slide}><h1 className="text-3xl font-extrabold">Which vehicle?</h1><p className="mb-6 mt-1.5 text-fog">A single wash. For regular washing a membership is better value.</p><VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); setServiceId(null); }} /></motion.section>}
+      {step === 0 && <motion.section key="s0" {...slide}><h1 className="text-3xl font-extrabold">Which vehicle?</h1><p className="mb-6 mt-1.5 text-fog">A single wash. For regular washing a membership is better value.</p><VehiclePicker value={vehicle?.id ?? null} onChange={(v) => { setVehicle(v); setServiceId(null); setCoupon(null); }} /></motion.section>}
 
       {step === 1 && (
         <motion.section key="s1" {...slide}>
@@ -92,7 +103,7 @@ export default function BookWizard() {
           {!catalogLoading && !catalogError && !options.length && <p className="mt-6 text-sm text-fog">No services are available for this vehicle right now.</p>}
           <div className="mt-6 grid gap-3" role="radiogroup" aria-label="Service">
             {options.map((s) => (
-              <button key={s.id} type="button" role="radio" aria-checked={s.id === serviceId} onClick={() => setServiceId(s.id)} className={cn('flex items-center gap-4 rounded-3xl border p-4 text-left transition-all', s.id === serviceId ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
+              <button key={s.id} type="button" role="radio" aria-checked={s.id === serviceId} onClick={() => { setServiceId(s.id); setCoupon(null); }} className={cn('flex items-center gap-4 rounded-3xl border p-4 text-left transition-all', s.id === serviceId ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
                 <ServicePhoto code={s.code} name={s.name} className="h-20 w-20 shrink-0 rounded-2xl" />
                 <span className="min-w-0 flex-1"><span className="block font-bold">{s.name}</span><span className="mt-1 block text-sm text-fog">{s.tagline ?? s.description}</span></span>
                 <span className="font-display text-2xl font-extrabold">{rupees(s.price!)}</span>
@@ -111,8 +122,15 @@ export default function BookWizard() {
             <div className="flex justify-between p-5"><span className="text-fog">Service</span><span className="font-semibold">{service.name}</span></div>
             <div className="flex justify-between p-5"><span className="text-fog">Vehicle</span><span className="font-semibold">{vehicle.model} · {vehicle.registration_number}</span></div>
             <div className="flex justify-between p-5"><span className="text-fog">When</span><span className="font-semibold">{prettyDate(date)}, {slotLabel(slot)}</span></div>
-            <div className="flex justify-between p-5"><span className="text-fog">Total</span><span className="font-display text-xl font-extrabold">{rupees(service.price!)}</span></div>
+            {coupon && priced.data?.coupon && (
+              <>
+                <div className="flex justify-between p-5"><span className="text-fog">Price</span><span className="font-semibold">{rupees(priced.data.list_cents)}</span></div>
+                <div className="flex justify-between p-5"><span className="text-fog">Coupon {priced.data.coupon.code} ({percent(priced.data.coupon.bp)})</span><span className="font-semibold text-ok">−{rupees(priced.data.coupon.cents)}</span></div>
+              </>
+            )}
+            <div className="flex justify-between p-5"><span className="text-fog">Total</span><span className="font-display text-xl font-extrabold">{rupees(total)}</span></div>
           </div>
+          <CouponBox applied={coupon ? { code: coupon, bp: priced.data?.coupon?.bp } : null} stopped={couponStopped} check={checkCoupon} onApply={setCoupon} onRemove={() => setCoupon(null)} />
           <p className="mt-4 text-xs text-fog">Your wash is booked once the payment is verified. The price is set by WASHO's rate card, not by this page.</p>
           <PayPhoneGate />
         </motion.section>
@@ -122,7 +140,7 @@ export default function BookWizard() {
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t lg:left-[17rem] border-white/[0.08] bg-ink-900/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <Button variant="glass" size="lg" disabled={step === 0} onClick={() => setStep(step - 1)} aria-label="Back" icon={<ArrowLeft className="h-5 w-5" />} />
-          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(service.price!) : ''}`.trim()} disabled={paying || start.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone)]} onConfirm={submit} onDone={afterPaid} />}
+          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(total) : ''}`.trim()} disabled={paying || start.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone), ...(couponStopped ? [{ label: 'Remove the coupon first', target: 'pay-coupon' }] : [])]} onConfirm={submit} onDone={afterPaid} />}
         </div>
       </div>
     </div>

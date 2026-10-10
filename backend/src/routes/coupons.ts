@@ -13,7 +13,7 @@ couponsRouter.use('/admin', requireSession, requireRole('admin'));
 
 const uuid = z.string().uuid();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a date.');
-const body = z.object({
+const base = z.object({
   code: z.string().trim().max(30).optional(),
   // basis points (500 = 5%): the page works in percent and sends whole hundredths of a percent
   discount_bp: z.number().int('Enter the percentage.').min(1, 'A coupon takes between 0.01% and 50% off.').max(5000, 'A coupon takes between 0.01% and 50% off.'),
@@ -22,6 +22,9 @@ const body = z.object({
   max_uses: z.number().int().min(1, 'The most uses must be 1 or more.').max(1_000_000).nullish(),
   once_per_customer: z.boolean().default(true),
 });
+const worksOn = z.enum(['membership', 'single', 'both'], 'Choose what the coupon works on.'); // a membership, a single wash, or both
+const createBody = base.extend({ applies_to: worksOn.default('both') });
+const changeBody = base.extend({ applies_to: worksOn }); // a change always says it, so an old page can never widen a coupon by leaving it out
 
 const one = async <T>(req: { db: <R>(fn: (c: import('pg').PoolClient) => Promise<R>) => Promise<R> }, sql: string, params: unknown[] = []) =>
   req.db(async (c) => (await c.query(sql, params)).rows[0].r as T);
@@ -36,8 +39,8 @@ couponsRouter.get(
 couponsRouter.post(
   '/admin/coupons',
   asyncHandler(async (req, res) => {
-    const b = parse(body, req.body);
-    const coupon = await one(req, 'SELECT public.admin_save_coupon(NULL, $1, $2, $3, $4::date, $5, $6) AS r', [b.code ?? '', b.discount_bp, b.label ?? null, b.expires_on ?? null, b.max_uses ?? null, b.once_per_customer]);
+    const b = parse(createBody, req.body);
+    const coupon = await one(req, 'SELECT public.admin_save_coupon(NULL, $1, $2, $3, $4::date, $5, $6, $7) AS r', [b.code ?? '', b.discount_bp, b.label ?? null, b.expires_on ?? null, b.max_uses ?? null, b.once_per_customer, b.applies_to]);
     res.status(201).json({ success: true, coupon });
   })
 );
@@ -46,8 +49,8 @@ couponsRouter.put(
   '/admin/coupons/:id',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    const b = parse(body, req.body);
-    const coupon = await one(req, 'SELECT public.admin_save_coupon($1, $2, $3, $4, $5::date, $6, $7) AS r', [id, b.code ?? null, b.discount_bp, b.label ?? null, b.expires_on ?? null, b.max_uses ?? null, b.once_per_customer]);
+    const b = parse(changeBody, req.body);
+    const coupon = await one(req, 'SELECT public.admin_save_coupon($1, $2, $3, $4, $5::date, $6, $7, $8) AS r', [id, b.code ?? null, b.discount_bp, b.label ?? null, b.expires_on ?? null, b.max_uses ?? null, b.once_per_customer, b.applies_to]);
     res.json({ success: true, coupon });
   })
 );

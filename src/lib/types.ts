@@ -199,6 +199,9 @@ export type BookingStatus =
   | 'refunded'
   | 'no_show';
 
+/** A customer's rating of a finished wash: 1 to 5 stars, and the words if they wrote any. */
+export interface WashReview { rating: number; review: string | null; updated_at: string }
+
 export interface MembershipWash {
   id: string;
   reference_code: string;
@@ -209,6 +212,7 @@ export interface MembershipWash {
   service_name: string;
   wash_kind: WashKind | null;
   completed_at: string | null;
+  review?: WashReview | null;
 }
 
 export interface Booking {
@@ -236,6 +240,8 @@ export interface Booking {
   registration_number: string;
   /** Set when this is a free wash claimed in a campaign (the booking detail only). */
   campaign_name?: string | null;
+  /** This customer's own rating of the wash, once they have given one. */
+  review?: WashReview | null;
 }
 
 export interface BookingRefund {
@@ -696,6 +702,27 @@ export interface AdminSettings {
   maintenance_message: string;
   big_refund_threshold_cents: number;
 }
+export interface AdminReview {
+  id: string;
+  booking_id: string;
+  rating: number;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+  customer_name: string | null;
+  worker_name: string | null;
+  service_name: string;
+  scheduled_date: string;
+  booking_type: 'on_demand' | 'membership';
+  vehicle_model: string;
+  registration_number: string;
+}
+export interface AdminReviews {
+  summary: { count: number; average: number; with_text: number; stars: Record<'1' | '2' | '3' | '4' | '5', number> };
+  reviews: AdminReview[];
+}
+
+export type CouponKind = 'membership' | 'single' | 'both';
 export interface AdminCoupon {
   id: string;
   code: string;
@@ -705,13 +732,15 @@ export interface AdminCoupon {
   expires_on: string | null;
   max_uses: number | null;
   once_per_customer: boolean;
+  /** What the coupon works on: memberships, single washes or both. */
+  applies_to: CouponKind;
   created_at: string;
   uses: number;
   saved_cents: number;
   last_used_at: string | null;
   status: 'live' | 'off' | 'expired' | 'used_up';
 }
-export interface CouponUse { id: string; at: string; customer_name: string | null; customer_phone: string | null; reference_code: string | null; discount_cents: number; membership_id: string; plan_cents: number }
+export interface CouponUse { id: string; kind: 'membership' | 'single'; at: string; customer_name: string | null; customer_phone: string | null; reference_code: string | null; discount_cents: number; membership_id: string; plan_cents: number }
 
 export type RenewalStep = 'week' | 'last' | 'ended';
 export interface RenewalStepSetting { on: boolean; days: number }

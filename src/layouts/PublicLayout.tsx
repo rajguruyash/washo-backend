@@ -87,7 +87,7 @@ export function PublicLayout() {
           <div>
             <h4 className="text-sm font-bold">Contact</h4>
             <ul className="mt-4 space-y-2.5 text-sm text-fog">
-              <li className="flex items-center gap-2"><Phone className="h-4 w-4 text-washo-300" /><a href="tel:8668890147" className="hover:text-white">8668890147</a> / <a href="tel:9822911523" className="hover:text-white">9822911523</a></li>
+              <li className="flex items-center gap-2"><Phone className="h-4 w-4 text-washo-300" /><a href="tel:8668890147" className="hover:text-white">8668890147</a> / <a href="tel:9172792929" className="hover:text-white">9172792929</a></li>
               <li className="flex items-center gap-2"><Mail className="h-4 w-4 text-washo-300" /><a href="mailto:contact.washo@gmail.com" className="hover:text-white">contact.washo@gmail.com</a></li>
               <li className="flex items-center gap-2"><MapPin className="h-4 w-4 text-washo-300" /> Kharadi, Pune</li>
             </ul>

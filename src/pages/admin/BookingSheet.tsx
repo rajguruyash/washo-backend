@@ -2,6 +2,7 @@ import { CalendarClock, Pencil, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { PhotoGrid } from '../../components/PhotoGrid';
+import { Stars } from '../../components/WashRating';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Input, Select, TextArea } from '../../components/ui/Field';
@@ -65,6 +66,12 @@ export function BookingSheet({ id, onClose }: { id: string | null; onClose: () =
             </div>
           )}
           <section><h3 className="mb-2 text-sm font-bold">Photos</h3><PhotoGrid bookingId={b.id} /></section>
+          {data!.review && (
+            <section>
+              <h3 className="mb-2 text-sm font-bold">What the customer said</h3>
+              <div className="panel p-3"><Stars value={data!.review.rating} size={20} />{data!.review.review ? <p className="mt-2 whitespace-pre-wrap text-sm text-mist">{data!.review.review}</p> : <p className="mt-2 text-xs text-fog">Stars only, no review.</p>}</div>
+            </section>
+          )}
           <section>
             <h3 className="mb-2 text-sm font-bold">History</h3>
             <ol className="space-y-2 text-sm">

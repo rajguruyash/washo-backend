@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { campaignNames, withCampaignNames } from '../campaigns';
+import { reviewsNotInstalled } from '../reviews';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { reconcileOrder, refundPayment } from '../razorpay';
 import { strongPassword } from '../password';
@@ -137,7 +138,9 @@ adminRouter.get(
     if (!out) throw new HttpError(404, 'not_found', 'Booking not found');
     const photos = await Promise.all(out.photoRows.map(async (p: any) => ({ id: p.id, phase: p.phase, photo_type: p.photo_type, created_at: p.created_at, url: await photoStorage.signedUrl(p.storage_path) })));
     const names = await campaignNames(req.db, [id]);
-    res.json({ success: true, booking: { ...out.booking, campaign_name: names.get(id) ?? null }, events: out.events, photos });
+    // The customer's rating of this wash, if they gave one (tolerant: a database without reviews yet has none).
+    const review = await req.db(async (c) => (await c.query('SELECT public.admin_wash_review($1) AS r', [id])).rows[0].r).catch((err) => { if (reviewsNotInstalled(err)) return null; throw err; });
+    res.json({ success: true, booking: { ...out.booking, campaign_name: names.get(id) ?? null }, events: out.events, photos, review });
   })
 );
 

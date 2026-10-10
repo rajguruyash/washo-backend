@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requirePhone, requireRole, requireSession } from '../middleware/http';
 import { campaignsNotInstalled } from '../campaigns';
+import { withReviews } from '../reviews';
 import { notifyAdminOfRequest } from '../notify';
 import { openOrder, reconcileOrder } from '../razorpay';
 
@@ -175,6 +176,6 @@ membershipsRouter.get(
       return { membership, washes };
     });
     if (!out) throw new HttpError(404, 'not_found', 'Membership not found');
-    res.json({ success: true, ...out });
+    res.json({ success: true, ...out, washes: await withReviews(req.db, out.washes) });
   })
 );
