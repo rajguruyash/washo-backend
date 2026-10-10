@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { EMPTY_STATUS, campaignsNotInstalled } from '../campaigns';
 import { freeWashEmail, sendTracked } from '../emails';
 import { mailConfigured } from '../notify';
-import { parse } from '../errors';
+import { HttpError, parse } from '../errors';
 import { withAnon } from '../db';
 import { cached, forgetPublic } from '../publicCache';
 import { asyncHandler, optionalSession, requirePhone, requireRole, requireSession } from '../middleware/http';
@@ -86,14 +86,23 @@ campaignRouter.post(
       }),
       req.body
     );
-    const r = await req.db(
-      async (c) =>
-        (
-          await c.query('SELECT public.claim_campaign_wash($1, $2, NULL::date, NULL::public.time_slot, $3, $4) AS r', [
-            b.campaign_id, b.vehicle_id, b.address_id ?? null, b.parking_location ?? null,
-          ])
-        ).rows[0].r
-    );
+    const r = await req
+      .db(
+        async (c) =>
+          (
+            await c.query('SELECT public.claim_campaign_wash($1, $2, NULL::date, NULL::public.time_slot, $3, $4) AS r', [
+              b.campaign_id, b.vehicle_id, b.address_id ?? null, b.parking_location ?? null,
+            ])
+          ).rows[0].r
+      )
+      .catch((err) => {
+        // The website never shows the time of day a campaign opens at: "This offer opens on 10 Sep, 10:00 am" is told as "This offer opens on 10 Sep".
+        const m = (err as { code?: string; message?: string }).message ?? '';
+        if ((err as { code?: string }).code === 'P0001' && /^This offer opens on .+, \d{1,2}:\d{2} (am|pm)$/i.test(m)) {
+          throw new HttpError(422, 'rule', m.replace(/, \d{1,2}:\d{2} (am|pm)$/i, ''));
+        }
+        throw err;
+      });
     forgetPublic(); // the number of free washes left has just changed
     res.status(201).json({ success: true, ...r });
     void emailConfirmation(req, r.booking_id).catch((err) => console.error('Free wash confirmation email failed:', (err as Error).message));

@@ -35,6 +35,7 @@ const WORDS: Record<string, string> = {
   coupon_switched_off: 'Switched a coupon off',
   renewal_settings_changed: 'Changed the renewal emails',
   campaign_switched_off: 'Switched a campaign off',
+  campaign_deleted: 'Deleted a campaign',
   campaign_wash_claimed: 'A free wash was claimed',
   profile_restored: 'Restored a person',
   profile_archived: 'Switched a person off',

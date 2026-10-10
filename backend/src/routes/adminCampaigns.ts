@@ -88,12 +88,31 @@ const campaignSql = (times: boolean) => `
 const withTimes = async <T>(run: (sql: string) => Promise<T>): Promise<T> => {
   try { return await run(campaignSql(true)); } catch (err) { if ((err as { code?: string }).code === '42703') return run(campaignSql(false)); throw err; }
 };
+/** The list leaves out deleted campaigns (migration 37). A database without that column simply has none deleted. */
+const listLive = async <T>(run: (sql: string) => Promise<T>): Promise<T> => {
+  try { return await withTimes((sql) => run(`${sql} WHERE k.archived_at IS NULL`)); } catch (err) { if ((err as { code?: string }).code === '42703') return withTimes((sql) => run(sql)); throw err; }
+};
 
 adminCampaignsRouter.get(
   '/admin/campaigns',
   asyncHandler(async (req, res) => {
-    const campaigns = await withTimes((sql) => req.db(async (c) => (await c.query(`${sql} GROUP BY k.id ORDER BY k.created_at DESC`)).rows));
+    const campaigns = await listLive((sql) => req.db(async (c) => (await c.query(`${sql} GROUP BY k.id ORDER BY k.created_at DESC`)).rows));
     res.json({ success: true, campaigns });
+  })
+);
+
+// "Delete": archives the campaign. Nothing is removed (the claims, bookings and offers stay); it leaves the list and the website for good.
+adminCampaignsRouter.post(
+  '/admin/campaigns/:id/delete',
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    try {
+      await req.db((c) => c.query('SELECT public.admin_archive_campaign($1)', [id]));
+    } catch (err) {
+      if ((err as { code?: string }).code === '42883') throw new HttpError(503, 'backend_not_ready', "Deleting a campaign isn't switched on yet. The database needs its latest update; please contact whoever looks after it.");
+      throw err;
+    }
+    res.json({ success: true });
   })
 );
 

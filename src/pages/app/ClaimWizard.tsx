@@ -17,7 +17,7 @@ import { Button, ButtonLink } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
-import { claimView, closesLabel, opensLabel } from '../../lib/campaign';
+import { claimView, dayOf } from '../../lib/campaign';
 import { cn } from '../../lib/cn';
 import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
@@ -96,7 +96,7 @@ export default function ClaimWizard() {
   if (view === 'forfeited') return <Gate title="Your free wash was missed" actions={<ButtonLink to="/app/membership/new">Build a membership</ButtonLink>}><p>The offer has been used. You can still start a membership any time.</p></Gate>;
   if (view === 'ineligible') return <Gate title="This offer is for new customers" actions={<><ButtonLink to="/app/membership/new">Build a membership</ButtonLink><ButtonLink to="/app/book" variant="glass">Book a wash</ButtonLink></>}><p>You have already had a wash with WASHO, so the free wash is not available on this account.</p></Gate>;
   if (view === 'staff') return <Gate title="Sign in as a customer to claim" actions={<ButtonLink to="/app" variant="glass">Back</ButtonLink>} />;
-  if (view === 'upcoming') return <Gate title={`${campaign!.name} opens on ${opensLabel(campaign!)}`} actions={<ButtonLink to="/navratri" variant="glass">See the offer</ButtonLink>} />;
+  if (view === 'upcoming') return <Gate title={`${campaign!.name} opens on ${dayOf(campaign!.claim_opens_on)}`} actions={<ButtonLink to="/navratri" variant="glass">See the offer</ButtonLink>} />;
   if (view === 'full') return <Gate title="All the free washes have been claimed" actions={<ButtonLink to="/app/membership/new">Build a membership</ButtonLink>}><p>Thank you for your interest.</p></Gate>;
 
   const c = campaign as Campaign;
@@ -172,7 +172,7 @@ export default function ClaimWizard() {
             {!user?.email && <div className="mt-5"><Input label="Email" type="email" optional value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" hint="We will email your booking confirmation. You can leave this empty." /></div>}
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-offer/25 bg-offer/10 p-4 text-sm text-mist">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-offer" />
-              <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open (until {closesLabel(c)}). A specialist calls ahead on the day.</p>
+              <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open (until {dayOf(c.claim_closes_on)}). A specialist calls ahead on the day.</p>
             </div>
             <PayPhoneGate what="claim" />
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}

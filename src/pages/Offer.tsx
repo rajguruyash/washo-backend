@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import { Reveal } from '../components/ui/Reveal';
 import { Skeleton } from '../components/ui/Skeleton';
-import { audience, claimView, closesLabel, dayOf, offerRates, opensLabel } from '../lib/campaign';
+import { audience, claimView, dayOf, offerRates } from '../lib/campaign';
 import { percent, rupees } from '../lib/format';
 import { useCampaign, useCatalog } from '../lib/queries';
 import type { Campaign } from '../lib/types';
@@ -38,7 +38,7 @@ function ClaimButton({ campaign, size = 'lg' }: { campaign: Campaign; size?: 'md
   const status = useCampaign().data;
   const view = claimView(status, user?.role);
   const me = status?.me;
-  if (view === 'upcoming') return <p className="rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-mist">Opens {opensLabel(campaign)}</p>;
+  if (view === 'upcoming') return <p className="rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-mist">Opens {dayOf(campaign.claim_opens_on)}</p>;
   if (view === 'full') return <p className="rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-mist">All the free washes have been claimed. Thank you!</p>;
   if (view === 'staff') return <p className="text-sm text-fog">Sign in with a customer account to claim.</p>;
   if (view === 'booked' && me && 'booking_id' in me) return <ButtonLink to={`/app/bookings/${me.booking_id}`} size={size} iconRight={<ArrowRight className="h-5 w-5" />}>You are booked. View your free wash</ButtonLink>;
@@ -53,7 +53,7 @@ function ClaimButton({ campaign, size = 'lg' }: { campaign: Campaign; size?: 'md
 }
 
 const steps = [
-  { icon: Smartphone, title: 'Sign in with your phone', text: 'A one-time code to your mobile number. That is your claim: one free wash per number.' },
+  { icon: Smartphone, title: 'Sign in with your phone', text: 'Your mobile number and a password. That is your claim: one free wash per number.' },
   { icon: UserPlus, title: 'Add your vehicle and address', text: 'Your society and parking spot, and your bike, car or SUV. It takes a minute.' },
   { icon: Check, title: 'Slide to claim', text: 'No payment, no card. That is all you do: there is no date to pick.' },
   { icon: CalendarCheck, title: 'We choose the day and time', text: 'We place your wash on the earliest day with room, tell you straight away, and a specialist calls ahead.' },
@@ -89,7 +89,7 @@ export default function Offer() {
           <p className="mt-4 max-w-xl text-lg text-mist">{c.description ?? `A free body wash at your parking spot for ${audience(c).long} in Kharadi, Pune. No payment, no catch.`}</p>
           <div className="mt-5 flex flex-wrap gap-2">
             {left && <Badge tone="amber">{left}</Badge>}
-            <Badge>Claim by {closesLabel(c)}</Badge>
+            <Badge>Claim by {dayOf(c.claim_closes_on)}</Badge>
             <Badge>Wash by {dayOf(c.use_by_date)}</Badge>
           </div>
           <div className="mt-8"><ClaimButton campaign={c} /></div>
@@ -128,7 +128,7 @@ export default function Offer() {
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> One free wash for each phone number, vehicle and flat.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> You do not choose the day or time: we place your wash and tell you at once.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> It is a body wash: bike body wash, or car body wash for cars and SUVs.</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Claim from {opensLabel(c)} to {closesLabel(c)}. The wash itself must be on or before {dayOf(c.use_by_date)}.</li>
+            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Claim from {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}. The wash itself must be on or before {dayOf(c.use_by_date)}.</li>
             <li className="flex gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Kharadi, Pune, at your society parking spot.</li>
             <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Cancel it and the claim comes back, while the offer is still open.</li>
           </ul>

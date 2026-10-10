@@ -1,4 +1,4 @@
-import { ArrowLeft, Gift, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Gift, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
 import { Badge, type Tone } from '../../components/ui/Badge';
@@ -15,7 +15,7 @@ import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminCampaign, AdminCampaignClaim } from '../../lib/types';
 import { BookingSheet } from './BookingSheet';
-import { Loading, errText } from './shared';
+import { ConfirmSheet, Loading, errText } from './shared';
 
 /** Where a campaign is right now, in words, for its badge. */
 function liveState(c: AdminCampaign): { label: string; tone: Tone } {
@@ -25,6 +25,23 @@ function liveState(c: AdminCampaign): { label: string; tone: Tone } {
   if (Date.now() >= w.closes) return { label: 'Claims closed', tone: 'slate' };
   if (c.claimed >= c.total_cap) return { label: 'All claimed', tone: 'amber' };
   return { label: 'Live', tone: 'green' };
+}
+
+/** "Delete a campaign": it leaves the list and the website for good, but nothing is removed: the free washes already claimed stay on record. */
+function DeleteCampaign({ campaign, onClose, onDeleted }: { campaign: AdminCampaign | null; onClose: () => void; onDeleted?: () => void }) {
+  const act = useAdminAction();
+  const toast = useToast();
+  const go = async () => {
+    if (!campaign) return;
+    try { await act.mutateAsync({ path: `campaigns/${campaign.id}/delete`, body: {} }); toast.success(`${campaign.name} was deleted`); onClose(); onDeleted?.(); } catch (e) { toast.error(errText(e)); onClose(); }
+  };
+  return (
+    <ConfirmSheet
+      open={Boolean(campaign)} onClose={onClose} loading={act.isPending} tone="danger" confirmLabel="Delete campaign" title={`Delete ${campaign?.name ?? 'this campaign'}?`}
+      description={campaign ? `It is switched off and removed from this list and from the website, for good.${campaign.claimed ? ` The ${campaign.claimed} free wash${campaign.claimed === 1 ? '' : 'es'} already claimed stay booked and on record, and so do their welcome offers.` : ''} Its short name (${campaign.code}) cannot be used again.` : undefined}
+      onConfirm={() => void go()}
+    />
+  );
 }
 
 const claimTone: Record<AdminCampaignClaim['status'], { label: string; tone: Tone }> = {
@@ -180,6 +197,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   const claims = useAdminCampaignClaims(id, status, debounced);
   const [open, setOpen] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<AdminCampaign | null>(null);
 
   if (isError) return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
@@ -199,9 +217,10 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
             <div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-extrabold">{c.name}</h2><Badge tone={st.tone}>{st.label}</Badge></div>
             <p className="mt-1 text-sm text-fog">{c.new_customers_only ? 'New customers only' : 'Open to everyone'} · claims {opensLabel(c)} to {closesLabel(c)} · wash by {dayOf(c.use_by_date)} · page: /navratri</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => onEdit(c)}>Edit</Button>
             <Button size="sm" variant={c.is_active ? 'danger' : 'primary'} icon={<Power className="h-4 w-4" />} loading={act.isPending} onClick={() => void toggle()}>{c.is_active ? 'Switch off' : 'Switch on'}</Button>
+            <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(c)}>Delete</Button>
           </div>
         </div>
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-offer to-washo-300" style={{ width: `${Math.min(100, (c.claimed / c.total_cap) * 100)}%` }} /></div>
@@ -254,6 +273,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
         ) : <p className="panel p-6 text-center text-sm text-fog">No claims match.</p>}
       </section>
       <BookingSheet id={open} onClose={() => setOpen(null)} />
+      <DeleteCampaign campaign={deleting} onClose={() => setDeleting(null)} onDeleted={onBack} />
     </div>
   );
 }
@@ -265,6 +285,7 @@ export default function Campaigns() {
   const toast = useToast();
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminCampaign | 'new' | null>(null);
+  const [deleting, setDeleting] = useState<AdminCampaign | null>(null);
   const sheet = useMemo(() => (editing === 'new' ? null : editing), [editing]);
 
   const sheetEl = <CampaignSheet open={Boolean(editing)} campaign={sheet} onClose={() => setEditing(null)} />;
@@ -307,12 +328,14 @@ export default function Campaigns() {
                 <Button size="sm" variant="glass" onClick={() => setOpen(c.id)}>Claims and numbers</Button>
                 <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(c)}>Edit</Button>
                 <Button size="sm" variant={c.is_active ? 'danger' : 'primary'} icon={<Power className="h-4 w-4" />} loading={act.isPending} onClick={() => void toggle(c)}>{c.is_active ? 'Switch off' : 'Switch on'}</Button>
+                <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} aria-label={`Delete ${c.name}`} onClick={() => setDeleting(c)}>Delete</Button>
               </div>
             </div>
           );
         })}
       </div>
       {sheetEl}
+      <DeleteCampaign campaign={deleting} onClose={() => setDeleting(null)} />
     </div>
   );
 }

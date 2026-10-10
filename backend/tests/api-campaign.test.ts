@@ -350,7 +350,8 @@ describe('claims open and close at an exact time', () => {
     const n = await newcomer();
     const refused = await n.c.post('/api/campaign/claim', claimBody(id, n));
     expect(refused.status).toBe(422);
-    expect(refused.body.message).toMatch(/^This offer opens on \d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d{2} (am|pm)$/);
+    expect(refused.body.message).toMatch(/^This offer opens on \d{1,2} [A-Z][a-z]{2}$/);   // the website never says the time of day
+    expect(refused.body.message).not.toMatch(/\d:\d{2}/);
     // the admin moves the opening to a minute ago: it is open at once
     const list = expectOk(await admin.c.get('/api/admin/campaigns')).body.campaigns.find((c: any) => c.id === id);
     expect(list.claim_opens_at).toBeTruthy();
@@ -396,3 +397,52 @@ describe('claims open and close at an exact time', () => {
     expect((await post({ claim_opens_at: '2099-03-10T10:00:00' })).status).toBe(400);      // no offset: it would be ambiguous
   });
 });
+
+describe('deleting a campaign', () => {
+  it('archives it: gone from the list and the website, switched off for good, and every claim stays on record', async () => {
+    const { admin, id } = await liveCampaign();
+    const n = await newcomer();
+    const claimed = expectOk(await n.c.post('/api/campaign/claim', claimBody(id, n))).body;
+    expect(expectOk(await new Client().get('/api/campaign')).body.campaign).toMatchObject({ id });
+    expectOk(await admin.c.post(`/api/admin/campaigns/${id}/delete`, {}));
+    expect(expectOk(await admin.c.get('/api/admin/campaigns')).body.campaigns.some((c: any) => c.id === id)).toBe(false);
+    expect(expectOk(await new Client().get('/api/campaign')).body.campaign).toBeNull();
+    // the free wash that was claimed is still booked, and still the customer's
+    expect((await dbOne('select status::text s from public.bookings where id = $1', [claimed.booking_id])).s).toBe('confirmed');
+    expect((await dbOne('select count(*)::int n from public.campaign_claims where campaign_id = $1', [id])).n).toBe(1);
+    expect((await dbOne('select archived_at is not null a, is_active from public.campaigns where id = $1', [id]))).toEqual({ a: true, is_active: false });
+    // nobody else can claim it, and it cannot be switched on or edited again
+    const other = await newcomer();
+    expect((await other.c.post('/api/campaign/claim', claimBody(id, other))).status).toBe(422);
+    const on = await admin.c.post(`/api/admin/campaigns/${id}/active`, { active: true });
+    expect(on.status).toBe(422);
+    expect(on.body.message).toBe('This campaign was deleted');
+    expect((await admin.c.put(`/api/admin/campaigns/${id}`, campaignBody({ code: undefined, name: 'Renamed after delete' }))).status).toBe(422);
+    const events = (await fake.admin.query(`select event_type, metadata from public.audit_events where entity_id = $1 and event_type = 'campaign_deleted'`, [id])).rows;
+    expect(events).toHaveLength(1);
+    expect(events[0].metadata).toMatchObject({ claims: 1 });
+  });
+
+  it('a campaign with no claims can be deleted too; deleting twice or something that is not there is "not found"; the short name stays taken', async () => {
+    const { admin, id } = await liveCampaign();
+    const code = (await dbOne('select code from public.campaigns where id = $1', [id])).code as string;
+    expectOk(await admin.c.post(`/api/admin/campaigns/${id}/delete`, {}));
+    expect((await admin.c.post(`/api/admin/campaigns/${id}/delete`, {})).status).toBe(404);
+    expect((await admin.c.post(`/api/admin/campaigns/${crypto.randomUUID()}/delete`, {})).status).toBe(404);
+    expect((await admin.c.post('/api/admin/campaigns/not-an-id/delete', {})).status).toBe(400);
+    const again = await admin.c.post('/api/admin/campaigns', campaignBody({ code }));
+    expect(again.status).toBe(422);
+    expect(JSON.stringify(again.body)).toMatch(/already a campaign called/);
+  });
+
+  it('only an admin may delete one', async () => {
+    const { id } = await liveCampaign();
+    const n = await newcomer();
+    const worker = await staffClient('worker');
+    expect((await n.c.post(`/api/admin/campaigns/${id}/delete`, {})).status).toBe(403);
+    expect((await worker.c.post(`/api/admin/campaigns/${id}/delete`, {})).status).toBe(403);
+    expect((await new Client().post(`/api/admin/campaigns/${id}/delete`, {})).status).toBe(401);
+    expect((await dbOne('select archived_at from public.campaigns where id = $1', [id])).archived_at).toBeNull();
+  });
+});
+

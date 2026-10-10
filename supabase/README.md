@@ -262,3 +262,12 @@ Production dry run (rolled back, production checked untouched afterwards): see t
 - `admin_save_campaign` (replaced; two new last arguments, both optional): derives `claim_opens_on` / `claim_closes_on` from the times as Pune dates, so everything that reads the dates keeps working. A call without times (the website that is live today) still works and leaves a campaign with whole days.
 Production dry run (rolled back, production checked untouched afterwards): see the commit message.
 
+
+## Deleting a campaign (migration 37)
+
+`20261004000037_campaign_delete.sql`, additive. Deleting a campaign means archiving it, so nothing a customer claimed or the audit trail is lost.
+- `campaigns.archived_at` (timestamptz, empty for every campaign that exists today) and an index over the campaigns that are not archived.
+- `admin_archive_campaign(id)` (new): switches the campaign off, stamps `archived_at`, and writes a `campaign_deleted` audit entry with the code and the number of claims. Any signed-in admin, like saving a campaign (the same rule as the other campaign controls). Its short name can never be used again.
+- `campaigns_stay_archived` (trigger): an archived campaign cannot be switched back on or edited ("This campaign was deleted"). Updates that change nothing go through.
+- The admin list leaves archived campaigns out. The BFF falls back to the old list when a database does not have this migration yet.
+Production dry run (rolled back, production checked untouched afterwards): see the commit message.
