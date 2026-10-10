@@ -233,12 +233,24 @@ the Supabase SQL editor, then run the preflight again: every line should read `t
 
 `./supabase/tests/run.sh legacy` proves sign-in against a database shaped like production today.
 
+## Phone codes through 2Factor (Send SMS Hook) — built, NOT deployed, NOT switched on
+
+Today Supabase Auth sends phone codes with Twilio Verify. `supabase/functions/send-sms-hook` is the replacement: **Supabase still generates, stores and checks the 6-digit code** (so sessions, accounts and the website's sign-in code do not change); the function only *delivers* the code Supabase hands it, through 2Factor's approved template `WASHO_LOGIN_OTP` (sender WASHO). It is not an OTP system of its own and never calls 2Factor's AUTOGEN or VERIFY endpoints.
+
+- **2Factor request** (their documentation, "Send OTP (Manual Generation)"): `GET https://2factor.in/API/V1/:api_key/SMS/:phone_number/:otp_value/:otp_template_name`, phone in international form (`+91XXXXXXXXXX`), a 4 to 6 digit code we supply. It answers `{"Status":"Success","Details":"<session id>"}` or `{"Status":"Error","Details":"..."}`. Only Indian mobile numbers (`91` + a number starting 6-9) are sent; anything else is refused with a 400.
+- **Who may call it.** Supabase signs every hook call (Standard Webhooks: `webhook-id`, `webhook-timestamp`, `webhook-signature`, HMAC-SHA256 over `id.timestamp.raw body`, keyed by `SEND_SMS_HOOK_SECRET`). A missing secret, a bad signature, a timestamp more than 5 minutes off, or a `webhook-id` already accepted is refused, and nothing is sent. Without a configured secret or API key the function refuses everything. (`verify_jwt = false` in `supabase/config.toml`, because the signature is the authentication.)
+- **What never reaches a log or an error message:** the API key, the request URL, the code, the full phone number (logs show `91******1234`), the hook secret. A network error from `fetch` is only classified (its own text holds the URL). Callers get plain words: 401 invalid signature, 400 unreadable request or non-Indian number, 500 "could not send" when 2Factor says no (key, template, balance), 503 when 2Factor is slow or down (3.5 s limit; Supabase allows about 5 s and may retry).
+- **Files:** `supabase/functions/send-sms-hook/{index.ts,handler.ts}`, `supabase/functions/_shared/sms.ts`; tests `sms.test.ts` and `handler.test.ts` (run by `npm test`, 2Factor is mocked).
+- **Secrets** (Supabase → Edge Functions → Secrets; never in Git or this repo's `.env`): `TWOFACTOR_API_KEY`, `SEND_SMS_HOOK_SECRET` (`v1,whsec_...`, shown when the hook is created), `TWOFACTOR_OTP_TEMPLATE` (optional, default `WASHO_LOGIN_OTP`).
+- **The hook is project-wide.** Deploying the function changes nothing. Once the hook is switched on (Auth → Hooks → Send SMS), every phone code of this Supabase project goes through it, **including the mobile app's**. Switching it off returns to Twilio at once (keep the Twilio credentials until it has run well for a while). Do not add an `[auth.hook.send_sms]` block to `config.toml`: `supabase config push` would switch it on.
+- **Replay protection is per running instance** (an id is remembered for 11 minutes in memory), plus the 5-minute timestamp window and Supabase's own SMS rate limits.
+
 ## Tests
 
 | Command | What it proves |
 |---|---|
 | `npm run typecheck` | frontend + server |
-| `npm test` | pure unit tests (formatting, Razorpay signature helpers) |
+| `npm test` | pure unit tests (formatting, Razorpay signature helpers, the Send SMS Hook with a mocked 2Factor) |
 | `npm run db:test:baseline` | the production vulnerabilities reproduce on the unmodified schema |
 | `npm run db:test` | safe migrations (rolled-back transactions on a local replica) |
 | `npm run db:test:full` | safe + cutover: end-to-end membership and worker lifecycle |

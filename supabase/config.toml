@@ -1,6 +1,7 @@
 # Function settings to merge into the project's supabase/config.toml.
-# Razorpay cannot send a Supabase JWT, so ONLY the webhook skips JWT verification; its HMAC signature
-# (RAZORPAY_WEBHOOK_SECRET) is its authentication. The other two require a signed-in user.
+# Razorpay cannot send a Supabase JWT, so the webhook skips JWT verification; its HMAC signature
+# (RAZORPAY_WEBHOOK_SECRET) is its authentication. The other two payment functions require a signed-in user.
+# The same goes for send-sms-hook: Supabase Auth calls a hook with a Standard Webhooks signature (SEND_SMS_HOOK_SECRET), not a user token.
 [functions.create-razorpay-order]
 verify_jwt = true
 
@@ -8,4 +9,9 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.razorpay-webhook]
+verify_jwt = false
+
+# Deploying this does NOT switch it on: phone codes only go through it once the hook is enabled under Auth -> Hooks (see README, "Phone codes through 2Factor").
+# Do not add an [auth.hook.send_sms] block here: `supabase config push` would enable the hook project-wide.
+[functions.send-sms-hook]
 verify_jwt = false
