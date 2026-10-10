@@ -44,7 +44,7 @@ async function recordSource(claims: Claims, source: string | undefined) {
 
 const sourceSchema = z.string().regex(/^[a-z0-9_-]{1,32}$/i).optional().catch(undefined);
 
-// Supabase Auth owns the codes, their expiry, attempt limits and the SMS (Twilio Verify). This is a thin relay
+// Supabase Auth owns the codes, their expiry and attempt limits; the SMS is delivered by 2Factor through Supabase's Send SMS hook. This is a thin relay
 // that keeps the resulting tokens in httpOnly cookies, so the browser never holds a token it could leak.
 authRouter.post(
   '/auth/otp/request',

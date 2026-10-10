@@ -3,7 +3,7 @@
 Doorstep car and bike washing for Kharadi, Pune. React 19 + Vite + Tailwind 4 frontend, and a thin Express server.
 
 **Supabase is the single backend**, shared with the mobile app: Postgres (with row-level security and all business rules as
-functions), Auth (phone OTP via Twilio Verify), Razorpay edge functions and Storage. This repo's server contains no business
+functions), Auth (phone codes delivered by 2Factor through a Send SMS hook), Razorpay edge functions and Storage. This repo's server contains no business
 logic and no database of its own; it signs people in, calls the database functions *as the signed-in person*, and relays the
 Razorpay edge functions. The mobile app is not touched by anything in this repo.
 
@@ -181,7 +181,7 @@ What makes the first visit quick (and repeat visits nearly instant), all in the 
 
 ## Sign-in
 
-- **Mobile number + code** (Supabase Auth phone OTP, Twilio Verify). The main way in for customers, and the only one that gives them a verified number.
+- **Mobile number + code** (Supabase Auth phone OTP, delivered by 2Factor through the Send SMS hook). The main way in for customers, and the only one that gives them a verified number.
 - **Continue with Email** (customers and specialists): an email and a password. **Sign in**, or **Create account** (8 or more characters with a letter and a number). There is **no verification email and no emailed code for customers**: the password is their key, so a typed address proves nothing and nothing is sent to it.
   `POST /api/auth/email/signup` creates the login at Supabase Auth (service role, already confirmed) and signs them in; `POST /api/auth/email/login` checks the password (8 wrong ones in 15 minutes for an address make it wait; sign-ups are limited per network). A login that has no profile yet (an account made before profiles were created automatically) gets one at this moment (`ensure_my_profile()`, migration 26), for the phone code too.
   There is no "forgot password" by email (an unverified address cannot be trusted to reset anything): the page points to the mobile number.
@@ -235,23 +235,20 @@ the Supabase SQL editor, then run the preflight again: every line should read `t
 
 ## Phone codes through 2Factor (Send SMS Hook)
 
-Supabase Auth used to send phone codes with Twilio Verify. `supabase/functions/send-sms-hook` delivers them through 2Factor instead (approved template `WASHO_LOGIN_OTP`, sender WASHO). **Supabase still generates, stores, checks and expires the 6-digit code and creates the session** (user ids, profiles and sessions do not change); the function only *delivers* the code Supabase hands it. It is not an OTP system of its own and never calls 2Factor's AUTOGEN or VERIFY endpoints.
+Supabase Auth sends phone codes through the **Send SMS hook**: `supabase/functions/send-sms-hook` delivers them through 2Factor (the template named in the `TWOFACTOR_OTP_TEMPLATE` secret, `OTP1` today). Twilio is no longer used anywhere: no code, no setting and no key of it belongs to WASHO any more. **Supabase still generates, stores, checks and expires the 6-digit code and creates the session** (user ids, profiles and sessions do not change); the function only *delivers* the code Supabase hands it. It is not an OTP system of its own and never calls 2Factor's AUTOGEN or VERIFY endpoints.
 
-> **This affects the website AND the mobile app.** A Supabase Auth hook is project-wide: while it is switched on, every phone code of this Supabase project (website sign-in, mobile app sign-in, phone-number change) is delivered through 2Factor. The mobile app's code is not touched. There is no Twilio fallback (a fallback could text the same person twice).
+> **This affects the website AND the mobile app.** A Supabase Auth hook is project-wide: while it is switched on, every phone code of this Supabase project (website sign-in, mobile app sign-in, phone-number change) is delivered through 2Factor. The mobile app's code is not touched. There is no fallback provider (a fallback could text the same person twice).
 
 - **2Factor request** (their documentation, "Send OTP (Manual Generation)"): `GET https://2factor.in/API/V1/:api_key/SMS/:phone_number/:otp_value/:otp_template_name`, the 10-digit number with no country code (the form that delivers as a text on this account), a 4 to 6 digit code we supply. It answers `{"Status":"Success","Details":"<session id>"}` or `{"Status":"Error","Details":"..."}`. Only Indian mobile numbers (`91` + a number starting 6-9) are sent; anything else is refused.
 - **What Supabase sends the hook:** `{ metadata, user: {...}, sms: { otp, phone } }`. The number to text is `sms.phone` (for a phone-number change that is the NEW number; `user.phone` is still the old one). Older Auth versions send only `user`: then `user.phone`.
 - **Who may call it.** Supabase signs every hook call (Standard Webhooks: `webhook-id`, `webhook-timestamp`, `webhook-signature`, HMAC-SHA256 over `id.timestamp.raw body`, keyed by `SEND_SMS_HOOK_SECRET`). A missing secret, a bad signature, a timestamp more than 5 minutes off, or a `webhook-id` already accepted is refused, and nothing is sent. Without a configured secret or API key the function refuses everything. (`verify_jwt = false` in `supabase/config.toml`, because the signature is the authentication.)
 - **What never reaches a log or an error message:** the API key, the request URL, the code, the full phone number (logs show `91******1234`), the hook secret. A network error from `fetch` is only classified (its own text holds the URL). Callers get plain words: 401 invalid signature, 400 unreadable request or non-Indian number, 500 "could not send" when 2Factor says no (key, template, balance), 503 when 2Factor is slow or down (3.5 s limit; Supabase gives a hook about 5 s). Supabase retries a hook only for a 429/503 that carries a `retry-after` header, and this function never sends one, so the person simply asks for a new code. A failed send is never reported as success.
 - **Files:** `supabase/functions/send-sms-hook/{index.ts,handler.ts}`, `supabase/functions/_shared/sms.ts`; tests `sms.test.ts` and `handler.test.ts` (run by `npm test`, 2Factor is mocked).
-- **Secrets** (Supabase → Edge Functions → Secrets; never in Git or this repo's `.env`): `TWOFACTOR_API_KEY`, `SEND_SMS_HOOK_SECRET` (`v1,whsec_<base64>`, the SAME value as the hook's secret in Authentication → Hooks), `TWOFACTOR_OTP_TEMPLATE` (optional, default `WASHO_LOGIN_OTP`).
+- **Secrets** (Supabase → Edge Functions → Secrets; never in Git or this repo's `.env`): `TWOFACTOR_API_KEY`, `SEND_SMS_HOOK_SECRET` (`v1,whsec_<base64>`, the SAME value as the hook's secret in Authentication → Hooks), `TWOFACTOR_OTP_TEMPLATE` (the template name, `OTP1` today; default `WASHO_LOGIN_OTP` when unset).
 - **Deploy:** `supabase functions deploy send-sms-hook --no-verify-jwt --project-ref opjbxvpffrceibbuybiq` (always by name: without a name the CLI deploys every function). Never `supabase config push` for this repo (its `config.toml` is only a fragment), and do not add an `[auth.hook.send_sms]` block to it.
 - **Switch on:** Authentication → Hooks → Send SMS hook → HTTPS, URL `https://opjbxvpffrceibbuybiq.supabase.co/functions/v1/send-sms-hook`, secret = `SEND_SMS_HOOK_SECRET`, enable. Also check Authentication → Providers → Phone: phone provider on, SMS OTP length 6.
-- **Roll back (about a minute, no code change):**
-  1. Authentication → Hooks → Send SMS hook → turn it **off** (or delete it). Supabase goes back to the Phone provider settings, which were left untouched (Twilio Verify and its credentials).
-  2. Nothing to redeploy. The function can stay deployed; it is inert without the hook.
-  3. Ask for a **fresh code** afterwards: with the hook on, Supabase checks codes itself; with it off, Twilio Verify checks them, so a code issued under the other mode will not work.
-  4. Sign in once on the website and once in the mobile app to confirm. Existing sessions are not affected either way.
+- **If it has to be switched off:** with Twilio gone, turning the hook off (Authentication → Hooks → Send SMS hook) leaves Supabase with **no way to send a phone code**: sign-in by code stops on the website AND in the mobile app until the hook is back (customers can still use email and password on the website; the app has no other way in). Existing sessions are not affected. So: do not switch it off to "try something"; if 2Factor itself is down, the fix is on 2Factor's side (balance, key, template) or to add another provider to the function.
+- **Order of events when moving to 2Factor:** (1) enable the hook and confirm a text from 2Factor arrives on a phone and the code signs in; (2) only then clear the Twilio credentials under Authentication → Providers → Phone and revoke the keys in Twilio's console. Clearing Twilio first, with the hook off, stops every phone sign-in.
 - **Replay protection is per running instance** (an id is remembered for 11 minutes in memory), plus the 5-minute timestamp window and Supabase's own SMS rate limits.
 
 ## Tests

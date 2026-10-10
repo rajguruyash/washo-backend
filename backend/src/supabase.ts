@@ -3,7 +3,7 @@ import { HttpError } from './errors';
 
 /**
  * The only places this server talks to Supabase over HTTP:
- *   - Auth (phone OTP via Twilio Verify, Google sign-in, email + password: all configured inside Supabase)
+ *   - Auth (phone OTP delivered by 2Factor through the Send SMS hook, Google sign-in, email + password: all configured inside Supabase)
  *   - Storage, for wash photos
  */
 
