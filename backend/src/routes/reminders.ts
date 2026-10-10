@@ -1,3 +1,4 @@
+import { isPhoneLoginEmail } from '../phone';
 import crypto from 'crypto';
 import { Router } from 'express';
 import { config } from '../config';
@@ -75,7 +76,7 @@ remindersRouter.post(
     const cfg = await loadRenewalSettings();
     if (!stagesFor(cfg).some((s) => s.stage === step)) throw new HttpError(409, 'step_off', 'That email is switched off. Switch it on first.');
     const row = await req.db(async (c) => (await c.query('SELECT public.admin_renewal_row($1) AS r', [id])).rows[0].r as Record<string, unknown> & { email: string | null });
-    if (!row.email) throw new HttpError(422, 'no_email', 'This customer has no email address.');
+    if (!row.email || isPhoneLoginEmail(row.email)) throw new HttpError(422, 'no_email', 'This customer has no email address.');
     const result = await sendRenewal(step, row as never);
     if (result === 'already') throw new HttpError(409, 'already_sent', 'That email has already gone to this customer.');
     if (result === 'failed') throw new HttpError(502, 'send_failed', 'The email could not be sent. It is recorded, and the automatic job will try again.');

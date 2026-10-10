@@ -88,6 +88,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
   const state = {
     otps: new Map<string, string>(),
     refresh: new Map<string, string>(), // refresh token -> auth user id
+    amr: new Map<string, unknown[]>(), // refresh token -> how that session was signed in (the token's `amr` claim, which survives a refresh)
     orders: new Map<string, { amount: number; currency: string; receipt: string }>(),
     payments: new Map<string, { order_id: string; amount: number; currency: string; status: string }>(),
     refunds: new Map<string, { payment_id: string; amount: number; notes: Record<string, string>; receipt: string; status: string }>(),
@@ -109,6 +110,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     const access_token = signJwt({ aud: 'authenticated', role: 'authenticated', sub: authUserId, exp: Math.floor(Date.now() / 1000) + expires_in, ...extra });
     const refresh_token = crypto.randomBytes(12).toString('hex');
     state.refresh.set(refresh_token, authUserId);
+    state.amr.set(refresh_token, (extra.amr as unknown[] | undefined) ?? []);
     return { access_token, refresh_token, expires_in };
   };
 
@@ -116,10 +118,10 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
     const { rows } = await admin.query('SELECT id, phone, email FROM auth.users WHERE id = $1', [authUserId]);
     return rows[0] as { id: string; phone: string | null; email: string | null } | undefined;
   }
-  const full = async (authUserId: string) => {
+  const full = async (authUserId: string, amr?: unknown[]) => {
     if (state.banned.has(authUserId)) throw Object.assign(new Error('banned'), { banned: true });
     const u = await userRow(authUserId);
-    return { ...session(authUserId, { phone: u?.phone ?? undefined, email: u?.email ?? undefined }), token_type: 'bearer', user: { id: authUserId, phone: u?.phone ?? undefined, email: u?.email ?? undefined } };
+    return { ...session(authUserId, { phone: u?.phone ?? undefined, email: u?.email ?? undefined, ...(amr ? { amr } : {}) }), token_type: 'bearer', user: { id: authUserId, phone: u?.phone ?? undefined, email: u?.email ?? undefined } };
   };
 
   async function asRole<T>(role: 'authenticated' | 'service_role', authUserId: string | null, fn: (c: PoolClient) => Promise<T>): Promise<T> {
@@ -198,10 +200,16 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
             const dup = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
             if (dup.rows.length) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
             if (b.password !== undefined && String(b.password).length < 8) return send(res, 422, { code: 422, error_code: 'weak_password', msg: 'Password should be at least 8 characters.' });
+            // Like GoTrue: an email AND a phone in one call. The phone is checked first, so a refused number creates nothing.
+            const phoneDigits = String(b.phone ?? '').replace(/\D/g, '');
+            if (phoneDigits) {
+              const dupPhone = await admin.query(`SELECT 1 FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1`, [phoneDigits]);
+              if (dupPhone.rows.length) return send(res, 422, { code: 422, error_code: 'phone_exists', msg: 'Phone number already registered by another user' });
+            }
             const { rows } = await admin.query(
-              `INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, CASE WHEN $4::text IS NULL THEN '' ELSE crypt($4, gen_salt('bf')) END, $2, '{"provider":"email","providers":["email"]}'::jsonb, $3::jsonb, now(), now()) RETURNING id`,
-              [email, b.email_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {}), b.password ?? null]
+              `INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, phone, phone_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $1, CASE WHEN $4::text IS NULL THEN '' ELSE crypt($4, gen_salt('bf')) END, $2, $5, $6, '{"provider":"email","providers":["email"]}'::jsonb, $3::jsonb, now(), now()) RETURNING id`,
+              [email, b.email_confirm ? new Date() : null, JSON.stringify(b.user_metadata ?? {}), b.password ?? null, phoneDigits ? b.phone : null, phoneDigits && b.phone_confirm ? new Date() : null]
             );
             return send(res, 200, { id: rows[0].id, email });
           }
@@ -295,7 +303,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           state.phoneChange.delete(uid);
           // what GoTrue does: set and confirm the number (the database's own trigger then links the profile)
           await admin.query('UPDATE auth.users SET phone = $1, phone_confirmed_at = now(), updated_at = now() WHERE id = $2', [phone, uid]);
-          return send(res, 200, await full(uid));
+          return send(res, 200, await full(uid, [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }]));
         }
         if (type === 'email') {
           const email = String(json().email ?? '').toLowerCase();
@@ -304,7 +312,7 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           const { rows } = await admin.query('SELECT id FROM auth.users WHERE lower(email) = $1', [email]);
           if (!rows.length) return send(res, 403, { code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' });
           try {
-            return send(res, 200, await full(rows[0].id));
+            return send(res, 200, await full(rows[0].id, [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }]));
           } catch (e) {
             if ((e as { banned?: boolean }).banned) return send(res, 400, { code: 400, error_code: 'user_banned', msg: 'User is banned' });
             throw e;
@@ -324,14 +332,14 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
             )
           ).rows;
         }
-        return send(res, 200, await full(rows[0].id));
+        return send(res, 200, await full(rows[0].id, [{ method: 'otp', timestamp: Math.floor(Date.now() / 1000) }]));
       }
       if (path === '/auth/v1/token' && req.method === 'POST') {
         const grant = url.searchParams.get('grant_type');
         if (grant === 'refresh_token') {
           const id = state.refresh.get(json().refresh_token);
           if (!id) return send(res, 400, { code: 400, error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' });
-          return send(res, 200, await full(id));
+          return send(res, 200, await full(id, state.amr.get(String(json().refresh_token))));
         }
         if (grant === 'pkce') {
           const { auth_code, code_verifier } = json();
@@ -339,13 +347,25 @@ export async function startFakeSupabase(dbName: string): Promise<FakeSupabase> {
           state.codes.delete(auth_code); // single use
           const ok = hit && code_verifier && crypto.createHash('sha256').update(code_verifier).digest('base64url') === hit.challenge;
           if (!ok) return send(res, 400, { code: 400, error_code: 'flow_state_not_found', msg: 'invalid flow state, no valid flow state found' });
-          return send(res, 200, await full(hit!.userId));
+          return send(res, 200, await full(hit!.userId, [{ method: 'oauth', timestamp: Math.floor(Date.now() / 1000) }]));
         }
         if (grant === 'password') {
-          const { email, password } = json();
+          const { email, password, phone } = json();
+          if (email && phone) return send(res, 400, { code: 400, error_code: 'validation_failed', msg: 'Only an email address or phone number should be provided on login.' });
+          if (phone) {
+            // Like GoTrue: the password is checked first, and only a number a code has CONFIRMED can sign in with it.
+            const digits = String(phone).replace(/\D/g, '');
+            const { rows } = await admin.query(
+              `SELECT id, phone_confirmed_at FROM auth.users WHERE regexp_replace(coalesce(phone,''), '\\D', '', 'g') = $1 AND encrypted_password <> '' AND encrypted_password = crypt($2, encrypted_password)`,
+              [digits, password]
+            );
+            if (!rows.length) return send(res, 400, { code: 400, error_code: 'invalid_credentials', msg: 'Invalid login credentials' });
+            if (!rows[0].phone_confirmed_at) return send(res, 400, { code: 400, error_code: 'phone_not_confirmed', msg: 'Phone not confirmed' });
+            return send(res, 200, await full(rows[0].id, [{ method: 'password', timestamp: Math.floor(Date.now() / 1000) }]));
+          }
           const { rows } = await admin.query('SELECT id FROM auth.users WHERE email = $1 AND encrypted_password = crypt($2, encrypted_password)', [email, password]);
           if (!rows.length) return send(res, 400, { code: 400, error_code: 'invalid_credentials', msg: 'Invalid login credentials' });
-          return send(res, 200, await full(rows[0].id));
+          return send(res, 200, await full(rows[0].id, [{ method: 'password', timestamp: Math.floor(Date.now() / 1000) }]));
         }
       }
       if (path === '/auth/v1/logout' && req.method === 'POST') return send(res, 204, {});

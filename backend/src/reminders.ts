@@ -1,3 +1,4 @@
+import { isPhoneLoginEmail } from './phone';
 import { campaignsNotInstalled } from './campaigns';
 import { withApiRole } from './db';
 import { renewalEmail, sendTracked, type RenewalStage } from './emails';
@@ -108,7 +109,7 @@ export async function runRenewalReminders(o: { dryRun?: boolean; manual?: boolea
   for (const s of stagesFor(cfg)) {
     let due: DueRow[];
     try {
-      due = await dueFor(s);
+      due = (await dueFor(s)).filter((d) => !isPhoneLoginEmail(d.email)); // an internal "mobile number + password" login address is not an inbox
     } catch (err) {
       if (campaignsNotInstalled(err)) return { ...out, ready: false };
       throw err;

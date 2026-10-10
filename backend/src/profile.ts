@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { Claims, withUser } from './db';
+import { realEmail } from './phone';
 import { HttpError } from './errors';
 
 export type Role = 'customer' | 'worker' | 'admin';
@@ -31,7 +32,7 @@ export async function loadProfile(c: PoolClient, claims: Claims): Promise<Profil
     role: p.role as Role,
     full_name: (p.full_name as string | null) ?? null,
     phone: (p.phone as string | null) ?? claims.phone ?? null,
-    email: (p.email as string | null) ?? claims.email ?? null,
+    email: realEmail((p.email as string | null) ?? claims.email ?? null), // the internal "mobile number + password" login address is never an email
     archived: Boolean(p.archived_at),
   };
 }

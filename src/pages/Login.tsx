@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2, Mail, MessageSquareText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Loader2, Mail, MessageSquareText, Smartphone } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { AvatarFull } from '../components/brand/Avatar';
@@ -37,6 +37,35 @@ function useTicker() {
   return [left, start] as const;
 }
 
+/** The +91 mobile number box, shared by the password form and the code form. */
+function PhoneField({ phone, onChange, error, autoFocus, autoComplete = 'tel-national', tight }: { phone: string; onChange: (v: string) => void; error?: string; autoFocus?: boolean; autoComplete?: string; tight?: boolean }) {
+  return (
+    <>
+      <label htmlFor="phone" className={cn('mb-1.5 block text-[13px] font-medium text-mist', tight ? 'mt-5' : 'mt-7')}>Mobile number</label>
+      <div className={cn('flex h-14 items-center overflow-hidden rounded-2xl border bg-white/[0.04] transition-colors focus-within:border-washo-400 focus-within:ring-4 focus-within:ring-washo-500/15', error ? 'border-bad/60' : 'border-white/10')}>
+        <span className="flex h-full items-center border-r border-white/10 px-4 text-base font-semibold text-mist">+91</span>
+        <input
+          id="phone"
+          type="tel"
+          inputMode="numeric"
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          placeholder="98765 43210"
+          value={phone}
+          onChange={(e) => {
+            const d = e.target.value.replace(/\D/g, '').slice(0, 10);
+            onChange(d.length > 5 ? `${d.slice(0, 5)} ${d.slice(5)}` : d);
+          }}
+          aria-invalid={Boolean(error)}
+          aria-describedby="phone-err"
+          className="h-full min-w-0 flex-1 bg-transparent px-4 text-lg font-semibold tracking-wide outline-none placeholder:font-normal placeholder:text-fog/50"
+        />
+      </div>
+      <p id="phone-err" role="alert" className="mt-2 min-h-5 text-[13px] text-bad">{error}</p>
+    </>
+  );
+}
+
 export default function Login() {
   const { user, refresh } = useAuth();
   const navigate = useNavigate();
@@ -49,6 +78,11 @@ export default function Login() {
   }, [params]);
 
   const [step, setStep] = useState<Step>('phone');
+  // The default is a mobile number and a password (no code, no SMS). The older way, a 6-digit code to the number, is one tap away ("Get a code instead"): for a
+  // forgotten password and for accounts made with a code before.
+  const [viaCode, setViaCode] = useState(false);
+  const [mobileBusy, setMobileBusy] = useState(false);
+  const [mobileError, setMobileError] = useState<{ field?: 'phone' | 'password'; message: string } | null>(null);
   const [welcomeName, setWelcomeName] = useState<string | null>(null);
   const [phone, setPhone] = useState('');
   const [phoneError, setPhoneError] = useState('');
@@ -75,7 +109,7 @@ export default function Login() {
   const [emailVerifying, setEmailVerifying] = useState(false);
 
   // Already signed in (and not mid-login): go straight through.
-  if (user && step !== 'done' && !emailBusy && !emailVerifying) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
+  if (user && step !== 'done' && !emailBusy && !emailVerifying && !mobileBusy) return <Navigate to={next && next.startsWith(homeFor(user.role)) ? next : homeFor(user.role)} replace />;
 
   const digits = phone.replace(/\D/g, '');
 
@@ -150,6 +184,22 @@ export default function Login() {
       setStep('done');
       setTimeout(() => navigate(next && next.startsWith(home) ? next : home, { replace: true }), CELEBRATE_MS);
     } else navigate(next && next.startsWith(home) ? next : home, { replace: true });
+  };
+
+  const mobileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^[6-9]\d{9}$/.test(digits)) return setMobileError({ field: 'phone', message: 'Enter a valid 10-digit mobile number.' });
+    if (!password) return setMobileError({ field: 'password', message: tab === 'signup' ? 'Choose a password.' : 'Enter your password.' });
+    setMobileError(null);
+    setMobileBusy(true);
+    try {
+      const res = await post<{ role?: Role }>(tab === 'signup' ? '/auth/mobile/signup' : '/auth/mobile/login', tab === 'signup' ? { phone: digits, password, source: getSource() } : { phone: digits, password });
+      await finishSignIn(res.role ?? 'customer');
+    } catch (err) {
+      setMobileBusy(false);
+      if (err instanceof ApiError) setMobileError({ field: err.fields.phone ? 'phone' : err.fields.password ? 'password' : undefined, message: err.fields.phone ?? err.fields.password ?? err.message });
+      else setMobileError({ message: 'Something went wrong. Please try again.' });
+    }
   };
 
   const emailSubmit = async (e: React.FormEvent) => {
@@ -278,8 +328,8 @@ export default function Login() {
                       <Button type="submit" size="lg" full loading={emailBusy} iconRight={<ArrowRight className="h-5 w-5" />}>{tab === 'signup' ? 'Create account' : 'Sign in'}</Button>
                       {problemCode && signInErrors[problemCode] && <p role="alert" className="rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
                       <div className="grid gap-1 pt-1 text-center text-sm">
-                        {tab === 'signin' && <p className="text-fog">Forgot your password? Use your mobile number instead.</p>}
-                        <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number instead</button>
+                        {tab === 'signin' && <p className="text-fog">Forgot your password? <button type="button" onClick={() => { switchMode(false); setViaCode(true); }} className="font-semibold text-washo-300 hover:text-white">Get a code on your mobile number</button></p>}
+                        <button type="button" onClick={() => switchMode(false)} className="text-fog hover:text-white">Use my mobile number and password instead</button>
                       </div>
                     </motion.form>
                   ) : (
@@ -324,7 +374,42 @@ export default function Login() {
                   )
                 ) : (
                   <>
-                    {step === 'phone' && (
+                    {step === 'phone' && !viaCode && (
+                      <motion.form
+                        key="mobile"
+                        initial={{ opacity: 0, x: 24 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -24 }}
+                        onSubmit={(e) => void mobileSubmit(e)}
+                        noValidate
+                      >
+                        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><Smartphone className="h-6 w-6" /></span>
+                        <h1 className="mt-5 text-3xl font-extrabold">{tab === 'signup' ? 'Create your account' : 'Welcome to WASHO'}</h1>
+                        <p className="mt-2 text-fog">{tab === 'signup' ? 'Your mobile number and a password: 8 or more characters, with letters and a number. No code to wait for.' : 'Sign in with your mobile number and password.'}</p>
+                        <div role="tablist" aria-label="Sign in or create an account" className="mt-6 grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-1">
+                          {([['signin', 'Sign in'], ['signup', 'Create account']] as const).map(([v, label]) => (
+                            <button key={v} type="button" role="tab" aria-selected={tab === v} onClick={() => { setTab(v); setMobileError(null); }} className={cn('rounded-xl px-3 py-2 text-sm font-semibold transition-colors', tab === v ? 'border border-white/[0.1] bg-white/[0.09] text-white' : 'border border-transparent text-fog hover:text-mist')}>{label}</button>
+                          ))}
+                        </div>
+                        <PhoneField tight phone={phone} onChange={(v) => { setPhone(v); setMobileError(null); }} error={mobileError?.field === 'phone' ? mobileError.message : undefined} autoComplete="username" autoFocus />
+                        <div className="relative">
+                          <Input label="Password" type={showPw ? 'text' : 'password'} autoComplete={tab === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(e) => { setPassword(e.target.value); setMobileError(null); }} error={mobileError?.field === 'password' ? mobileError.message : undefined} required className="[&_input]:pr-12" />
+                          <button type="button" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw} className="absolute right-2 top-[2.05rem] grid h-9 w-9 place-items-center rounded-xl text-fog hover:bg-white/10 hover:text-white">{showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                        </div>
+                        {mobileError && !mobileError.field && <p role="alert" className="mt-4 rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{mobileError.message}</p>}
+                        <Button type="submit" size="lg" full loading={mobileBusy} iconRight={<ArrowRight className="h-5 w-5" />} className="mt-5">{tab === 'signup' ? 'Create account' : 'Sign in'}</Button>
+                        {problemCode && signInErrors[problemCode] && <p role="alert" className="mt-4 rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
+                        <p className="mt-4 text-center text-sm text-fog">
+                          {tab === 'signin' ? 'Forgot your password, or made your account with a code? ' : 'Already made an account with a code? '}
+                          <button type="button" onClick={() => { setViaCode(true); setMobileError(null); setPhoneError(''); }} className="font-semibold text-washo-300 hover:text-white">Get a code instead</button>
+                        </p>
+                        <div className="my-6 flex items-center gap-3 text-xs text-fog/70" aria-hidden><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
+                        {/* no backdrop-blur here: the card is already blurred, and Safari paints a nested blur solid white */}
+                        <button type="button" onClick={() => switchMode(true)} className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white transition-colors hover:bg-white/[0.1]"><Mail className="h-5 w-5 text-washo-300" /> Continue with Email</button>
+                      </motion.form>
+                    )}
+
+                    {step === 'phone' && viaCode && (
                       <motion.form
                         key="phone"
                         initial={{ opacity: 0, x: 24 }}
@@ -337,31 +422,10 @@ export default function Login() {
                         noValidate
                       >
                         <span className="grid h-12 w-12 place-items-center rounded-2xl bg-washo-500/15 text-washo-300"><MessageSquareText className="h-6 w-6" /></span>
-                        <h1 className="mt-5 text-3xl font-extrabold">Welcome to WASHO</h1>
-                        <p className="mt-2 text-fog">Enter your mobile number and we'll text you a 6-digit code. No password needed.</p>
+                        <h1 className="mt-5 text-3xl font-extrabold">Get a code</h1>
+                        <p className="mt-2 text-fog">Enter your mobile number and we'll send you a 6-digit code. If you are signing in with a password, use that instead.</p>
 
-                        <label htmlFor="phone" className="mt-7 mb-1.5 block text-[13px] font-medium text-mist">Mobile number</label>
-                        <div className={cn('flex h-14 items-center overflow-hidden rounded-2xl border bg-white/[0.04] transition-colors focus-within:border-washo-400 focus-within:ring-4 focus-within:ring-washo-500/15', phoneError ? 'border-bad/60' : 'border-white/10')}>
-                          <span className="flex h-full items-center border-r border-white/10 px-4 text-base font-semibold text-mist">+91</span>
-                          <input
-                            id="phone"
-                            type="tel"
-                            inputMode="numeric"
-                            autoComplete="tel-national"
-                            autoFocus
-                            placeholder="98765 43210"
-                            value={phone}
-                            onChange={(e) => {
-                              const d = e.target.value.replace(/\D/g, '').slice(0, 10);
-                              setPhone(d.length > 5 ? `${d.slice(0, 5)} ${d.slice(5)}` : d);
-                              setPhoneError('');
-                            }}
-                            aria-invalid={Boolean(phoneError)}
-                            aria-describedby="phone-err"
-                            className="h-full min-w-0 flex-1 bg-transparent px-4 text-lg font-semibold tracking-wide outline-none placeholder:font-normal placeholder:text-fog/50"
-                          />
-                        </div>
-                        <p id="phone-err" role="alert" className="mt-2 min-h-5 text-[13px] text-bad">{phoneError}</p>
+                        <PhoneField phone={phone} onChange={(v) => { setPhone(v); setPhoneError(''); }} error={phoneError} autoFocus />
 
                         <Button type="submit" size="lg" full loading={sending} iconRight={<ArrowRight className="h-5 w-5" />} className="mt-3">
                           Send code
@@ -369,9 +433,9 @@ export default function Login() {
 
                         {problemCode && signInErrors[problemCode] && <p role="alert" className="mt-4 rounded-xl border border-bad/30 bg-bad/10 px-4 py-3 text-sm text-bad">{signInErrors[problemCode]}</p>}
 
-                        <div className="my-6 flex items-center gap-3 text-xs text-fog/70" aria-hidden><span className="h-px flex-1 bg-white/10" />or<span className="h-px flex-1 bg-white/10" /></div>
-                        {/* no backdrop-blur here: the card is already blurred, and Safari paints a nested blur solid white */}
-                        <button type="button" onClick={() => switchMode(true)} className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl border border-white/[0.12] bg-white/[0.06] text-base font-semibold text-white transition-colors hover:bg-white/[0.1]"><Mail className="h-5 w-5 text-washo-300" /> Continue with Email</button>
+                        <p className="mt-6 text-center text-sm">
+                          <button type="button" onClick={() => { setViaCode(false); setPhoneError(''); }} className="text-fog hover:text-white">Use my password instead</button>
+                        </p>
                       </motion.form>
                     )}
 
