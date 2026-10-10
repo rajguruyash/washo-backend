@@ -65,6 +65,21 @@ describe('a valid delivery', () => {
   });
 });
 
+describe('the payload Supabase Auth really sends', () => {
+  it('a phone-number change is texted to the NEW number (sms.phone), with metadata and extra user fields ignored', async () => {
+    const h = hook();
+    const body = JSON.stringify({
+      metadata: { uuid: 'a8f1c7d0-0000-4000-8000-000000000000', time: '2026-10-10T10:00:00Z', name: 'send-sms', ip_address: '203.0.113.7' },
+      user: { id: 'u-1', phone: '919000000001', phone_change: '919172792929', email: '', user_metadata: { full_name: 'Someone' } },
+      sms: { otp: OTP, phone: PHONE },
+    });
+    const res = await h.send({ body });
+    expect(res.status).toBe(200);
+    expect(h.calls).toEqual([`https://2factor.in/API/V1/${API_KEY}/SMS/+919172792929/${OTP}/WASHO_LOGIN_OTP`]);
+    noSecrets(h.logs.join('\n'));
+  });
+});
+
 describe('signature, timestamp and replay', () => {
   it('refuses a bad signature, a missing signature and a signature for another body, and sends nothing', async () => {
     const h = hook();

@@ -116,7 +116,12 @@ export function indianMobile(raw: unknown): string | null {
   return m ? m[1] : null;
 }
 
-/** Reads the hook body: { user: { phone }, sms: { otp } }. 2Factor's custom OTP is 4 to 6 digits; WASHO's is 6 (Auth -> SMS OTP Length). */
+/**
+ * Reads the hook body Supabase Auth sends: { metadata, user: { phone, phone_change }, sms: { otp, phone } }. 2Factor's custom OTP is 4 to 6 digits; WASHO's is 6
+ * (Auth -> SMS OTP Length).
+ * WHERE the code goes: `sms.phone` is the number Auth is texting (current Auth sends it). For a phone-number change that is the NEW number while `user.phone` is
+ * still the old one, so `sms.phone` always wins. Older Auth versions have only `user`: then `user.phone`, and `user.phone_change` when the user has no phone yet.
+ */
 export function parseHookPayload(rawBody: string): HookPayload {
   let body: unknown;
   try {
@@ -124,10 +129,11 @@ export function parseHookPayload(rawBody: string): HookPayload {
   } catch {
     return { ok: false, reason: 'malformed' };
   }
-  const b = body as { user?: { phone?: unknown }; sms?: { otp?: unknown } } | null;
-  const phone = b?.user?.phone;
+  const b = body as { user?: { phone?: unknown; phone_change?: unknown }; sms?: { otp?: unknown; phone?: unknown } } | null;
+  const first = (...c: unknown[]) => c.find((v): v is string => typeof v === 'string' && v.trim() !== '');
+  const phone = first(b?.sms?.phone, b?.user?.phone, b?.user?.phone_change);
   const otp = b?.sms?.otp;
-  if (typeof phone !== 'string' || typeof otp !== 'string') return { ok: false, reason: 'malformed' };
+  if (phone === undefined || typeof otp !== 'string') return { ok: false, reason: 'malformed' };
   const mobile = indianMobile(phone);
   if (!mobile) return { ok: false, reason: 'unsupported_phone' };
   if (!/^\d{4,6}$/.test(otp)) return { ok: false, reason: 'bad_otp' };

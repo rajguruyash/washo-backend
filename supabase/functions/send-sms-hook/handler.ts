@@ -94,12 +94,13 @@ async function run(req: Request, d: HookDeps): Promise<Response> {
     return accepted();
   }
 
-  // Not sent: give the id back so Supabase's retry of this same delivery goes through, and say only what is safe to say.
+  // Not sent: give the id back (so a second delivery of the same id is not mistaken for a replay), and say only what is safe to say.
   d.replay.release(id as string);
   const extra: Record<string, string | number> = {};
   if ('httpStatus' in sent && sent.httpStatus !== undefined) extra.httpStatus = sent.httpStatus;
   if ('detail' in sent && sent.detail) extra.detail = sent.detail;
   d.log('error', 'send_failed', { id: id as string, to: who, kind: sent.kind, ms, ...extra });
-  // 503 asks Supabase to try again (a timeout, a network drop or a 2Factor outage); 500 is final (2Factor said no: key, template, balance).
+  // 503: a timeout, a network drop or a 2Factor outage; 500: 2Factor said no (key, template, balance). There is deliberately NO retry-after header: Supabase
+  // retries only a 429/503 that carries one, and a retry would text (and, on 2Factor's side, possibly ring) the same person twice. The person asks for a new code.
   return sent.kind === 'rejected' ? refuse(500, CANNOT_SEND) : refuse(503, CANNOT_SEND);
 }

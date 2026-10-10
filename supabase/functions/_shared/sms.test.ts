@@ -118,12 +118,24 @@ describe('the hook body', () => {
     expect(parseHookPayload(body('919172792929', '123456'))).toEqual({ ok: true, mobile: '9172792929', otp: '123456' });
     expect(parseHookPayload(body('+919172792929', '0123'))).toEqual({ ok: true, mobile: '9172792929', otp: '0123' });
   });
+  it('texts the number Supabase says it is texting (sms.phone), which for a phone-number change is the NEW one, not user.phone', () => {
+    const full = (user: object, sms: object) => JSON.stringify({ metadata: { uuid: 'x', name: 'send-sms' }, user, sms });
+    expect(parseHookPayload(full({ phone: '919000000001' }, { otp: '123456', phone: '919876543210' }))).toEqual({ ok: true, mobile: '9876543210', otp: '123456' });
+    // older Auth versions send no sms.phone: user.phone, then user.phone_change for an account that has no phone yet
+    expect(parseHookPayload(full({ phone: '919876543210' }, { otp: '123456' }))).toEqual({ ok: true, mobile: '9876543210', otp: '123456' });
+    expect(parseHookPayload(full({ phone: '', phone_change: '919876543210' }, { otp: '123456' }))).toEqual({ ok: true, mobile: '9876543210', otp: '123456' });
+    expect(parseHookPayload(full({ phone_change: '919876543210' }, { otp: '123456', phone: '' }))).toEqual({ ok: true, mobile: '9876543210', otp: '123456' });
+  });
+  it('never falls back to the old number when sms.phone says the code is for a number it cannot deliver to', () => {
+    const raw = JSON.stringify({ user: { phone: '919876543210' }, sms: { otp: '123456', phone: '14155550123' } });
+    expect(parseHookPayload(raw)).toEqual({ ok: false, reason: 'unsupported_phone' });
+  });
   it('refuses numbers 2Factor cannot deliver to, and codes it would not send', () => {
-    for (const p of ['14155550123', '9172792929', '915172792929', '91917279292', '9191727929299', '', 'abc']) expect(parseHookPayload(body(p, '123456')), p).toEqual({ ok: false, reason: 'unsupported_phone' });
+    for (const p of ['14155550123', '9172792929', '915172792929', '91917279292', '9191727929299', 'abc']) expect(parseHookPayload(body(p, '123456')), p).toEqual({ ok: false, reason: 'unsupported_phone' });
     for (const o of ['123', '1234567', '12 456', 'abcdef', '']) expect(parseHookPayload(body('919172792929', o)), o).toEqual({ ok: false, reason: 'bad_otp' });
   });
   it('refuses anything that is not the shape Supabase sends', () => {
-    for (const raw of ['not json', 'null', '[]', '{}', body(null, '123456'), body('919172792929', 123456), JSON.stringify({ sms: { otp: '123456' } })]) {
+    for (const raw of ['not json', 'null', '[]', '{}', body(null, '123456'), body('', '123456'), body('   ', '123456'), body('919172792929', 123456), JSON.stringify({ sms: { otp: '123456' } })]) {
       expect(parseHookPayload(raw), raw).toEqual({ ok: false, reason: 'malformed' });
     }
   });
