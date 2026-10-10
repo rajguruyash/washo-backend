@@ -1,3 +1,4 @@
+import { ServiceCarousel } from '../components/ServiceCarousel';
 import { ServicePhoto } from '../components/ServicePhoto';
 import SpotlightCard from '../components/reactbits/SpotlightCard';
 import { Badge } from '../components/ui/Badge';
@@ -16,6 +17,7 @@ export default function Services() {
       <h1 className="mt-2 text-4xl font-extrabold">Every wash, one clear price</h1>
       <p className="mt-3 max-w-2xl text-fog">Single washes are priced from our rate card. For regular washing, a custom membership is better value: you see the price as you build it.</p>
       {isError && <div className="mt-10"><ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} /></div>}
+      {data && <div className="mt-8"><ServiceCarousel services={data.services} /></div>}
       <div className="mt-10 grid gap-5 md:grid-cols-2">
         {isLoading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-72" />) : data?.services.map((s) => {
           const own = s.unit_prices?.find((p) => p.vehicle_type === s.vehicle_type)?.price_cents;

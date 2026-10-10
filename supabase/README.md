@@ -254,3 +254,11 @@ Production dry run (rolled back, production checked untouched afterwards): see t
 `20261004000035_hide_finished_washes.sql`, additive. `customer_hidden_washes` (a customer reads only their own rows), `hide_my_wash(booking)` (done, cancelled, refunded or missed washes only) and `unhide_my_wash(booking)`. Nothing is deleted.
 Production dry run (rolled back, production checked untouched afterwards): see the commit message.
 
+## Campaign opening and closing times (migration 36)
+
+`20261004000036_campaign_times.sql`, additive. `campaigns.claim_opens_at` / `claim_closes_at` (timestamptz, both set or both empty, closing after opening). `app_private.campaign_opens_at(campaign)` and `campaign_closes_at(campaign)` are the one place that says when a campaign opens and closes: the exact times when there are some, else the start of the first day and the end of the last (Pune time), so a campaign made before this behaves exactly as it did.
+- `get_campaign_status` (replaced): the campaign people can claim now, or that opens soon, chosen by the clock (open ones first); it also returns `claim_opens_at` and `claim_closes_at`.
+- `claim_campaign_wash` (replaced, one change): refuses before the opening time with "This offer opens on 10 Sep, 10:00 am" and from the closing time with "This offer has ended".
+- `admin_save_campaign` (replaced; two new last arguments, both optional): derives `claim_opens_on` / `claim_closes_on` from the times as Pune dates, so everything that reads the dates keeps working. A call without times (the website that is live today) still works and leaves a campaign with whole days.
+Production dry run (rolled back, production checked untouched afterwards): see the commit message.
+

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarCheck, Camera, Droplets, Gift, Leaf, MessageSquareText, ShieldCheck, Sparkles, Timer, UserCheck, Users, Wallet } from 'lucide-react';
 import { AvatarFull } from '../components/brand/Avatar';
 import { Badge } from '../components/ui/Badge';
@@ -8,17 +8,32 @@ import SplitFlapText from '../components/reactbits/SplitFlapText';
 import StarBorder from '../components/reactbits/StarBorder';
 import { ComboPacks } from '../components/ComboPacks';
 import { RotatingLine } from '../components/RotatingLine';
-import { ServicePhoto } from '../components/ServicePhoto';
-import cardArt from '../assets/brand/washo-card.webp';
+import { ServiceCarousel } from '../components/ServiceCarousel';
+import cardFront from '../assets/brand/washo-card.webp';
+import cardBack from '../assets/brand/washo-card-back.webp';
 import { Reveal } from '../components/ui/Reveal';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '../components/ui/Skeleton';
 import { audience } from '../lib/campaign';
-import { rupees } from '../lib/format';
 import { useCampaign, useCatalog } from '../lib/queries';
 
-// The holographic card is WebGL, so it is its own piece of the page's code: it loads after everything else and never delays the first paint.
-const HoloCard = lazy(() => import('../components/reactbits/HoloCard'));
+// The lanyard is three.js, so it is its own piece of the page's code: it loads after everything else and never delays the first paint.
+const Lanyard = lazy(() => import('../components/reactbits/Lanyard'));
+
+/** True once the element is within a screen of the viewport (it stays true). The lanyard's code is only fetched then, so it costs nothing to anyone who never scrolls that far. */
+function useNearViewport<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return undefined;
+    if (typeof IntersectionObserver === 'undefined') { setNear(true); return undefined; }
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { setNear(true); io.disconnect(); } }, { rootMargin: '600px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
+  return [ref, near] as const;
+}
 
 const steps = [
   { icon: CalendarCheck, title: 'Build your plan', text: 'Pick your vehicle, how many washes you want each month (4 or more), the days, and how long. The estimate updates as you go.' },
@@ -37,6 +52,7 @@ const why = [
 ];
 
 export default function Landing() {
+  const [lanyardRef, lanyardNear] = useNearViewport<HTMLDivElement>();
   const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const { data: catalog, isLoading } = useCatalog();
   const campaign = useCampaign().data?.campaign;
@@ -125,22 +141,7 @@ export default function Landing() {
 
       <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8">
         <Reveal><p className="eyebrow">Single washes</p><h2 className="mt-2 text-3xl font-extrabold md:text-4xl">Or book one wash</h2></Reveal>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {isLoading || !catalog ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64" />) : catalog.services.map((s, i) => {
-            const price = s.unit_prices?.find((p) => p.vehicle_type === s.vehicle_type)?.price_cents;
-            return (
-              <Reveal key={s.id} delay={i * 0.04} className="glass overflow-hidden">
-                <Link to="/app/book" className="group block">
-                  <ServicePhoto code={s.code} name={s.name} className="aspect-[4/3] w-full" />
-                  <div className="flex items-end justify-between gap-3 p-4">
-                    <div className="min-w-0"><p className="truncate font-bold">{s.name}</p><p className="truncate text-xs text-fog">{s.tagline ?? ''}</p></div>
-                    {price != null && <p className="font-display text-xl font-extrabold tabular-nums">{rupees(price)}</p>}
-                  </div>
-                </Link>
-              </Reveal>
-            );
-          })}
-        </div>
+        <div className="mt-6">{isLoading || !catalog ? <Skeleton className="h-[560px]" /> : <ServiceCarousel services={catalog.services} />}</div>
         <p className="mt-4 text-xs text-fog">SUVs use the car Body wash rate and the SUV Deep cleaning rate.</p>
       </section>
 
@@ -154,16 +155,18 @@ export default function Landing() {
       </section>
 
       <section className="mx-auto max-w-7xl px-4 pb-28 sm:px-6 lg:px-8" aria-labelledby="card-title">
-        <div className="glass grid items-center gap-10 overflow-hidden p-6 md:p-10 lg:grid-cols-[1fr_auto]">
+        <div className="glass grid items-center gap-6 overflow-hidden p-6 md:p-10 lg:grid-cols-2">
           <Reveal>
             <p className="eyebrow">Your WASHO card</p>
             <h2 id="card-title" className="mt-2 text-3xl font-extrabold md:text-4xl">Clean today, shine every day.</h2>
-            <p className="mt-4 max-w-md text-mist">Build a plan once and your washes are scheduled for you: your days, your slot, a call before every wash and before and after photos. Tilt the card, then start yours.</p>
+            <p className="mt-4 max-w-md text-mist">Build a plan once and your washes are scheduled for you: your days, your slot, a call before every wash and before and after photos. Give the card a swing, then start yours.</p>
             <ButtonLink to="/app/membership/new" className="mt-8" iconRight={<ArrowRight className="h-5 w-5" />}>Build my plan</ButtonLink>
           </Reveal>
-          <div className="mx-auto w-full max-w-[320px] justify-self-center lg:mx-0">
-            <Suspense fallback={<img src={cardArt} alt="WASHO member card" width={320} height={447} className="w-full rounded-[14px]" />}>
-              <HoloCard image={cardArt} alt="WASHO member card. Tilt it to see the foil shine." preset="rainbow" width={320} radius={18} tiltMax={16} intensity={0.75} glare={0.55} edgeSparkle={0.55} frame={3} foilColor="#cfe0ff" />
+          <div ref={lanyardRef} className="relative mx-auto h-[540px] w-full max-w-[460px] sm:h-[620px]" role="img" aria-label="A WASHO member card hanging from a lanyard. Drag it to swing it.">
+            <Suspense fallback={<img src={cardFront} alt="" width={320} height={447} className="mx-auto mt-24 w-56 rounded-2xl" />}>
+              {lanyardNear
+                ? <Lanyard frontImage={cardFront} backImage={cardBack} orientation="portrait" size={0.72} strapLength={0.38} strapColor="#16284d" strapWidth={0.7} metal="silver" finish="glossy" cornerRadius={0.3} />
+                : <img src={cardFront} alt="" width={320} height={447} className="mx-auto mt-24 w-56 rounded-2xl" />}
             </Suspense>
           </div>
         </div>

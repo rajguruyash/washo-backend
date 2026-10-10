@@ -327,3 +327,72 @@ describe('who can claim', () => {
     expect(expectOk(await admin.c.get(`/api/admin/campaigns/${id}`)).body.campaign.new_customers_only).toBe(false);
   });
 });
+
+describe('claims open and close at an exact time', () => {
+  const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+  const timed = (opensInMin: number, closesInMin: number, o: Record<string, unknown> = {}) =>
+    campaignBody({ claim_opens_at: at(opensInMin), claim_closes_at: at(closesInMin), claim_opens_on: istDate(0), claim_closes_on: istDate(0), use_by_date: istDate(7), ...o });
+  const live = async (b: Record<string, unknown>) => {
+    await reset();
+    const admin = await staffClient('admin');
+    const id = expectOk(await admin.c.post('/api/admin/campaigns', b)).body.campaign_id as string;
+    expectOk(await admin.c.post(`/api/admin/campaigns/${id}/active`, { active: true }));
+    return { admin, id };
+  };
+
+  it('before the opening time the page says upcoming (with the time) and a claim is refused with the time; after it opens, claims work', async () => {
+    const { admin, id } = await live(timed(120, 600));
+    const visitor = new Client();
+    const up = expectOk(await visitor.get('/api/campaign')).body.campaign;
+    expect(up).toMatchObject({ id, state: 'upcoming' });
+    expect(Date.parse(up.claim_opens_at)).toBeGreaterThan(Date.now());
+    expect(Date.parse(up.claim_closes_at)).toBeGreaterThan(Date.parse(up.claim_opens_at));
+    const n = await newcomer();
+    const refused = await n.c.post('/api/campaign/claim', claimBody(id, n));
+    expect(refused.status).toBe(422);
+    expect(refused.body.message).toMatch(/^This offer opens on \d{1,2} [A-Z][a-z]{2}, \d{1,2}:\d{2} (am|pm)$/);
+    // the admin moves the opening to a minute ago: it is open at once
+    const list = expectOk(await admin.c.get('/api/admin/campaigns')).body.campaigns.find((c: any) => c.id === id);
+    expect(list.claim_opens_at).toBeTruthy();
+    expectOk(await admin.c.put(`/api/admin/campaigns/${id}`, timed(-1, 600, { code: undefined })));
+    expect(expectOk(await visitor.get('/api/campaign')).body.campaign).toMatchObject({ id, state: 'open' });
+    expect(expectOk(await n.c.post('/api/campaign/claim', claimBody(id, n))).status).toBe(201);
+  });
+
+  it('after the closing time it is over: nothing on the page, and a claim is refused', async () => {
+    const { admin, id } = await live(timed(-600, 600));
+    expectOk(await admin.c.put(`/api/admin/campaigns/${id}`, timed(-600, -1, { code: undefined })));
+    expect(expectOk(await new Client().get('/api/campaign')).body.campaign).toBeNull();
+    const n = await newcomer();
+    const refused = await n.c.post('/api/campaign/claim', claimBody(id, n));
+    expect(refused.status).toBe(422);
+    expect(refused.body.message).toBe('This offer has ended');
+  });
+
+  it('saves and lists the times; the dates are the Pune dates of those times; a campaign saved with no times has none', async () => {
+    await reset();
+    const admin = await staffClient('admin');
+    const created = expectOk(await admin.c.post('/api/admin/campaigns', campaignBody({ claim_opens_at: '2099-03-10T00:30:00+05:30', claim_closes_at: '2099-03-12T20:00:00+05:30', claim_opens_on: '2099-03-10', claim_closes_on: '2099-03-12', use_by_date: '2099-03-20' }))).body.campaign_id as string;
+    const row = expectOk(await admin.c.get(`/api/admin/campaigns/${created}`)).body.campaign;
+    expect(Date.parse(row.claim_opens_at)).toBe(Date.parse('2099-03-10T00:30:00+05:30'));
+    expect(Date.parse(row.claim_closes_at)).toBe(Date.parse('2099-03-12T20:00:00+05:30'));
+    expect(String(row.claim_opens_on).slice(0, 10)).toBe('2099-03-10');   // the Pune date, not the UTC one (the evening before)
+    const plain = expectOk(await admin.c.post('/api/admin/campaigns', campaignBody())).body.campaign_id as string;
+    const p = expectOk(await admin.c.get(`/api/admin/campaigns/${plain}`)).body.campaign;
+    expect(p.claim_opens_at).toBeNull();
+    expect(p.claim_closes_at).toBeNull();
+  });
+
+  it('says what is wrong: only one time, closing before opening, a time that is not a time', async () => {
+    const admin = await staffClient('admin');
+    const post = (o: Record<string, unknown>) => admin.c.post('/api/admin/campaigns', campaignBody({ claim_opens_at: at(60), claim_closes_at: at(600), ...o }));
+    const one = await post({ claim_closes_at: undefined });
+    expect(one.status).toBe(422);
+    expect(one.body.message).toBe('Set both the time claims open and the time they close');
+    const back = await post({ claim_closes_at: at(30) });
+    expect(back.status).toBe(422);
+    expect(back.body.message).toBe('Claims must close after they open');
+    expect((await post({ claim_opens_at: 'tomorrow morning' })).status).toBe(400);
+    expect((await post({ claim_opens_at: '2099-03-10T10:00:00' })).status).toBe(400);      // no offset: it would be ambiguous
+  });
+});

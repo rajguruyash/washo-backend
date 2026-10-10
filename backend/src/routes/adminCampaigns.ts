@@ -20,6 +20,9 @@ const body = z.object({
   description: text(400).optional(),
   claim_opens_on: isoDate,
   claim_closes_on: isoDate,
+  // The exact time (Pune time, sent with its +05:30 offset) claims open and close. Both or neither; the dates above are the Pune dates of these times.
+  claim_opens_at: z.string().datetime({ offset: true, message: 'Pick the time claims open.' }).nullish(),
+  claim_closes_at: z.string().datetime({ offset: true, message: 'Pick the time claims close.' }).nullish(),
   use_by_date: isoDate,
   total_cap: z.number().int('Enter a whole number.').min(1, 'At least 1.').max(100000),
   daily_cap: z.number().int('Enter a whole number.').min(1, 'At least 1, or leave empty.').max(10000).nullish(),
@@ -34,6 +37,7 @@ const body = z.object({
 
 const SAVE = `SELECT public.admin_save_campaign($1, $2, $3, $4, $5::date, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14) AS id`;
 const SAVE_WITH_AUDIENCE = `SELECT public.admin_save_campaign($1, $2, $3, $4, $5::date, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14, $15::boolean) AS id`;
+const SAVE_WITH_TIMES = `SELECT public.admin_save_campaign($1, $2, $3, $4, $5::date, $6::date, $7::date, $8, $9, $10, $11, $12, $13, $14, $15::boolean, $16::timestamptz, $17::timestamptz) AS id`;
 const saveParams = (id: string | null, b: z.infer<typeof body>) => [
   id, b.code ?? '', b.name, b.description ?? null, b.claim_opens_on, b.claim_closes_on, b.use_by_date, b.total_cap, b.daily_cap ?? null,
   b.pack_offer_days, b.pack_bp_1, b.pack_bp_2, b.pack_bp_3plus, b.active ?? null,
@@ -46,6 +50,15 @@ type Run = <T>(fn: (c: import('pg').PoolClient) => Promise<T>) => Promise<T>;
  */
 async function saveCampaign(db: Run, id: string | null, b: z.infer<typeof body>): Promise<string> {
   const params = saveParams(id, b);
+  // Opening and closing at an exact time arrived with migration 36. Without times this is the call the database has always had.
+  if (b.claim_opens_at || b.claim_closes_at) {
+    try {
+      return await db(async (c) => (await c.query(SAVE_WITH_TIMES, [...params, b.new_customers_only ?? null, b.claim_opens_at ?? null, b.claim_closes_at ?? null])).rows[0].id as string);
+    } catch (err) {
+      if ((err as { code?: string }).code === '42883') throw new HttpError(503, 'backend_not_ready', "Opening and closing at an exact time isn't switched on yet. The database needs its latest update; please contact whoever looks after it.");
+      throw err;
+    }
+  }
   try {
     return await db(async (c) => (await c.query(SAVE_WITH_AUDIENCE, [...params, b.new_customers_only ?? null])).rows[0].id as string);
   } catch (err) {
@@ -57,8 +70,8 @@ async function saveCampaign(db: Run, id: string | null, b: z.infer<typeof body>)
   }
 }
 
-const CAMPAIGN_SQL = `
-  SELECT k.id, k.code, k.name, k.description, k.is_active, k.claim_opens_on, k.claim_closes_on, k.use_by_date, k.total_cap, k.daily_cap,
+const campaignSql = (times: boolean) => `
+  SELECT k.id, k.code, k.name, k.description, k.is_active, k.claim_opens_on, k.claim_closes_on, ${times ? 'k.claim_opens_at, k.claim_closes_at,' : 'NULL::timestamptz AS claim_opens_at, NULL::timestamptz AS claim_closes_at,'} k.use_by_date, k.total_cap, k.daily_cap,
          k.new_customers_only, k.pack_offer_days, k.pack_offer_bp_1 AS pack_bp_1, k.pack_offer_bp_2 AS pack_bp_2, k.pack_offer_bp_3plus AS pack_bp_3plus, k.created_at,
          count(x.id) FILTER (WHERE x.status <> 'released')::int AS claimed,
          count(x.id) FILTER (WHERE x.status = 'booked')::int AS booked,
@@ -71,11 +84,15 @@ const CAMPAIGN_SQL = `
     FROM public.campaigns k
     LEFT JOIN public.campaign_claims x ON x.campaign_id = k.id
     LEFT JOIN public.memberships m ON m.id = x.offer_membership_id`;
+/** Runs a campaign query with the times, or without them on a database that does not have migration 36 yet. */
+const withTimes = async <T>(run: (sql: string) => Promise<T>): Promise<T> => {
+  try { return await run(campaignSql(true)); } catch (err) { if ((err as { code?: string }).code === '42703') return run(campaignSql(false)); throw err; }
+};
 
 adminCampaignsRouter.get(
   '/admin/campaigns',
   asyncHandler(async (req, res) => {
-    const campaigns = await req.db(async (c) => (await c.query(`${CAMPAIGN_SQL} GROUP BY k.id ORDER BY k.created_at DESC`)).rows);
+    const campaigns = await withTimes((sql) => req.db(async (c) => (await c.query(`${sql} GROUP BY k.id ORDER BY k.created_at DESC`)).rows));
     res.json({ success: true, campaigns });
   })
 );
@@ -84,8 +101,8 @@ adminCampaignsRouter.get(
   '/admin/campaigns/:id',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    const out = await req.db(async (c) => {
-      const campaign = (await c.query(`${CAMPAIGN_SQL} WHERE k.id = $1 GROUP BY k.id`, [id])).rows[0];
+    const out = await withTimes((sql) => req.db(async (c) => {
+      const campaign = (await c.query(`${sql} WHERE k.id = $1 GROUP BY k.id`, [id])).rows[0];
       if (!campaign) return null;
       // washes per day (only the claims still standing), so the daily limit can be watched
       const days = (
@@ -97,7 +114,7 @@ adminCampaignsRouter.get(
         )
       ).rows;
       return { campaign, days };
-    });
+    }));
     if (!out) throw new HttpError(404, 'not_found', 'Campaign not found');
     res.json({ success: true, ...out });
   })

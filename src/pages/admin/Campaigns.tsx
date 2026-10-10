@@ -7,7 +7,7 @@ import { Input, Select, TextArea } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
-import { dayOf, shortDayIST } from '../../lib/campaign';
+import { claimWindow, closesLabel, dayOf, fromIstInput, istInput, opensLabel, shortDayIST } from '../../lib/campaign';
 import { addDays, percent, prettyDate, prettyPhone, rupees, todayIST, vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminCampaign, useAdminCampaignClaims, useAdminCampaigns } from '../../lib/queries';
@@ -19,10 +19,10 @@ import { Loading, errText } from './shared';
 
 /** Where a campaign is right now, in words, for its badge. */
 function liveState(c: AdminCampaign): { label: string; tone: Tone } {
-  const today = todayIST();
+  const w = claimWindow(c);
   if (!c.is_active) return { label: 'Switched off', tone: 'slate' };
-  if (today < c.claim_opens_on) return { label: `Opens ${dayOf(c.claim_opens_on)}`, tone: 'blue' };
-  if (today > c.claim_closes_on) return { label: 'Claims closed', tone: 'slate' };
+  if (Date.now() < w.opens) return { label: `Opens ${opensLabel(c)}`, tone: 'blue' };
+  if (Date.now() >= w.closes) return { label: 'Claims closed', tone: 'slate' };
   if (c.claimed >= c.total_cap) return { label: 'All claimed', tone: 'amber' };
   return { label: 'Live', tone: 'green' };
 }
@@ -50,14 +50,14 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
   const toast = useToast();
   const blank = () => {
     const today = todayIST();
-    return { code: 'navratri-2026', name: 'Navratri free wash', description: 'A free body wash at your parking spot for WASHO customers.', opens: today, closes: addDays(today, 1), useBy: addDays(today, 6), total: '100', daily: '', offerDays: '14', p1: '5', p2: '10', p3: '15', on: false, newOnly: false };
+    return { code: 'navratri-2026', name: 'Navratri free wash', description: 'A free body wash at your parking spot for WASHO customers.', opens: `${today}T00:00`, closes: `${addDays(today, 1)}T23:59`, useBy: addDays(today, 6), total: '100', daily: '', offerDays: '14', p1: '5', p2: '10', p3: '15', on: false, newOnly: false };
   };
   const [f, setF] = useState(blank);
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     setErrors({});
     setF(campaign
-      ? { code: campaign.code, name: campaign.name, description: campaign.description ?? '', opens: campaign.claim_opens_on, closes: campaign.claim_closes_on, useBy: campaign.use_by_date, total: String(campaign.total_cap), daily: campaign.daily_cap ? String(campaign.daily_cap) : '', offerDays: String(campaign.pack_offer_days), p1: String(campaign.pack_bp_1 / 100), p2: String(campaign.pack_bp_2 / 100), p3: String(campaign.pack_bp_3plus / 100), on: campaign.is_active, newOnly: campaign.new_customers_only }
+      ? { code: campaign.code, name: campaign.name, description: campaign.description ?? '', opens: campaign.claim_opens_at ? istInput(campaign.claim_opens_at) : `${campaign.claim_opens_on}T00:00`, closes: campaign.claim_closes_at ? istInput(campaign.claim_closes_at) : `${campaign.claim_closes_on}T23:59`, useBy: campaign.use_by_date, total: String(campaign.total_cap), daily: campaign.daily_cap ? String(campaign.daily_cap) : '', offerDays: String(campaign.pack_offer_days), p1: String(campaign.pack_bp_1 / 100), p2: String(campaign.pack_bp_2 / 100), p3: String(campaign.pack_bp_3plus / 100), on: campaign.is_active, newOnly: campaign.new_customers_only }
       : blank());
   }, [campaign, open]);
   const set = (k: keyof ReturnType<typeof blank>) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
@@ -69,7 +69,7 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
       ...(campaign ? {} : { code: f.code, active: f.on }),
       new_customers_only: f.newOnly,
       name: f.name, description: f.description || undefined,
-      claim_opens_on: f.opens, claim_closes_on: f.closes, use_by_date: f.useBy,
+      claim_opens_on: f.opens.slice(0, 10), claim_closes_on: f.closes.slice(0, 10), claim_opens_at: fromIstInput(f.opens), claim_closes_at: fromIstInput(f.closes), use_by_date: f.useBy,
       total_cap: Number(f.total), daily_cap: f.daily.trim() ? Number(f.daily) : null,
       pack_offer_days: Number(f.offerDays), pack_bp_1: bpOf(f.p1), pack_bp_2: bpOf(f.p2), pack_bp_3plus: bpOf(f.p3),
     };
@@ -100,12 +100,14 @@ function CampaignSheet({ open, campaign, onClose }: { open: boolean; campaign: A
 
         <fieldset className="space-y-3">
           <legend className="text-sm font-bold">When</legend>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Input label="Claims open" type="date" value={f.opens} error={errors.claim_opens_on} onChange={set('opens')} />
-            <Input label="Claims close" type="date" value={f.closes} min={f.opens} error={errors.claim_closes_on} onChange={set('closes')} />
-            <Input label="Last day for the wash" type="date" value={f.useBy} min={f.opens} error={errors.use_by_date} onChange={set('useBy')} hint="Every free wash is placed on or before this day." />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Claims open" type="datetime-local" value={f.opens} error={errors.claim_opens_at ?? errors.claim_opens_on} onChange={set('opens')} hint="Pune time, for example 10 September, 10:00 am." />
+            <Input label="Claims close" type="datetime-local" value={f.closes} min={f.opens} error={errors.claim_closes_at ?? errors.claim_closes_on} onChange={set('closes')} hint="Nobody can claim from this moment." />
           </div>
-          <p className="text-xs text-fog">Both days count in full. A customer can claim until the end of the last claim day, for a wash on or before the last day for the wash.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Last day for the wash" type="date" value={f.useBy} min={f.opens.slice(0, 10)} error={errors.use_by_date} onChange={set('useBy')} hint="Every free wash is placed on or before this day." />
+          </div>
+          <p className="text-xs text-fog">Claims open and close at exactly these times. {f.on || campaign?.is_active ? 'A campaign that is switched on starts as soon as the opening time comes.' : 'Nothing shows on the website until you switch it on; once it is on, it starts at the opening time (at once, if that has passed).'}</p>
         </fieldset>
 
         <fieldset className="space-y-3">
@@ -195,7 +197,7 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-extrabold">{c.name}</h2><Badge tone={st.tone}>{st.label}</Badge></div>
-            <p className="mt-1 text-sm text-fog">{c.new_customers_only ? 'New customers only' : 'Open to everyone'} · claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)} · wash by {dayOf(c.use_by_date)} · page: /navratri</p>
+            <p className="mt-1 text-sm text-fog">{c.new_customers_only ? 'New customers only' : 'Open to everyone'} · claims {opensLabel(c)} to {closesLabel(c)} · wash by {dayOf(c.use_by_date)} · page: /navratri</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => onEdit(c)}>Edit</Button>
@@ -295,7 +297,7 @@ export default function Campaigns() {
               <div className="flex items-start justify-between gap-3">
                 <button onClick={() => setOpen(c.id)} className="min-w-0 text-left">
                   <p className="truncate text-lg font-bold hover:text-washo-300">{c.name}</p>
-                  <p className="text-xs text-fog">{c.code} · {c.new_customers_only ? 'new customers only' : 'open to everyone'} · claims {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}</p>
+                  <p className="text-xs text-fog">{c.code} · {c.new_customers_only ? 'new customers only' : 'open to everyone'} · claims {opensLabel(c)} to {closesLabel(c)}</p>
                 </button>
                 <Badge tone={st.tone}>{st.label}</Badge>
               </div>

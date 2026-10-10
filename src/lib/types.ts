@@ -555,6 +555,9 @@ export interface Campaign {
   state: CampaignState;
   claim_opens_on: string;
   claim_closes_on: string;
+  /** The exact times claims open and close, when the campaign has them (otherwise whole days). */
+  claim_opens_at?: string | null;
+  claim_closes_at?: string | null;
   use_by_date: string;
   total_cap: number;
   spots_left: number;
@@ -580,6 +583,8 @@ export interface AdminCampaign {
   is_active: boolean;
   claim_opens_on: string;
   claim_closes_on: string;
+  claim_opens_at?: string | null;
+  claim_closes_at?: string | null;
   use_by_date: string;
   total_cap: number;
   daily_cap: number | null;

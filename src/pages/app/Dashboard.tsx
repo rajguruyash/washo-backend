@@ -13,7 +13,7 @@ import { ButtonLink } from '../../components/ui/Button';
 import { VehicleSheet } from '../../components/VehicleSheet';
 import { cn } from '../../lib/cn';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { audience, claimView, dayOf } from '../../lib/campaign';
+import { audience, claimView, closesLabel } from '../../lib/campaign';
 import { prettyDate } from '../../lib/format';
 import { useBookings, useCampaign, useMemberships, useRequests } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
@@ -72,7 +72,7 @@ export default function Dashboard() {
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-offer/15 text-offer"><Gift className="h-6 w-6" /></span>
               <div className="min-w-0 flex-1">
                 <p className="font-bold">{c.name}: claim your free wash</p>
-                <p className="text-sm text-fog">A free body wash {audience(c).short}. Claim by {dayOf(c.claim_closes_on)}{c.spots_left <= 30 ? ` · only ${c.spots_left} left` : ''}.</p>
+                <p className="text-sm text-fog">A free body wash {audience(c).short}. Claim by {closesLabel(c)}{c.spots_left <= 30 ? ` · only ${c.spots_left} left` : ''}.</p>
               </div>
               <ArrowRight className="h-5 w-5 text-fog" />
             </Link></CampaignGlare>
