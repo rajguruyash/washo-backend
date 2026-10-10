@@ -51,7 +51,7 @@ describe('a valid delivery', () => {
     const res = await h.send();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({});
-    expect(h.calls).toEqual([`https://2factor.in/API/V1/${API_KEY}/SMS/+919172792929/${OTP}/WASHO_LOGIN_OTP`]);
+    expect(h.calls).toEqual([`https://2factor.in/API/V1/${API_KEY}/SMS/9172792929/${OTP}/WASHO_LOGIN_OTP`]);
     noSecrets(h.logs.join('\n'));
     expect(h.logs.join('\n')).toContain('91******2929');
   });
@@ -75,7 +75,7 @@ describe('the payload Supabase Auth really sends', () => {
     });
     const res = await h.send({ body });
     expect(res.status).toBe(200);
-    expect(h.calls).toEqual([`https://2factor.in/API/V1/${API_KEY}/SMS/+919172792929/${OTP}/WASHO_LOGIN_OTP`]);
+    expect(h.calls).toEqual([`https://2factor.in/API/V1/${API_KEY}/SMS/9172792929/${OTP}/WASHO_LOGIN_OTP`]);
     noSecrets(h.logs.join('\n'));
   });
 });

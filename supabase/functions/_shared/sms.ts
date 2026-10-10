@@ -148,12 +148,13 @@ export const maskMobile = (mobile: string): string => `91******${mobile.slice(-4
 /**
  * 2Factor "Send OTP (Manual Generation)", from their official API documentation:
  *   GET https://2factor.in/API/V1/:api_key/SMS/:phone_number/:otp_value/:otp_template_name
- * phone_number in international format (their example: +919999999999), otp_value a 4-6 digit OTP that WE supply, otp_template_name the approved
- * template. Never the AUTOGEN or VERIFY endpoints: 2Factor must send exactly the code Supabase generated and will check.
+ * phone_number is the person's 10-digit number with no country code (the form confirmed to deliver as a text on this account; 2Factor also accepts +91...),
+ * otp_value a 4-6 digit OTP that WE supply, otp_template_name the template (OTP1). Never the AUTOGEN or VERIFY endpoints: AUTOGEN makes 2Factor invent its own
+ * code, which Supabase would not recognise, so 2Factor must send exactly the code Supabase generated and will check.
  * The returned string contains the API key and the OTP: pass it straight to fetch, never log it.
  */
 export function twoFactorSendUrl(apiKey: string, mobile: string, otp: string, template: string): string {
-  return `${TWOFACTOR_BASE}/${encodeURIComponent(apiKey)}/SMS/+91${mobile}/${otp}/${encodeURIComponent(template)}`;
+  return `${TWOFACTOR_BASE}/${encodeURIComponent(apiKey)}/SMS/${mobile}/${otp}/${encodeURIComponent(template)}`;
 }
 
 export type SendResult =

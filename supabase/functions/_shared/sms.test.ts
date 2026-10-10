@@ -157,12 +157,12 @@ describe('the hook body', () => {
 describe('2Factor request format (official: GET /API/V1/:api_key/SMS/:phone_number/:otp_value/:otp_template_name)', () => {
   it('builds the custom-OTP URL with the international phone number and OUR code, never AUTOGEN', () => {
     const url = twoFactorSendUrl('KEY-1234', '9172792929', '123456', 'WASHO_LOGIN_OTP');
-    expect(url).toBe('https://2factor.in/API/V1/KEY-1234/SMS/+919172792929/123456/WASHO_LOGIN_OTP');
+    expect(url).toBe('https://2factor.in/API/V1/KEY-1234/SMS/9172792929/123456/WASHO_LOGIN_OTP');
     expect(url).not.toMatch(/AUTOGEN|VERIFY/);
   });
   it('cannot be steered by odd characters in the key or the template', () => {
     const url = twoFactorSendUrl('a/b?c#d', '9172792929', '123456', '../x y');
-    expect(url).toBe('https://2factor.in/API/V1/a%2Fb%3Fc%23d/SMS/+919172792929/123456/..%2Fx%20y');
+    expect(url).toBe('https://2factor.in/API/V1/a%2Fb%3Fc%23d/SMS/9172792929/123456/..%2Fx%20y');
   });
 });
 
@@ -187,7 +187,7 @@ describe('sendOtpVia2Factor', () => {
     }) as unknown as typeof fetch;
     await sendOtpVia2Factor({ ...base, fetchFn });
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe(`https://2factor.in/API/V1/${KEY}/SMS/+919172792929/${OTP}/WASHO_LOGIN_OTP`);
+    expect(calls[0].url).toBe(`https://2factor.in/API/V1/${KEY}/SMS/9172792929/${OTP}/WASHO_LOGIN_OTP`);
     expect(calls[0].init).toMatchObject({ method: 'GET', redirect: 'error' });
     expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
   });
