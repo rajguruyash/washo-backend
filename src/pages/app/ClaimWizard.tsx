@@ -172,7 +172,7 @@ export default function ClaimWizard() {
             {!user?.email && <div className="mt-5"><Input label="Email" type="email" optional value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" hint="We will email your booking confirmation. You can leave this empty." /></div>}
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-offer/25 bg-offer/10 p-4 text-sm text-mist">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-offer" />
-              <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open (until {dayOf(c.claim_closes_on)}). A specialist calls ahead on the day.</p>
+              <p>One free wash for each phone number, vehicle and flat. If you cancel it, the claim comes back while the offer is open. A specialist calls ahead on the day.</p>
             </div>
             <PayPhoneGate what="claim" />
             {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}

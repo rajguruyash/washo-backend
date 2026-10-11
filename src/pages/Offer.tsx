@@ -86,10 +86,6 @@ export default function Offer() {
           <Badge tone="yellow" icon={<Gift className="h-3.5 w-3.5" />}>{c.name}</Badge>
           <h1 className="mt-4 text-4xl font-extrabold leading-[1.05] sm:text-5xl">{audience(c).headline}</h1>
           <p className="mt-4 max-w-xl text-lg text-mist">{c.description ?? `A free body wash at your parking spot for ${audience(c).long} in Kharadi, Pune. No payment, no catch.`}</p>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Badge>Claim by {dayOf(c.claim_closes_on)}</Badge>
-            <Badge>Wash by {dayOf(c.use_by_date)}</Badge>
-          </div>
           <div className="mt-8"><ClaimButton campaign={c} /></div>
         </div>
         <Reveal>
