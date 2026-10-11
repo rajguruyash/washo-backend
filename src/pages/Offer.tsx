@@ -1,5 +1,5 @@
 import { animate, useReducedMotion } from 'framer-motion';
-import { ArrowRight, CalendarCheck, Check, Gift, MapPin, ShieldCheck, Smartphone, Sparkles, UserPlus } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Check, Gift, Smartphone, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CampaignGlare } from '../components/CampaignGlare';
@@ -8,8 +8,8 @@ import { Badge } from '../components/ui/Badge';
 import { ButtonLink } from '../components/ui/Button';
 import { Reveal } from '../components/ui/Reveal';
 import { Skeleton } from '../components/ui/Skeleton';
-import { audience, claimView, dayOf, offerRates } from '../lib/campaign';
-import { percent, rupees } from '../lib/format';
+import { audience, claimView, dayOf } from '../lib/campaign';
+import { rupees } from '../lib/format';
 import { useCampaign, useCatalog } from '../lib/queries';
 import type { Campaign } from '../lib/types';
 import { useAuth } from '../state/auth';
@@ -79,7 +79,6 @@ export default function Offer() {
     );
   }
 
-  const left = c.state === 'open' ? (c.spots_left <= 30 ? `Only ${c.spots_left} of ${c.total_cap} left` : `${c.spots_left} free washes left`) : null;
   return (
     <div className="mx-auto max-w-5xl px-4 pb-24 pt-32 sm:px-6 lg:px-8">
       <section className="grid items-center gap-10 md:grid-cols-[1.15fr_0.85fr]">
@@ -88,7 +87,6 @@ export default function Offer() {
           <h1 className="mt-4 text-4xl font-extrabold leading-[1.05] sm:text-5xl">{audience(c).headline}</h1>
           <p className="mt-4 max-w-xl text-lg text-mist">{c.description ?? `A free body wash at your parking spot for ${audience(c).long} in Kharadi, Pune. No payment, no catch.`}</p>
           <div className="mt-5 flex flex-wrap gap-2">
-            {left && <Badge tone="amber">{left}</Badge>}
             <Badge>Claim by {dayOf(c.claim_closes_on)}</Badge>
             <Badge>Wash by {dayOf(c.use_by_date)}</Badge>
           </div>
@@ -118,38 +116,6 @@ export default function Offer() {
             </Reveal>
           ))}
         </ol>
-      </section>
-
-      <section className="mt-16 grid gap-5 md:grid-cols-2" aria-labelledby="rules">
-        <div className="glass p-6">
-          <h2 id="rules" className="flex items-center gap-2 text-lg font-bold"><ShieldCheck className="h-5 w-5 text-washo-300" aria-hidden /> The small print</h2>
-          <ul className="mt-4 space-y-2.5 text-sm text-mist">
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> {audience(c).rule}</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> One free wash for each phone number, vehicle and flat.</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> You do not choose the day or time: we place your wash and tell you at once.</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> It is a body wash: bike body wash, or car body wash for cars and SUVs.</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Claim from {dayOf(c.claim_opens_on)} to {dayOf(c.claim_closes_on)}. The wash itself must be on or before {dayOf(c.use_by_date)}.</li>
-            <li className="flex gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Kharadi, Pune, at your society parking spot.</li>
-            <li className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden /> Cancel it and the claim comes back, while the offer is still open.</li>
-          </ul>
-        </div>
-        <CampaignGlare><div className="glass h-full border-offer/25 p-6">
-          <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles className="h-5 w-5 text-offer" aria-hidden /> Then, a welcome offer</h2>
-          <p className="mt-2 text-sm text-fog">Loved it? For {c.pack_offer.days} days after your free wash, a membership costs less:</p>
-          <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
-            {[
-              ['4 to 7 washes a month', c.pack_offer.bp_1],
-              ['8 to 11 a month', c.pack_offer.bp_2],
-              ['12 or more a month', c.pack_offer.bp_3plus],
-            ].map(([label, bp]) => (
-              <div key={label as string} className="rounded-2xl border border-white/[0.09] bg-white/[0.04] p-3">
-                <dd className="font-display text-2xl font-extrabold text-offer">{percent(bp as number)}</dd>
-                <dt className="mt-0.5 text-[11px] text-fog">{label} off</dt>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-3 text-xs text-fog">{offerRates(c.pack_offer)}. Applied for you at checkout.</p>
-        </div></CampaignGlare>
       </section>
 
       <section className="mt-16 rounded-3xl border border-white/[0.09] bg-gradient-to-br from-washo-600/25 to-transparent p-8 text-center">
