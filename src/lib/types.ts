@@ -388,6 +388,10 @@ export interface AdminBooking {
   source?: string;
   /** The free-wash campaign this wash was claimed in, if any. */
   campaign_name?: string | null;
+  /** How it is paid for: a paid single wash, one of a membership's washes, free, refunded, or unpaid. */
+  payment_kind: 'paid' | 'membership' | 'free' | 'refunded' | 'unpaid';
+  /** For a paid single wash: razorpay (online) or offline (cash taken by WASHO). */
+  payment_provider?: string | null;
   service_name: string;
   wash_kind: WashKind | null;
   vehicle_type: VehicleType;

@@ -26,5 +26,19 @@ export const staffStatus: Record<BookingStatus, { label: string; tone: Tone }> =
   call_not_picked_up: { label: 'Call not picked up', tone: 'amber' },
 };
 
+/** How a wash is paid for, as the admin Washes tab shows it (see PAY_KIND_SQL in backend/src/routes/admin.ts). */
+export type PayKind = 'paid' | 'membership' | 'free' | 'refunded' | 'unpaid';
+export const PAY_KINDS: PayKind[] = ['paid', 'membership', 'free', 'refunded', 'unpaid'];
+export const payKind: Record<PayKind, { label: string; tone: Tone }> = {
+  paid: { label: 'Paid', tone: 'green' },
+  membership: { label: 'Membership', tone: 'blue' },
+  free: { label: 'Free', tone: 'yellow' },
+  refunded: { label: 'Refunded', tone: 'amber' },
+  unpaid: { label: 'Unpaid', tone: 'red' },
+};
+/** The label on the badge: a paid wash also says how (online through Razorpay, or cash taken by WASHO). */
+export const payLabel = (kind: PayKind, provider?: string | null): string =>
+  kind === 'paid' ? (provider === 'razorpay' ? 'Paid · online' : provider === 'offline' ? 'Paid · cash' : 'Paid') : payKind[kind].label;
+
 export const LIVE_STATUSES: BookingStatus[] = ['pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'in_progress'];
 export const isLive = (s: BookingStatus) => LIVE_STATUSES.includes(s);

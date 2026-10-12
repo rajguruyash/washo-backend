@@ -71,8 +71,26 @@ adminRouter.post(
 );
 
 // ───────────────────────── bookings ─────────────────────────
+/**
+ * How a wash is paid for, as the Washes tab shows it:
+ *   membership  one of a membership's washes (the plan was paid for as a whole)
+ *   refunded    a single wash whose payment was refunded
+ *   paid        a single wash with a payment on record (online through Razorpay, or cash recorded by WASHO)
+ *   free        nothing to pay (a free-wash campaign claim, or a complimentary wash booked by WASHO)
+ *   unpaid      a single wash with a price and no payment on record
+ */
+export const PAY_KIND_SQL = `CASE
+    WHEN b.booking_type::text = 'membership' THEN 'membership'
+    WHEN pay.status = 'refunded' THEN 'refunded'
+    WHEN pay.status IN ('paid', 'partially_refunded') THEN 'paid'
+    WHEN COALESCE(b.price_cents, 0) = 0 THEN 'free'
+    ELSE 'unpaid'
+  END`;
+export const PAY_KINDS = ['paid', 'membership', 'free', 'refunded', 'unpaid'] as const;
+
 export const ADMIN_BOOKING_SQL = `
   SELECT b.id, b.reference_code, b.status::text AS status, b.booking_type::text AS booking_type, b.scheduled_date, b.time_slot::text AS time_slot,
+         ${PAY_KIND_SQL} AS payment_kind, pay.provider AS payment_provider,
          b.membership_id, b.price_cents, b.customer_confirmed_at, b.parking_location, b.cancel_reason, b.notes, COALESCE(b.address_id, v.address_id) AS address_id, b.source,
          s.name AS service_name, s.wash_kind,
          v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number, v.color AS vehicle_color,
@@ -85,7 +103,8 @@ export const ADMIN_BOOKING_SQL = `
     JOIN public.profiles p ON p.id = b.customer_profile_id
     LEFT JOIN public.customer_addresses a ON a.id = COALESCE(b.address_id, v.address_id)
     LEFT JOIN public.worker_assignments wa ON wa.booking_id = b.id AND wa.is_active
-    LEFT JOIN public.profiles wp ON wp.id = wa.worker_profile_id`;
+    LEFT JOIN public.profiles wp ON wp.id = wa.worker_profile_id
+    LEFT JOIN LATERAL (SELECT py.status::text AS status, py.provider FROM public.payments py WHERE py.booking_id = b.id ORDER BY py.created_at DESC LIMIT 1) pay ON true`;
 
 adminRouter.get(
   '/admin/bookings',
@@ -98,6 +117,7 @@ adminRouter.get(
         worker: z.string().uuid().optional().catch(undefined),
         unassigned: z.enum(['1']).optional().catch(undefined),
         membership: z.string().uuid().optional().catch(undefined),
+        pay: z.enum(PAY_KINDS).optional().catch(undefined),
       }),
       req.query
     );
@@ -108,8 +128,9 @@ adminRouter.get(
             WHERE ($1::date IS NULL OR b.scheduled_date >= $1) AND ($2::date IS NULL OR b.scheduled_date <= $2)
               AND ($3::text IS NULL OR b.status::text = $3) AND ($4::uuid IS NULL OR wp.id = $4)
               AND ($5::text IS NULL OR wp.id IS NULL) AND ($6::uuid IS NULL OR b.membership_id = $6)
+              AND ($7::text IS NULL OR ${PAY_KIND_SQL} = $7)
             ORDER BY b.scheduled_date, b.time_slot, b.created_at LIMIT 400`,
-          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null]
+          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null, q.pay ?? null]
         )
       ).rows
     );

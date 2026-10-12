@@ -359,6 +359,8 @@ export interface AdminBookingFilter {
   worker?: string;
   unassigned?: boolean;
   membership?: string;
+  /** paid | membership | free | refunded | unpaid */
+  pay?: string;
 }
 
 export const useAdminBookings = (f: AdminBookingFilter) => {
@@ -369,6 +371,7 @@ export const useAdminBookings = (f: AdminBookingFilter) => {
   if (f.worker) q.set('worker', f.worker);
   if (f.unassigned) q.set('unassigned', '1');
   if (f.membership) q.set('membership', f.membership);
+  if (f.pay) q.set('pay', f.pay);
   return useQuery({ queryKey: keys.admin('bookings', q.toString()), queryFn: async () => (await get<{ bookings: AdminBooking[] }>(`/admin/bookings?${q}`)).bookings });
 };
 

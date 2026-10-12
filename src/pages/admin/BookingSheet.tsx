@@ -11,7 +11,7 @@ import { useToast } from '../../components/ui/Toast';
 import { prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
 import { useAdminAction, useAdminBooking, useAdminCustomer, useAdminWorkers } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
-import { staffStatus } from '../../lib/status';
+import { payKind, payLabel, staffStatus } from '../../lib/status';
 import type { SlotId } from '../../lib/types';
 import { Loading, errText } from './shared';
 
@@ -42,7 +42,7 @@ export function BookingSheet({ id, onClose }: { id: string | null; onClose: () =
     <Sheet open={Boolean(id)} onClose={onClose} size="lg" title={b ? `${b.reference_code} · ${b.service_name}` : 'Wash'} description={b ? `${prettyDate(b.scheduled_date)}, ${slotLabel(b.time_slot)}` : undefined}>
       {!b ? <Loading /> : view === 'details' ? (
         <div className="space-y-5">
-          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.booking_type === 'membership' && <Badge tone="blue">Membership</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.campaign_name && <Badge tone="yellow">Campaign · {b.campaign_name}</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
+          <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.payment_kind && <Badge tone={payKind[b.payment_kind].tone}>{payLabel(b.payment_kind, b.payment_provider)}</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.campaign_name && <Badge tone="yellow">Campaign · {b.campaign_name}</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
           <div className="grid gap-4 text-sm sm:grid-cols-2">
             <div><p className="eyebrow">Customer</p><p className="font-semibold">{b.customer_name}</p><a href={`tel:${b.customer_phone}`} className="text-washo-300">{prettyPhone(b.customer_phone)}</a></div>
             <div><p className="eyebrow">Vehicle</p><p>{b.vehicle_type.toUpperCase()} · {b.vehicle_model} {b.vehicle_color ?? ''}</p><p className="text-fog">{b.registration_number}</p></div>

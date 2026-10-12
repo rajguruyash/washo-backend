@@ -15,7 +15,7 @@ import {
   useAdminAction, useAdminAttention, useAdminBookings, useAdminMemberships, useAdminOverview, useAdminRequests, useAdminWorkers, useReviewRequest, useRefreshAll,
 } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
-import { staffStatus } from '../../lib/status';
+import { PAY_KINDS, payKind, payLabel, staffStatus } from '../../lib/status';
 import type { AdminBooking, AdminMembership, AdminRequest, Attention as AttentionData, RequestStatus, SlotId } from '../../lib/types';
 import { StaffLayout } from '../../layouts/StaffLayout';
 import { ROLE_LABEL, canDo, isReadOnly } from '../../lib/adminAccess';
@@ -182,19 +182,24 @@ function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: 
   const [to, setTo] = useState(addDays(todayIST(), 7));
   const [status, setStatus] = useState('');
   const [unassigned, setUnassigned] = useState(false);
-  const filter = useMemo(() => (membership ? { membership } : { from, to, status: status || undefined, unassigned }), [membership, from, to, status, unassigned]);
+  const [pay, setPay] = useState('');
+  const filter = useMemo(() => (membership ? { membership } : { from, to, status: status || undefined, unassigned, pay: pay || undefined }), [membership, from, to, status, unassigned, pay]);
   const { data, isLoading, isError, refetch } = useAdminBookings(filter);
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       {!membership && canAdd && <div className="flex justify-end"><Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={onAdd}>Book a wash</Button></div>}
       {!membership && (
-        <div className="glass grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
+        <div className="glass grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
           <Input label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           <Input label="To" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Any</option>
             {Object.entries(staffStatus).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </Select>
+          <Select label="Payment" value={pay} onChange={(e) => setPay(e.target.value)}>
+            <option value="">Any</option>
+            {PAY_KINDS.map((k) => <option key={k} value={k}>{payKind[k].label}</option>)}
           </Select>
           <label className="flex h-12 items-center gap-2 text-sm"><input type="checkbox" checked={unassigned} onChange={(e) => setUnassigned(e.target.checked)} className="h-4 w-4" /> Unassigned only</label>
         </div>
@@ -206,6 +211,7 @@ function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: 
               <div className="w-28 shrink-0"><p className="text-sm font-bold">{prettyDate(b.scheduled_date)}</p><p className="text-xs text-fog">{slotLabel(b.time_slot)}</p></div>
               <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}{b.campaign_name ? ' · free wash' : ''}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
               <p className="w-32 truncate text-sm text-mist">{b.worker_name ?? <span className="text-warn">Unassigned</span>}</p>
+              <Badge tone={payKind[b.payment_kind]?.tone ?? 'slate'}>{b.payment_kind ? payLabel(b.payment_kind, b.payment_provider) : 'Payment unknown'}</Badge>
               <Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>
             </button>
           ))}
