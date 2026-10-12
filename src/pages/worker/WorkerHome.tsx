@@ -1,5 +1,5 @@
 import { ChevronRight, MapPin, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState } from '../../components/EmptyState';
 import { Plate } from '../../components/brand/Plate';
@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/Button';
 import { Segmented } from '../../components/ui/Segmented';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
+import { ALL_BUILDINGS, buildingOptions, inBuilding } from '../../lib/buildings';
 import { friendlyDay } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useWorkerPool, useWorkerQueue, useWorkerStep } from '../../lib/queries';
@@ -16,6 +17,9 @@ import { staffStatus } from '../../lib/status';
 import type { WorkerBucket, WorkerWash } from '../../lib/types';
 
 type Tab = WorkerBucket | 'available';
+
+// A wash that is no longer yours has its details hidden, building included, so it can only be found under "All buildings".
+const asRow = (r: WorkerWash) => ({ building_block: r.building_block, hidden: r.bucket === 'changed' });
 
 export function ChangeNote({ w }: { w: WorkerWash }) {
   const c = w.change;
@@ -65,12 +69,22 @@ export default function WorkerHome() {
   const step = useWorkerStep();
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('today');
-  const rows = queue.data ?? [];
+  const [building, setBuilding] = useState(ALL_BUILDINGS);
+  const all = useMemo(() => queue.data ?? [], [queue.data]);
+  const buildings = useMemo(() => buildingOptions(all.map(asRow)), [all]);
+  // The chosen building may have no washes left after a refresh: fall back to all of them rather than show an empty page.
+  const choice = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
+  const rows = all.filter((r) => inBuilding(asRow(r), choice));
   const by = (b: WorkerBucket) => rows.filter((r) => r.bucket === b);
   // Washes moved but still in the queue also appear under "Cancelled / moved" so nothing changes silently.
   const movedLive = rows.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled');
   const changed = [...by('changed'), ...movedLive];
   const list: WorkerWash[] = tab === 'changed' ? changed : tab === 'available' ? [] : by(tab);
+  const inTab = (value: string) => {
+    const mine = all.filter((r) => inBuilding(asRow(r), value));
+    return (tab === 'changed' ? [...mine.filter((r) => r.bucket === 'changed'), ...mine.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled')] : tab === 'available' ? [] : mine.filter((r) => r.bucket === tab)).length;
+  };
+  const chosenLabel = buildings.find((b) => b.value === choice)?.label;
 
   const claim = async (id: string) => {
     try {
@@ -96,6 +110,13 @@ export default function WorkerHome() {
         { value: 'available', label: 'Available', count: pool.data?.length },
       ]} />
 
+      {tab !== 'available' && buildings.length > 0 && (
+        <div className="mt-3">
+          <Segmented label="Building" value={choice} onChange={setBuilding} options={[{ value: ALL_BUILDINGS, label: 'All buildings' }, ...buildings.map((b) => ({ value: b.value, label: b.label, count: inTab(b.value) }))]} />
+          {choice !== ALL_BUILDINGS && tab === 'changed' && <p className="mt-2 text-xs text-fog">Washes that are no longer yours do not show a building, so they are only under All buildings.</p>}
+        </div>
+      )}
+
       <div className="mt-5 space-y-3">
         {queue.isError ? <ErrorState onRetry={() => void queue.refetch()} /> : queue.isLoading ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-32" />) : tab === 'available' ? (
           pool.data?.length ? pool.data.map((p) => (
@@ -109,7 +130,11 @@ export default function WorkerHome() {
             </div>
           )) : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
         ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : (
+          chosenLabel ? (
+          <EmptyState title={`No washes in ${chosenLabel} here`} text="Choose another building, or All buildings." />
+        ) : (
           <EmptyState title={{ today: 'Nothing due today', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
+        )
         )}
       </div>
     </div>
