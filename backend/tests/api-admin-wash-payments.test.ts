@@ -157,3 +157,73 @@ describe('the memberships list carries what the Paid tab shows', () => {
     expect(mine.flat_number).toBe('B-702');
   });
 });
+
+describe('on-demand washes in the Paid tab: history, upcoming, live', () => {
+  it('can be listed on their own (type), newest first (order), with when it was paid, completed and booked', async () => {
+    const t = await oneOfEach();
+    const window = `from=${istDate(0)}&to=${istDate(40)}`;
+    const single = (await kinds(t.admin, `${window}&type=on_demand`)) as any[];
+    expect(single.length).toBeGreaterThan(0);
+    expect(single.every((b) => b.booking_type === 'on_demand')).toBe(true);
+    expect(single.map((b) => b.id)).toEqual(expect.arrayContaining([t.cash, t.free, t.online]));
+    const plan = (await kinds(t.admin, `${window}&type=membership`)) as any[];
+    expect(plan.length).toBeGreaterThan(0);
+    expect(plan.every((b) => b.booking_type === 'membership')).toBe(true);
+    // anything else is no filter at all
+    expect((await kinds(t.admin, `${window}&type=banana`)).length).toBe((await kinds(t.admin, window)).length);
+
+    // oldest first by default, newest first on request
+    const up = single.map((b) => b.scheduled_date);
+    expect(up).toEqual([...up].sort());
+    const down = ((await kinds(t.admin, `${window}&type=on_demand&order=desc`)) as any[]).map((b) => b.scheduled_date);
+    expect(down).toEqual([...down].sort().reverse());
+
+    const online = single.find((b) => b.id === t.online);
+    expect(online.paid_at).toBeTruthy();
+    expect(online.booked_at).toBeTruthy();
+    expect(online.completed_at).toBeNull();
+    expect(single.find((b) => b.id === t.free).paid_at).toBeNull();
+    // paid single washes only
+    const paidOnly = (await kinds(t.admin, `${window}&type=on_demand&pay=paid`)) as any[];
+    expect(paidOnly.every((b) => b.payment_kind === 'paid' && b.booking_type === 'on_demand')).toBe(true);
+    expect(paidOnly.map((b) => b.id)).not.toContain(t.free);
+  });
+});
+
+describe('an admin moves a paid single wash', () => {
+  it('moves it to another day and window, shows it unassigned, tells the customer, and logs who did it', async () => {
+    const t = await oneOfEach();
+    const target = istDate(20);
+    expectOk(await t.admin.c.post(`/api/admin/bookings/${t.online}/reschedule`, { date: target, time_slot: 'night', reason: 'Customer called' }));
+    const after = expectOk(await t.admin.c.get(`/api/admin/bookings/${t.online}`)).body;
+    expect(after.booking).toMatchObject({ scheduled_date: target, time_slot: 'night', status: 'confirmed', payment_kind: 'paid', worker_id: null });
+    const moved = after.events.find((e: any) => e.event_type === 'rescheduled');
+    expect(moved.meta).toMatchObject({ new_date: target, new_slot: 'night', by: 'admin', reason: 'Customer called' });
+    // it keeps its payment and shows up in the new day's list
+    expect(((await kinds(t.admin, `from=${target}&to=${target}&type=on_demand&pay=paid`)) as any[]).map((b) => b.id)).toContain(t.online);
+    // cash-paid and free ones can be moved too
+    expectOk(await t.admin.c.post(`/api/admin/bookings/${t.cash}/reschedule`, { date: istDate(21), time_slot: 'morning' }));
+    expectOk(await t.admin.c.post(`/api/admin/bookings/${t.free}/reschedule`, { date: istDate(22), time_slot: 'afternoon' }));
+  });
+
+  it('is refused for a past date, for the same day and window, and for a cancelled wash', async () => {
+    const t = await oneOfEach();
+    const r1 = await t.admin.c.post(`/api/admin/bookings/${t.online}/reschedule`, { date: istDate(-1), time_slot: 'morning' });
+    expect(r1.status).toBeGreaterThanOrEqual(400);
+    expect(r1.body.message).toMatch(/today or a later date/);
+    const r2 = await t.admin.c.post(`/api/admin/bookings/${t.online}/reschedule`, { date: istDate(13), time_slot: 'morning' });
+    expect(r2.body.message).toMatch(/already the date and time/);
+    expectOk(await t.admin.c.post(`/api/admin/bookings/${t.cash}/cancel`, { reason: 'Customer cancelled' }));
+    const r3 = await t.admin.c.post(`/api/admin/bookings/${t.cash}/reschedule`, { date: istDate(25), time_slot: 'morning' });
+    expect(r3.status).toBeGreaterThanOrEqual(400);
+    expect(r3.body.message).toMatch(/cannot be rescheduled/);
+  });
+
+  it('only an admin may, and a customer cannot move their own paid single wash this way', async () => {
+    const t = await oneOfEach();
+    const w = await staffClient('worker');
+    expect((await w.c.post(`/api/admin/bookings/${t.online}/reschedule`, { date: istDate(25), time_slot: 'morning' })).status).toBeGreaterThanOrEqual(401);
+    const anon = (await customerWithVehicle('car')).c;
+    expect((await anon.post(`/api/admin/bookings/${t.online}/reschedule`, { date: istDate(25), time_slot: 'morning' })).status).toBeGreaterThanOrEqual(401);
+  });
+});

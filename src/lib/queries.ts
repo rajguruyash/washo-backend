@@ -361,6 +361,10 @@ export interface AdminBookingFilter {
   membership?: string;
   /** paid | membership | free | refunded | unpaid */
   pay?: string;
+  /** on_demand (single washes) or membership. */
+  type?: 'on_demand' | 'membership';
+  /** Newest first (the default is oldest first). */
+  order?: 'asc' | 'desc';
   /** Search words: customer, number, vehicle, society, reference, service, specialist. Looks at every date. */
   q?: string;
 }
@@ -374,6 +378,8 @@ export const useAdminBookings = (f: AdminBookingFilter) => {
   if (f.unassigned) q.set('unassigned', '1');
   if (f.membership) q.set('membership', f.membership);
   if (f.pay) q.set('pay', f.pay);
+  if (f.type) q.set('type', f.type);
+  if (f.order) q.set('order', f.order);
   if (f.q) q.set('q', f.q);
   return useQuery({ queryKey: keys.admin('bookings', q.toString()), queryFn: async () => (await get<{ bookings: AdminBooking[] }>(`/admin/bookings?${q}`)).bookings });
 };

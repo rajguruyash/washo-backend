@@ -14,7 +14,7 @@ const ANGLES: { id: Photo['photo_type']; label: string }[] = [
   { id: 'right', label: 'Right' },
 ];
 
-/** Camera tiles for one phase (before / after). One photo is required to continue; four angles are encouraged. */
+/** Camera tiles for one phase (before / after). Photos are optional; four angles are encouraged. */
 export function PhotoUploader({ bookingId, phase, disabled }: { bookingId: string; phase: 'before' | 'after'; disabled?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();

@@ -65,6 +65,17 @@ describe('worker queue', () => {
 });
 
 describe('the wash, step by step', () => {
+  it('a wash can be completed with NO photos at all: the customer sees it as completed', async () => {
+    const { w, m, washes } = await membershipWithWorker();
+    const id = washes[0].id;
+    expectOk(await step(w.c, id, 'start'));
+    const done = expectOk(await step(w.c, id, 'complete')).body.wash;
+    expect(done).toMatchObject({ status: 'completed', bucket: 'completed', photos_before: 0, photos_after: 0 });
+    expect(done.completed_at).toBeTruthy();
+    expect(expectOk(await m.c.get(`/api/bookings/${id}`)).body.booking.status).toBe('completed');
+    expect(expectOk(await w.c.get(`/api/bookings/${id}/photos`)).body.photos).toHaveLength(0);
+  });
+
   it('call -> customer confirmed -> start -> before photos -> after photos -> complete; then the next wash is already queued', async () => {
     const { w, m, washes } = await membershipWithWorker();
     // make this wash "today" for the queue by claiming the earliest one; it is upcoming but actionable
@@ -80,11 +91,9 @@ describe('the wash, step by step', () => {
     expect(confirmed.customer_confirmed_at).toBeTruthy();
     expect(expectOk(await step(w2.c, id2, 'start')).body.wash).toMatchObject({ status: 'in_progress', bucket: 'in_progress' });
 
-    // completion is refused without photos
-    expect((await step(w2.c, id2, 'complete')).body.message).toMatch(/before photo is required/);
+    // photos are optional: they are stored and counted when taken
     const b1 = expectOk(await upload(w2.c, id2, 'before', 'front'));
     expect(b1.status).toBe(201);
-    expect((await step(w2.c, id2, 'complete')).body.message).toMatch(/after photo is required/);
     expectOk(await upload(w2.c, id2, 'before', 'rear', PNG, 'image/png'));
     expectOk(await upload(w2.c, id2, 'after', 'front'));
     const queueRow = expectOk(await w2.c.get('/api/worker/queue?days=60')).body.queue.find((q: any) => q.booking_id === id2);

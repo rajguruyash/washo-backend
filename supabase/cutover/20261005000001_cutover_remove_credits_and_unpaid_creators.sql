@@ -32,17 +32,18 @@ BEGIN
 
   SELECT count(*) FILTER (WHERE phase = 'before'), count(*) FILTER (WHERE phase = 'after')
     INTO v_before, v_after FROM public.booking_photos WHERE booking_id = p_booking_id;
-  IF v_before < 1 THEN RAISE EXCEPTION 'At least 1 before photo is required before completion'; END IF;
-  IF v_after < 1 THEN RAISE EXCEPTION 'At least 1 after photo is required before completion'; END IF;
+  -- photos are encouraged but not required (migration 38): a wash can be completed without any
 
   UPDATE public.bookings SET status = 'completed', completed_at = now(), updated_at = now() WHERE id = p_booking_id;
   IF v_booking.membership_schedule_occurrence_id IS NOT NULL THEN
     UPDATE public.membership_schedule_occurrences SET status = 'completed', updated_at = now() WHERE id = v_booking.membership_schedule_occurrence_id;
   END IF;
-  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id) VALUES (p_booking_id, 'wash_completed', v_worker);
+  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
+  VALUES (p_booking_id, 'wash_completed', v_worker, jsonb_build_object('photos_before', v_before, 'photos_after', v_after));
   INSERT INTO public.notifications (profile_id, category, title, body, reference_id)
   VALUES (v_booking.customer_profile_id, 'wash_completed', 'Doorstep wash completed',
-          'Your vehicle has been cleaned. Check the before and after photos in the app.', p_booking_id);
+          CASE WHEN v_before + v_after > 0 THEN 'Your vehicle has been cleaned. Check the before and after photos in the app.' ELSE 'Your vehicle has been cleaned.' END,
+          p_booking_id);
   RETURN true;
 END $$;
 

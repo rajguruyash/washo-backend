@@ -11,7 +11,7 @@ import { useToast } from '../../components/ui/Toast';
 import { prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
 import { useAdminAction, useAdminBooking, useAdminCustomer, useAdminWorkers } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
-import { payKind, payLabel, staffStatus } from '../../lib/status';
+import { MOVABLE_STATUSES, payKind, payLabel, staffStatus } from '../../lib/status';
 import type { SlotId } from '../../lib/types';
 import { Loading, errText } from './shared';
 
@@ -59,7 +59,7 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
               </Select>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" disabled={!worker} loading={act.isPending} onClick={() => void run(`bookings/${b.id}/assign`, { worker_profile_id: worker }, 'Assigned')}>Assign</Button>
-                {b.booking_type === 'membership' && <Button size="sm" variant="glass" icon={<CalendarClock className="h-4 w-4" />} onClick={() => setView('move')}>Reschedule</Button>}
+                {MOVABLE_STATUSES.includes(b.status) && <Button size="sm" variant="glass" icon={<CalendarClock className="h-4 w-4" />} onClick={() => setView('move')}>Reschedule</Button>}
                 <Button size="sm" variant="glass" icon={<Pencil className="h-4 w-4" />} onClick={() => setView('edit')}>Edit details</Button>
                 <Button size="sm" variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => setView('cancel')}>Cancel wash</Button>
               </div>

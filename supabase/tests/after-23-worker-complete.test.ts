@@ -1,4 +1,4 @@
-/** GREEN tests for 20261004000023: a specialist can complete a membership wash (no credits), and the rest of completing a wash is unchanged. */
+/** GREEN tests for 20261004000023 (and 38): a specialist can complete a membership wash (no credits), with or without photos, and the rest of completing a wash is unchanged. */
 import { describe, expect, it } from 'vitest';
 import { confirmedBooking, createWorker, inTx, paidMembership } from './helpers';
 
@@ -9,7 +9,7 @@ const photo = async (s: any, booking: string, worker: string, phase: 'before' | 
 const complete = (s: any, id: string) => s.err(`select public.worker_complete_wash('${id}')`);
 
 describe('completing a membership wash', () => {
-  it('works with no credits: in progress, with before and after photos -> completed, and the customer is told', async () =>
+  it('works with no credits: in progress, with before and after photos -> completed, and the customer is told (the photos are mentioned)', async () =>
     inTx(async (s) => {
       const w = await createWorker(s);
       const m = await paidMembership(s, { startDays: 2 });
@@ -18,10 +18,7 @@ describe('completing a membership wash', () => {
       const wash = m.washes[0];
       await s.as('authenticated', w.authId);
       await s.q('select public.worker_start_wash($1)', [wash.booking_id]);
-      expect(await complete(s, wash.booking_id)).toMatch(/before photo is required/);
       await photo(s, wash.booking_id, w.profileId, 'before');
-      await s.as('authenticated', w.authId);
-      expect(await complete(s, wash.booking_id)).toMatch(/after photo is required/);
       await photo(s, wash.booking_id, w.profileId, 'after');
       await s.as('authenticated', w.authId);
       expect(await complete(s, wash.booking_id)).toBeNull();
@@ -31,10 +28,45 @@ describe('completing a membership wash', () => {
       expect((await s.q(`select status::text s from public.membership_schedule_occurrences where id=$1`, [wash.occ]))[0].s).toBe('completed');
       expect((await s.q(`select count(*)::int n from public.booking_events where booking_id=$1 and event_type='wash_completed' and actor_profile_id=$2`, [wash.booking_id, w.profileId]))[0].n).toBe(1);
       expect((await s.q(`select count(*)::int n from public.notifications where reference_id=$1 and category='wash_completed' and profile_id=$2`, [wash.booking_id, m.u.profileId]))[0].n).toBe(1);
+      expect((await s.q(`select body from public.notifications where reference_id=$1 and category='wash_completed'`, [wash.booking_id]))[0].body).toMatch(/before and after photos/);
+      expect((await s.q(`select event_metadata em from public.booking_events where booking_id=$1 and event_type='wash_completed'`, [wash.booking_id]))[0].em).toEqual({ photos_before: 1, photos_after: 1 });
       // nothing about credits was touched
       expect((await s.q(`select count(*)::int n from public.entitlement_transactions`))[0].n).toBe(0);
       // the membership's progress counts it, and the customer can read it
       expect((await s.q(`select count(*)::int n from public.bookings where membership_id=$1 and status='completed'`, [m.membership]))[0].n).toBe(1);
+    }));
+
+  it('works with NO photos at all (they are optional): completed, the customer is told without mention of photos, and the event says there were none', async () =>
+    inTx(async (s) => {
+      const w = await createWorker(s);
+      const m = await paidMembership(s, { startDays: 2 });
+      await s.as('authenticated', m.admin.authId);
+      await s.q('select public.admin_assign_membership_worker($1,$2)', [m.membership, w.profileId]);
+      const wash = m.washes[0];
+      await s.as('authenticated', w.authId);
+      await s.q('select public.worker_start_wash($1)', [wash.booking_id]);
+      expect(await complete(s, wash.booking_id)).toBeNull();
+      await s.as('postgres');
+      expect((await s.q(`select status::text s, completed_at is not null done from public.bookings where id=$1`, [wash.booking_id]))[0]).toEqual({ s: 'completed', done: true });
+      expect((await s.q(`select status::text s from public.membership_schedule_occurrences where id=$1`, [wash.occ]))[0].s).toBe('completed');
+      expect((await s.q(`select body from public.notifications where reference_id=$1 and category='wash_completed'`, [wash.booking_id]))[0].body).toBe('Your vehicle has been cleaned.');
+      expect((await s.q(`select event_metadata em from public.booking_events where booking_id=$1 and event_type='wash_completed'`, [wash.booking_id]))[0].em).toEqual({ photos_before: 0, photos_after: 0 });
+    }));
+
+  it('works with only a before photo, or only an after photo', async () =>
+    inTx(async (s) => {
+      const w = await createWorker(s);
+      const m = await paidMembership(s, { startDays: 2 });
+      await s.as('authenticated', m.admin.authId);
+      await s.q('select public.admin_assign_membership_worker($1,$2)', [m.membership, w.profileId]);
+      const [a, b] = m.washes;
+      for (const [wash, phase] of [[a, 'before'], [b, 'after']] as const) {
+        await s.as('authenticated', w.authId);
+        await s.q('select public.worker_start_wash($1)', [wash.booking_id]);
+        await photo(s, wash.booking_id, w.profileId, phase);
+        await s.as('authenticated', w.authId);
+        expect(await complete(s, wash.booking_id)).toBeNull();
+      }
     }));
 
   it('completing twice does nothing the second time; another specialist, or a wash not started, is refused', async () =>

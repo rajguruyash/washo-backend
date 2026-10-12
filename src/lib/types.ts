@@ -392,6 +392,10 @@ export interface AdminBooking {
   payment_kind: 'paid' | 'membership' | 'free' | 'refunded' | 'unpaid';
   /** For a paid single wash: razorpay (online) or offline (cash taken by WASHO). */
   payment_provider?: string | null;
+  /** When the payment came in, when the wash was finished, and when it was booked. */
+  paid_at?: string | null;
+  completed_at?: string | null;
+  booked_at?: string;
   service_name: string;
   wash_kind: WashKind | null;
   vehicle_type: VehicleType;

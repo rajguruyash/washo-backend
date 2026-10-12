@@ -90,7 +90,7 @@ export const PAY_KINDS = ['paid', 'membership', 'free', 'refunded', 'unpaid'] as
 
 export const ADMIN_BOOKING_SQL = `
   SELECT b.id, b.reference_code, b.status::text AS status, b.booking_type::text AS booking_type, b.scheduled_date, b.time_slot::text AS time_slot,
-         ${PAY_KIND_SQL} AS payment_kind, pay.provider AS payment_provider,
+         ${PAY_KIND_SQL} AS payment_kind, pay.provider AS payment_provider, pay.paid_at, b.completed_at, b.created_at AS booked_at,
          b.membership_id, b.price_cents, b.customer_confirmed_at, b.parking_location, b.cancel_reason, b.notes, COALESCE(b.address_id, v.address_id) AS address_id, b.source,
          s.name AS service_name, s.wash_kind,
          v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number, v.color AS vehicle_color,
@@ -104,7 +104,7 @@ export const ADMIN_BOOKING_SQL = `
     LEFT JOIN public.customer_addresses a ON a.id = COALESCE(b.address_id, v.address_id)
     LEFT JOIN public.worker_assignments wa ON wa.booking_id = b.id AND wa.is_active
     LEFT JOIN public.profiles wp ON wp.id = wa.worker_profile_id
-    LEFT JOIN LATERAL (SELECT py.status::text AS status, py.provider FROM public.payments py WHERE py.booking_id = b.id ORDER BY py.created_at DESC LIMIT 1) pay ON true`;
+    LEFT JOIN LATERAL (SELECT py.status::text AS status, py.provider, py.paid_at FROM public.payments py WHERE py.booking_id = b.id ORDER BY py.created_at DESC LIMIT 1) pay ON true`;
 
 adminRouter.get(
   '/admin/bookings',
@@ -118,6 +118,8 @@ adminRouter.get(
         unassigned: z.enum(['1']).optional().catch(undefined),
         membership: z.string().uuid().optional().catch(undefined),
         pay: z.enum(PAY_KINDS).optional().catch(undefined),
+        type: z.enum(['on_demand', 'membership']).optional().catch(undefined),
+        order: z.enum(['asc', 'desc']).optional().catch(undefined),
         q: z.string().trim().min(1).max(60).optional().catch(undefined),
       }),
       req.query
@@ -137,8 +139,9 @@ adminRouter.get(
               AND ($7::text IS NULL OR ${PAY_KIND_SQL} = $7)
               AND ($8::text IS NULL OR b.reference_code ILIKE $8 OR p.full_name ILIKE $8 OR p.phone ILIKE $9 OR v.registration_number ILIKE $8 OR v.model ILIKE $8
                    OR a.society_name ILIKE $8 OR a.flat_number ILIKE $8 OR a.building_block ILIKE $8 OR s.name ILIKE $8 OR wp.full_name ILIKE $8)
-            ORDER BY ${term ? 'b.scheduled_date DESC, b.time_slot DESC, b.created_at DESC' : 'b.scheduled_date, b.time_slot, b.created_at'} LIMIT 400`,
-          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null, q.pay ?? null, term, phoneTerm]
+              AND ($10::text IS NULL OR b.booking_type::text = $10)
+            ORDER BY ${term || q.order === 'desc' ? 'b.scheduled_date DESC, b.time_slot DESC, b.created_at DESC' : 'b.scheduled_date, b.time_slot, b.created_at'} LIMIT 400`,
+          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null, q.pay ?? null, term, phoneTerm, q.type ?? null]
         )
       ).rows
     );

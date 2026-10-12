@@ -65,7 +65,7 @@ const STEPS: Record<string, { sql: Step; schema?: z.ZodType }> = {
 };
 
 // Every step is one database function. The database decides whether this worker may take it (they must hold the wash,
-// it must be in the right state, completion needs before + after photos) and writes the booking event.
+// it must be in the right state; photos are optional) and writes the booking event.
 workerRouter.post(
   '/worker/washes/:id/:step',
   asyncHandler(async (req, res) => {

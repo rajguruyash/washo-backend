@@ -42,3 +42,6 @@ export const payLabel = (kind: PayKind, provider?: string | null): string =>
 
 export const LIVE_STATUSES: BookingStatus[] = ['pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'in_progress'];
 export const isLive = (s: BookingStatus) => LIVE_STATUSES.includes(s);
+
+/** A wash the admin can still move to another day: not started, not finished, not cancelled. */
+export const MOVABLE_STATUSES: BookingStatus[] = ['confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up'];

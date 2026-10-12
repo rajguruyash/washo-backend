@@ -106,14 +106,7 @@ describe('cutover 01: credits retired, unpaid creators closed, cancellation fixe
       await s.as('postgres');
       await s.q(`update public.bookings set status='in_progress' where id=$1`, [bookingId]);
       await s.as('authenticated', w.authId);
-      expect(await s.err(`select public.worker_complete_wash('${bookingId}')`)).toMatch(/before photo/);
-      await s.as('postgres');
-      await s.q(`insert into public.booking_photos (booking_id, worker_profile_id, phase, photo_type, storage_path) values ($1,$2,'before','front','x')`, [bookingId, w.profileId]);
-      await s.as('authenticated', w.authId);
-      expect(await s.err(`select public.worker_complete_wash('${bookingId}')`)).toMatch(/after photo/);
-      await s.as('postgres');
-      await s.q(`insert into public.booking_photos (booking_id, worker_profile_id, phase, photo_type, storage_path) values ($1,$2,'after','front','y')`, [bookingId, w.profileId]);
-      await s.as('authenticated', w.authId);
+      // photos are optional (migration 38 and the cutover agree): no photos at all completes the wash
       expect(await s.err(`select public.worker_complete_wash('${bookingId}')`)).toBeNull();
       expect(await s.err(`select public.worker_complete_wash('${bookingId}')`)).toBeNull(); // idempotent
     }));

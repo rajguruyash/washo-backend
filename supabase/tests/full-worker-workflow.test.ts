@@ -19,11 +19,9 @@ describe('membership wash, start to finish', () => {
       await s.q('select public.worker_start_wash($1)', [x.booking_id]);
       expect((await rowOf(s, w, x.booking_id)).bucket).toBe('in_progress');
 
-      // completion is refused until there is a before AND an after photo
+      // photos are optional: they are counted and stored when taken, completion does not wait for them
       await s.as('authenticated', w.authId);
-      expect(await s.err(`select public.worker_complete_wash('${x.booking_id}')`)).toMatch(/before photo is required/);
       await s.q(`select public.save_booking_photo($1,'before','front',$2)`, [x.booking_id, `${x.booking_id}/before-front.jpg`]);
-      expect(await s.err(`select public.worker_complete_wash('${x.booking_id}')`)).toMatch(/after photo is required/);
       await s.q(`select public.save_booking_photo($1,'after','front',$2)`, [x.booking_id, `${x.booking_id}/after-front.jpg`]);
       expect((await rowOf(s, w, x.booking_id))).toMatchObject({ photos_before: 1, photos_after: 1 });
 

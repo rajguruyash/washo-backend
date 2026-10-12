@@ -149,12 +149,12 @@ export default function WorkerWash() {
 
       {phase === 'work' && (
         <div className="space-y-5">
-          <div className="glass p-5"><h2 className="text-lg font-bold">4 · Before photos</h2><p className="mb-4 mt-1 text-sm text-fog">Photograph the vehicle before you begin.</p><PhotoUploader bookingId={w.booking_id} phase="before" /></div>
-          <div className="glass p-5"><h2 className="text-lg font-bold">5 · After photos</h2><p className="mb-4 mt-1 text-sm text-fog">When the wash is done, photograph the result.</p><PhotoUploader bookingId={w.booking_id} phase="after" /></div>
+          <div className="glass p-5"><h2 className="text-lg font-bold">4 · Before photos</h2><p className="mb-4 mt-1 text-sm text-fog">Photograph the vehicle before you begin. Optional.</p><PhotoUploader bookingId={w.booking_id} phase="before" /></div>
+          <div className="glass p-5"><h2 className="text-lg font-bold">5 · After photos</h2><p className="mb-4 mt-1 text-sm text-fog">When the wash is done, photograph the result. Optional.</p><PhotoUploader bookingId={w.booking_id} phase="after" /></div>
           <div className="glass p-5">
             <h2 className="text-lg font-bold">6 · Complete</h2>
-            <Button size="lg" full className="mt-4" disabled={w.photos_before < 1 || w.photos_after < 1} loading={busy} icon={<Check className="h-5 w-5" />} onClick={() => void run('complete', undefined, 'Wash completed')}>Mark wash completed</Button>
-            {(w.photos_before < 1 || w.photos_after < 1) && <p className="mt-2 text-center text-xs text-fog">Needs at least one before and one after photo.</p>}
+            <Button size="lg" full className="mt-4" loading={busy} icon={<Check className="h-5 w-5" />} onClick={() => void run('complete', undefined, 'Wash completed')}>Mark wash completed</Button>
+            {w.photos_before + w.photos_after < 1 && <p className="mt-2 text-center text-xs text-fog">No photos added. You can still complete the wash without them.</p>}
           </div>
         </div>
       )}
