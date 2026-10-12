@@ -28,6 +28,7 @@ import { Dashboard } from './Dashboard';
 import Export from './Export';
 import Campaigns from './Campaigns';
 import History from './History';
+import Paid from './Paid';
 import People from './People';
 import Discounts from './Discounts';
 import ServicesAdmin from './ServicesAdmin';
@@ -39,11 +40,12 @@ import Team from './Team';
 import { Loading, errText } from './shared';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+type Tab = 'overview' | 'requests' | 'bookings' | 'paid' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
 const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
   { value: 'overview', label: 'Dashboard', area: 'overview' },
   { value: 'bookings', label: 'Washes', area: 'bookings' },
+  { value: 'paid', label: 'Paid', area: (a) => canDo(a, 'bookings') && canDo(a, 'memberships') },
   { value: 'memberships', label: 'Memberships', area: 'memberships' },
   { value: 'people', label: 'People', area: 'people' },
   { value: 'reviews', label: 'Reviews', area: 'bookings' },
@@ -61,7 +63,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'settings', label: 'Settings', area: 'settings' },
 ];
 /** The area a tab's content is governed by (used to say "view only"). */
-const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', paid: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
@@ -183,16 +185,28 @@ function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: 
   const [status, setStatus] = useState('');
   const [unassigned, setUnassigned] = useState(false);
   const [pay, setPay] = useState('');
-  const filter = useMemo(() => (membership ? { membership } : { from, to, status: status || undefined, unassigned, pay: pay || undefined }), [membership, from, to, status, unassigned, pay]);
+  // A search looks at every date, so the date range is set aside while there are words in the box.
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t); }, [search]);
+  const filter = useMemo(
+    () => (membership ? { membership } : q ? { q, status: status || undefined, unassigned, pay: pay || undefined } : { from, to, status: status || undefined, unassigned, pay: pay || undefined }),
+    [membership, q, from, to, status, unassigned, pay],
+  );
   const { data, isLoading, isError, refetch } = useAdminBookings(filter);
   const [open, setOpen] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       {!membership && canAdd && <div className="flex justify-end"><Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={onAdd}>Book a wash</Button></div>}
       {!membership && (
+        <div className="glass p-4">
+          <Input label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, mobile number, vehicle, society, flat, reference or specialist" hint={q ? 'Searching every date, newest first. Clear the box to go back to the date range.' : undefined} />
+        </div>
+      )}
+      {!membership && (
         <div className="glass grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
-          <Input label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          <Input label="To" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          <Input label="From" type="date" value={from} disabled={Boolean(q)} onChange={(e) => setFrom(e.target.value)} />
+          <Input label="To" type="date" value={to} disabled={Boolean(q)} onChange={(e) => setTo(e.target.value)} />
           <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Any</option>
             {Object.entries(staffStatus).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -386,6 +400,7 @@ export default function Admin() {
           {tab === 'overview' && <Overview go={go} allowed={allowed} />}
           {tab === 'requests' && <Requests />}
           {tab === 'bookings' && (<>{membership && <button onClick={() => go('memberships')} className="mb-4 text-sm font-semibold text-washo-300">← All memberships</button>}<Bookings membership={membership} canAdd={canDo(access, 'bookings', 'manage')} onAdd={() => setAdding({ customerId: null })} /></>)}
+          {tab === 'paid' && <Paid canManage={canDo(access, 'bookings', 'manage')} />}
           {tab === 'history' && <History />}
           {tab === 'memberships' && <Memberships showWashes={(id) => go('bookings', { membership: id })} canManage={canDo(access, 'memberships', 'manage')} />}
           {tab === 'reviews' && <Reviews />}

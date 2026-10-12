@@ -449,6 +449,15 @@ export interface AdminMembership {
   washes_total: number;
   washes_completed: number;
   next_wash_date: string | null;
+  /** Where the specialist goes, and what the customer asked for. */
+  parking_location?: string | null;
+  customer_notes?: string | null;
+  society_name?: string | null;
+  building_block?: string | null;
+  flat_number?: string | null;
+  /** When the plan was paid, and how (razorpay = online). */
+  paid_at?: string | null;
+  payment_provider?: string | null;
 }
 
 export interface Specialist {

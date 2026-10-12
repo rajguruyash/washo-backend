@@ -118,9 +118,15 @@ adminRouter.get(
         unassigned: z.enum(['1']).optional().catch(undefined),
         membership: z.string().uuid().optional().catch(undefined),
         pay: z.enum(PAY_KINDS).optional().catch(undefined),
+        q: z.string().trim().min(1).max(60).optional().catch(undefined),
       }),
       req.query
     );
+    // A search matches the customer's name or number, the vehicle (number plate, model), the society or flat, the wash's reference, the service and the specialist.
+    // % and _ typed in the box are letters, not wildcards. A phone number matches however it was typed (spaces and dashes are ignored).
+    const like = (t: string) => `%${t.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const term = q.q ? like(q.q) : null;
+    const phoneTerm = q.q ? like(q.q.replace(/[\s-]/g, '')) : null;
     const bookings = await req.db(async (c) =>
       (
         await c.query(
@@ -129,8 +135,10 @@ adminRouter.get(
               AND ($3::text IS NULL OR b.status::text = $3) AND ($4::uuid IS NULL OR wp.id = $4)
               AND ($5::text IS NULL OR wp.id IS NULL) AND ($6::uuid IS NULL OR b.membership_id = $6)
               AND ($7::text IS NULL OR ${PAY_KIND_SQL} = $7)
-            ORDER BY b.scheduled_date, b.time_slot, b.created_at LIMIT 400`,
-          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null, q.pay ?? null]
+              AND ($8::text IS NULL OR b.reference_code ILIKE $8 OR p.full_name ILIKE $8 OR p.phone ILIKE $9 OR v.registration_number ILIKE $8 OR v.model ILIKE $8
+                   OR a.society_name ILIKE $8 OR a.flat_number ILIKE $8 OR a.building_block ILIKE $8 OR s.name ILIKE $8 OR wp.full_name ILIKE $8)
+            ORDER BY ${term ? 'b.scheduled_date DESC, b.time_slot DESC, b.created_at DESC' : 'b.scheduled_date, b.time_slot, b.created_at'} LIMIT 400`,
+          [q.from ?? null, q.to ?? null, q.status ?? null, q.worker ?? null, q.unassigned ?? null, q.membership ?? null, q.pay ?? null, term, phoneTerm]
         )
       ).rows
     );
@@ -203,6 +211,7 @@ adminRouter.get(
       (
         await c.query(`
           SELECT m.id, m.status, m.duration_months, m.start_at, m.end_at, m.final_amount_cents, r.reference_code, r.frequency_per_week, r.weekly_pattern, (r.monthly_body + r.monthly_deep) AS washes_per_month, r.monthly_body, r.monthly_deep, r.preferred_weekdays, r.time_slot::text AS time_slot,
+                 r.parking_location, r.customer_notes, ad.society_name, ad.building_block, ad.flat_number, pay.paid_at, pay.provider AS payment_provider,
                  p.id AS customer_id, p.full_name AS customer_name, p.phone AS customer_phone,
                  v.vehicle_type::text AS vehicle_type, v.model AS vehicle_model, v.registration_number,
                  wp.id AS worker_id, wp.full_name AS worker_name,
@@ -212,6 +221,8 @@ adminRouter.get(
             FROM public.memberships m
             JOIN public.profiles p ON p.id = m.customer_profile_id
             LEFT JOIN public.membership_requests r ON r.id = m.membership_request_id
+            LEFT JOIN public.customer_addresses ad ON ad.id = r.address_id
+            LEFT JOIN public.payments pay ON pay.id = r.payment_id
             LEFT JOIN public.vehicles v ON v.id = COALESCE(r.vehicle_id, (SELECT ms.vehicle_id FROM public.membership_services ms WHERE ms.membership_id = m.id LIMIT 1))
             LEFT JOIN public.profiles wp ON wp.id = m.assigned_worker_profile_id
            ORDER BY (m.status = 'active') DESC, m.created_at DESC LIMIT 300`)

@@ -89,3 +89,71 @@ describe('how each wash is paid for', () => {
     expect(expectOk(await t.admin.c.get(`/api/admin/bookings/${t.free}`)).body.booking.payment_kind).toBe('free');
   });
 });
+
+describe('searching the washes', () => {
+  /** A customer with a name nobody else has, and two washes (3 and 40 days out) booked by WASHO. */
+  async function distinct() {
+    const admin = await staffClient('admin');
+    const svc = (await row(`select id from public.services where code = 'car-body-wash'`)).id as string;
+    const cust = await customerWithVehicle('car');
+    const unique = `Quokka${Math.floor(Math.random() * 1e6)}`;
+    expectOk(await cust.c.put('/api/me', { full_name: `Zed ${unique}`, email: 'asha@example.com' }));
+    const me = expectOk(await cust.c.get('/api/me')).body.user;
+    const book = async (days: number) => expectOk(await admin.c.post('/api/admin/bookings', { customer_id: me.id, vehicle_id: cust.vehicle.id, service_id: svc, date: istDate(days), time_slot: 'morning', payment: 'cash' })).body.booking_id as string;
+    return { admin, cust, unique, near: await book(3), far: await book(40) };
+  }
+  const found = async (admin: { c: { get: (p: string) => Promise<any> } }, q: string, more = '') =>
+    (expectOk(await admin.c.get(`/api/admin/bookings?q=${encodeURIComponent(q)}${more}`)).body.bookings as { id: string; scheduled_date: string; customer_name: string }[]);
+
+  it('finds a customer by name (any case, part of it), by number plate, by phone however it is typed, by society, and by reference', async () => {
+    const t = await distinct();
+    const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+    expect(ids(await found(t.admin, t.unique.toLowerCase()))).toEqual(expect.arrayContaining([t.near, t.far]));
+    expect(ids(await found(t.admin, t.unique.slice(0, 7))).includes(t.near)).toBe(true);
+    expect(ids(await found(t.admin, t.cust.reg.toLowerCase())).includes(t.near)).toBe(true);
+    const digits = t.cust.phone as string; // 10 digits
+    expect(ids(await found(t.admin, digits)).includes(t.near)).toBe(true);
+    expect(ids(await found(t.admin, `${digits.slice(0, 5)} ${digits.slice(5)}`)).includes(t.near)).toBe(true);
+    // a society is shared by many washes (and the list stops at 400), so narrow it to the one day
+    expect(ids(await found(t.admin, 'yashwin', `&from=${istDate(3)}&to=${istDate(3)}`)).includes(t.near)).toBe(true);
+    const ref = (await row(`select reference_code from public.bookings where id = $1`, [t.near])).reference_code as string;
+    expect(ids(await found(t.admin, ref)).includes(t.near)).toBe(true);
+  });
+
+  it('looks at every date (the date range is for browsing), newest first, and narrows with the other filters', async () => {
+    const t = await distinct();
+    const rows = await found(t.admin, t.unique);
+    expect(rows.map((r) => r.id)).toEqual([t.far, t.near]); // 40 days out comes before 3 days out
+    // the same wash is not in the default week
+    const week = expectOk(await t.admin.c.get(`/api/admin/bookings?from=${istDate(0)}&to=${istDate(7)}`)).body.bookings as { id: string }[];
+    expect(week.some((b) => b.id === t.far)).toBe(false);
+    // narrowed by payment and status
+    expect((await found(t.admin, t.unique, '&pay=free')).length).toBe(0);
+    expect((await found(t.admin, t.unique, '&pay=paid')).map((r) => r.id)).toEqual([t.far, t.near]);
+    expect((await found(t.admin, t.unique, '&status=completed')).length).toBe(0);
+  });
+
+  it('% and _ are ordinary letters, nothing matches nothing, an empty or huge search is no search', async () => {
+    const t = await distinct();
+    expect((await found(t.admin, '%')).length).toBe(0);
+    expect((await found(t.admin, '_')).length).toBe(0);
+    expect((await found(t.admin, `${t.unique}%`)).length).toBe(0); // a name followed by a literal % is not a name
+    expect((await found(t.admin, 'no-such-person-anywhere-xyz')).length).toBe(0);
+    const everything = expectOk(await t.admin.c.get(`/api/admin/bookings?from=${istDate(0)}&to=${istDate(50)}`)).body.bookings.length as number;
+    expect(expectOk(await t.admin.c.get(`/api/admin/bookings?q=&from=${istDate(0)}&to=${istDate(50)}`)).body.bookings.length).toBe(everything);
+    expect(expectOk(await t.admin.c.get(`/api/admin/bookings?q=${'x'.repeat(200)}&from=${istDate(0)}&to=${istDate(50)}`)).body.bookings.length).toBe(everything);
+  });
+});
+
+describe('the memberships list carries what the Paid tab shows', () => {
+  it('where, when and how it was paid, and the slot and notes', async () => {
+    const admin = await staffClient('admin');
+    const m = await activeMembership({ type: 'car', pattern: PATTERN_3, months: 1 });
+    const list = expectOk(await admin.c.get('/api/admin/memberships')).body.memberships as any[];
+    const mine = list.find((x) => x.id === m.membershipId);
+    expect(mine).toMatchObject({ status: 'active', society_name: 'Yashwin Orizzonte', time_slot: 'morning', payment_provider: 'razorpay', customer_notes: 'Gate code 4321' });
+    expect(mine.paid_at).toBeTruthy();
+    expect(mine.final_amount_cents).toBeGreaterThan(0);
+    expect(mine.flat_number).toBe('B-702');
+  });
+});

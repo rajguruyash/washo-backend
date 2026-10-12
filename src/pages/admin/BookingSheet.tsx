@@ -16,7 +16,7 @@ import type { SlotId } from '../../lib/types';
 import { Loading, errText } from './shared';
 
 /** One wash in full: who, where, photos, history; and the admin's actions on it (assign, edit details, move, cancel). */
-export function BookingSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string | null; onClose: () => void; startIn?: 'details' | 'move' }) {
   const { data } = useAdminBooking(id ?? undefined);
   const workers = useAdminWorkers();
   const act = useAdminAction();
@@ -30,7 +30,7 @@ export function BookingSheet({ id, onClose }: { id: string | null; onClose: () =
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
   const [reason, setReason] = useState('');
-  useEffect(() => { setView('details'); setWorker(''); setDate(null); setSlot(null); setReason(''); }, [id]);
+  useEffect(() => { setView(startIn); setWorker(''); setDate(null); setSlot(null); setReason(''); }, [id, startIn]);
   const b = data?.booking;
   useEffect(() => { if (b) { setAddrId(b.address_id ?? ''); setParking(b.parking_location ?? ''); setNote(b.notes ?? ''); } }, [b?.id, b?.address_id, b?.parking_location, b?.notes]);
   const run = async (path: string, body: Record<string, unknown>, ok: string, method: 'POST' | 'PUT' = 'POST') => {
