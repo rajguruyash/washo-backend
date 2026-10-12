@@ -60,7 +60,7 @@ export function PhotoUploader({ bookingId, phase, disabled }: { bookingId: strin
         {ANGLES.map((a) => tile(a.id, a.label))}
         {tile('additional', extras ? `Extra (${extras})` : 'Extra')}
       </div>
-      <p className="mt-2 text-xs text-fog">{mine.length} photo{mine.length === 1 ? '' : 's'} saved. At least one is needed.</p>
+      <p className="mt-2 text-xs text-fog">{mine.length} photo{mine.length === 1 ? '' : 's'} saved. Optional.</p>
     </div>
   );
 }
