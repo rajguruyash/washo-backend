@@ -1,5 +1,6 @@
 import { Camera, LifeBuoy, Loader2, MessageSquare, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ErrorState } from '../../components/EmptyState';
 import { SupportPictures } from '../../components/SupportPictures';
 import { Badge } from '../../components/ui/Badge';
@@ -48,7 +49,7 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
   const send = async () => {
     try {
       await act.mutateAsync({ path: `support/${id}/reply`, body: { message: text.trim(), ...(status ? { status } : {}), ...(pics.length ? { picture_ids: pics.map((p) => p.id) } : {}) } });
-      toast.success(pics.length ? 'Reply sent with your pictures. The customer sees them in their app.' : 'Reply sent. The customer sees it in their app.');
+      toast.success(pics.length ? 'Reply sent with your pictures. The customer sees it from "Agent".' : 'Reply sent. The customer sees it from "Agent".');
       setText('');
       setStatus('');
       setPics([]);
@@ -96,7 +97,7 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
           <ul className="space-y-3">
             {data!.messages.map((m) => (
               <li key={m.id} className={m.from_admin ? 'ml-6 rounded-2xl rounded-tr-md border border-washo-500/30 bg-washo-500/10 p-3.5' : 'mr-6 rounded-2xl rounded-tl-md border border-white/10 bg-white/[0.04] p-3.5'}>
-                <p className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-fog"><span className="font-semibold text-mist">{m.from_admin ? `WASHO${m.author ? ` · ${m.author}` : ''}` : (t.customer_name ?? 'Customer')}</span><span>{when(m.created_at)}</span></p>
+                <p className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-fog"><span className="font-semibold text-mist">{m.from_admin ? `Agent${m.author ? ` (${m.author})` : ''}` : (t.customer_name ?? 'Customer')}</span><span>{when(m.created_at)}</span></p>
                 <p className="mt-1.5 whitespace-pre-wrap text-sm">{m.body}</p>
                 <SupportPictures pictures={m.attachments} />
               </li>
@@ -112,7 +113,12 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
 export default function Support({ canReply }: { canReply: boolean }) {
   const [status, setStatus] = useState<TicketStatus | 'all'>('open');
   const { data, isLoading, isError, refetch } = useAdminSupport(status);
-  const [open, setOpen] = useState<string | null>(null);
+  // A complaint found with the master search arrives as ?ticket=<id> and opens at once.
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get('ticket');
+  const [open, setOpen] = useState<string | null>(wanted);
+  useEffect(() => { if (wanted) setOpen(wanted); }, [wanted]);
+  const close = () => { setOpen(null); if (wanted) setParams((p) => { p.delete('ticket'); return p; }, { replace: true }); };
   return (
     <div className="space-y-4">
       <Segmented label="Complaint status" value={status} onChange={setStatus} options={[{ value: 'open', label: 'Open' }, { value: 'in_progress', label: 'In progress' }, { value: 'resolved', label: 'Resolved' }, { value: 'closed', label: 'Closed' }, { value: 'all', label: 'All' }]} />
@@ -132,7 +138,7 @@ export default function Support({ canReply }: { canReply: boolean }) {
           ))}
         </ul>
       )}
-      <Thread key={open ?? 'none'} id={open} canReply={canReply} onClose={() => setOpen(null)} />
+      <Thread key={open ?? 'none'} id={open} canReply={canReply} onClose={close} />
     </div>
   );
 }

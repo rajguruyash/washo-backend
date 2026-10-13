@@ -37,7 +37,7 @@ export default function HelpTicket() {
       <ul className="space-y-3">
         {data.messages.map((m) => (
           <li key={m.id} className={m.from_admin ? 'mr-6 rounded-2xl rounded-tl-md border border-washo-500/30 bg-washo-500/10 p-4' : 'ml-6 rounded-2xl rounded-tr-md border border-white/10 bg-white/[0.04] p-4'}>
-            <p className="flex items-baseline justify-between gap-2 text-xs text-fog"><span className="font-semibold text-mist">{m.from_admin ? 'WASHO' : 'You'}</span><span>{when(m.created_at)}</span></p>
+            <p className="flex items-baseline justify-between gap-2 text-xs text-fog"><span className="font-semibold text-mist">{m.from_admin ? 'Agent' : 'You'}</span><span>{when(m.created_at)}</span></p>
             <p className="mt-1.5 whitespace-pre-wrap text-sm">{m.body}</p>
             <SupportPictures pictures={m.attachments} />
           </li>

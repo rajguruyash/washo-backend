@@ -223,7 +223,7 @@ function AddressForm({ customerId, address, onDone }: { customerId: string; addr
 
 type CustomerView = { kind: 'details' } | { kind: 'edit' } | { kind: 'vehicle'; vehicle?: AdminVehicle } | { kind: 'address'; address?: AdminAddress };
 
-function CustomerSheet({ id, onClose, onBook }: { id: string | null; onClose: () => void; onBook: (customerId: string) => void }) {
+export function CustomerSheet({ id, onClose, onBook }: { id: string | null; onClose: () => void; onBook: (customerId: string) => void }) {
   const { data, isLoading, isError, refetch } = useAdminCustomer(id ?? undefined);
   const act = useAdminAction();
   const toast = useToast();

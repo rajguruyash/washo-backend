@@ -111,7 +111,7 @@ export function AddWashSheet({ open, customerId, onClose, onCreated }: { open: b
                       <option value="">Choose…</option>
                       {services.map((s) => <option key={s.id} value={s.id}>{s.name} · {rupees(s.price!)}</option>)}
                     </Select>
-                    <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={30} crowd={crowd} closedMode="warn" />
+                    <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={30} crowd={crowd} closedMode="warn" fullMode="warn" />
                     <Select label="Address" value={addressId} onChange={(e) => { setAddressId(e.target.value); const a = addresses.find((x) => x.id === e.target.value); if (a) setParking(a.parking_location); }}>
                       <option value="">Their usual address</option>
                       {addresses.map((a) => <option key={a.id} value={a.id}>{a.label} · {a.society_name}, {a.flat_number}</option>)}

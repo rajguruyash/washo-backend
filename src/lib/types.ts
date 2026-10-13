@@ -817,3 +817,11 @@ export interface TeamMember {
   created_at: string;
   last_sign_in_at: string | null;
 }
+
+/** The master search at the top of the admin page: the few best matches in each part of the console the admin may look at. */
+export interface AdminSearchResults {
+  customers: { id: string; full_name: string | null; phone: string | null; email: string | null; archived: boolean; plates: string | null }[];
+  washes: { id: string; reference_code: string; scheduled_date: string; time_slot: SlotId; status: BookingStatus; service_name: string; registration_number: string; customer_name: string | null; customer_phone: string | null; payment_kind: AdminBooking['payment_kind']; payment_provider?: string | null }[];
+  memberships: { id: string; status: string; end_at: string; reference_code: string | null; customer_name: string | null; customer_phone: string | null; vehicle_model: string | null; registration_number: string | null }[];
+  tickets: { id: string; reference_code: string; subject: string; status: TicketStatus; customer_name: string | null; customer_phone: string | null }[];
+}

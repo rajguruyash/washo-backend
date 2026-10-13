@@ -15,7 +15,7 @@ import { Loading, errText } from './shared';
 const STATE: Record<CrowdState, { label: string; tone: Tone; text: string; bar: string }> = {
   ok: { label: 'Room', tone: 'green', text: 'text-ok', bar: 'bg-ok' },
   busy: { label: 'Busy', tone: 'amber', text: 'text-warn', bar: 'bg-warn' },
-  full: { label: 'Rush', tone: 'red', text: 'text-bad', bar: 'bg-bad' },
+  full: { label: 'Full', tone: 'red', text: 'text-bad', bar: 'bg-bad' },
 };
 const KINDS = [{ kind: 'weekday', title: 'Weekdays', sub: 'Monday to Friday' }, { kind: 'weekend', title: 'Weekends', sub: 'Saturday and Sunday' }] as const;
 type Form = Record<'weekday' | 'weekend', Record<keyof Omit<CapacityRule, 'day_kind'>, string>>;
@@ -25,7 +25,7 @@ const toForm = (rules: CapacityRule[]): Form => {
   return { weekday: f('weekday'), weekend: f('weekend') };
 };
 
-/** The two numbers for a kind of day: when it turns amber (busy) and when it turns red (a rush), for the whole day and for each time window. Neither closes anything. */
+/** The two numbers for a kind of day: when it turns amber (busy) and when it turns red (full), for the whole day and for each time window. Amber only warns; a full day or window cannot be booked by customers. */
 function Limits({ rules }: { rules: CapacityRule[] }) {
   const act = useAdminAction();
   const toast = useToast();
@@ -48,8 +48,8 @@ function Limits({ rules }: { rules: CapacityRule[] }) {
       <div>
         <h2 className="text-lg font-bold">How many vehicles can you wash?</h2>
         <p className="mt-1 max-w-3xl text-sm text-fog">
-          Every wash booked for a day counts: memberships, single washes and free washes. When a day or a time window reaches the <strong className="text-warn">amber</strong> number customers see it in amber; at the <strong className="text-bad">red</strong> number it turns red with a note that there might be a slight delay because of the rush.
-          <strong className="text-white"> There is no upper limit:</strong> customers can still choose a red day and book it. Only the colour and the note change.
+          Every wash booked for a day counts: memberships, single washes and free washes. When a day or a time window reaches the <strong className="text-warn">amber</strong> number customers see it in amber; at the <strong className="text-bad">red</strong> number it is <strong className="text-white">full</strong>: customers and specialists cannot pick it (it is greyed out in red and says Full), and a free-wash claim passes over it.
+          <strong className="text-white"> WASHO's admins can still book it</strong> (Book a wash, or moving a wash), and a membership that is already paid is never refused. To take more washes, raise the red numbers.
         </p>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
@@ -108,7 +108,7 @@ export default function Capacity() {
       <Limits key={JSON.stringify(data.rules)} rules={data.rules} />
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-lg font-bold">The days ahead</h2><p className="text-sm text-fog">{crowded ? `${crowded} of the next ${span} days are busy or rush.` : `Nothing is busy in the next ${span} days.`} Counts are vehicles booked in each time window.</p></div>
+          <div><h2 className="text-lg font-bold">The days ahead</h2><p className="text-sm text-fog">{crowded ? `${crowded} of the next ${span} days are busy or full.` : `Nothing is busy in the next ${span} days.`} Counts are vehicles booked in each time window.</p></div>
           <Segmented label="How far ahead" value={span} onChange={setSpan} options={[{ value: '14', label: '2 weeks' }, { value: '28', label: '4 weeks' }, { value: '60', label: '2 months' }]} />
         </div>
         <ul className="panel divide-y divide-white/[0.07] overflow-hidden">{data.days.map((d) => <Row key={d.date} d={d} />)}</ul>

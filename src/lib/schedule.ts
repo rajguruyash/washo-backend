@@ -5,7 +5,7 @@ export interface Need { body: number; deep: number }
 /**
  * What is wrong with a set of exact dates, in words; null when it is fine. The same rules the database enforces before it takes any money:
  * the right number of each kind of wash, one a day (back to back on following days is fine), inside the term and not before the earliest start
- * (not today or tomorrow). (A rush day is allowed: it is only shown red.)
+ * (not today or tomorrow). (A day whose time window is full is refused, shown red.)
  */
 export function exactDatesProblem(o: { value: ExactDate[]; need: Need; minDate: string; end: string }): string | null {
   const body = o.value.filter((v) => v.kind === 'body').length;

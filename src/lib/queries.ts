@@ -3,7 +3,7 @@ import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
   ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
-  AdminWorkingDays, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
+  AdminSearchResults, AdminWorkingDays, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
 export const keys = {
@@ -34,7 +34,7 @@ export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () =
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
 export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
 
-/** How crowded each day and time window is, by date. Marks busy days amber and rush days red (never closed) on the booking pages. */
+/** How crowded each day and time window is, by date. Marks busy days amber and full days red (full ones cannot be booked by customers) on the booking pages. */
 export const useCapacity = (from: string, to: string, enabled = true) =>
   useQuery({
     queryKey: ['capacity', from, to],
@@ -454,6 +454,16 @@ export const useAdminCampaignClaims = (id: string | undefined, status: string, q
     queryFn: async () => (await get<{ claims: AdminCampaignClaim[] }>(`/admin/campaigns/${id}/claims?status=${status}&q=${encodeURIComponent(q)}`)).claims,
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
+  });
+/** The master search: nothing is asked until at least two letters are typed; the last answer stays on screen while the next one loads. */
+export const useAdminSearch = (q: string) =>
+  useQuery({
+    queryKey: keys.admin('search', q),
+    queryFn: async () => { const { success: _ok, ...r } = await get<AdminSearchResults & { success: boolean }>(`/admin/search?q=${encodeURIComponent(q)}`); return r as AdminSearchResults; },
+    enabled: q.length >= 2,
+    staleTime: 10_000,
+    placeholderData: (prev) => prev,
+    retry: false,
   });
 export const useAdminWorkingDays = () => useQuery({ queryKey: keys.admin('working-days'), queryFn: () => get<AdminWorkingDays & { success: boolean }>('/admin/working-days') });
 export const useAdminCapacity = (from: string, to: string) =>

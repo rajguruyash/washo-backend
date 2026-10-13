@@ -209,7 +209,7 @@ describe('exact dates', () => {
       expect(await checkoutErr(s, c, crowded)).toMatch(/No more than 2 washes in one week: the week of .* has 3/);
     }));
 
-  it('refuses a day the vehicle already has a wash, but accepts a day that is red', async () =>
+  it('refuses a day the vehicle already has a wash, and a day whose time window is full (red)', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const dates = await good(s, c);
@@ -222,7 +222,7 @@ describe('exact dates', () => {
       await limitsToOne(s);
       await s.as('postgres');
       await occupy(s, dates[3].date);
-      expect(await checkoutErr(s, c, dates)).toBeNull(); // a rush day is shown red, not refused
+      expect(await checkoutErr(s, c, dates)).toMatch(/is fully booked in the morning window/); // a full window is shown red and refused (migration 42)
     }));
 
   it('a bike has only Body washes, and malformed input is refused plainly', async () =>

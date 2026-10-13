@@ -307,3 +307,14 @@ Not applied to production by Claude: run it in the Supabase SQL Editor (it is th
 Customers cannot add pictures yet (the table already records who added each one, so that can be added without changing it).
 Not applied to production by Claude: run 40 and 41 in the Supabase SQL Editor (they are the last parts of `bundles/safe-migrations.sql`).
 
+## Full time windows cannot be booked (migration 42)
+
+`20261004000042_full_slots_block.sql`, re-runnable; no table or row is touched. Until now a time window past the red number in Admin -> Capacity was only shown red and could still be booked (migration 22). Now it is FULL, and for everything a customer or a specialist picks, a full window is refused. A window is full when it has reached its own red number, or the whole day has reached the day's red number (then every window of that day is full). Amber (busy) still only warns.
+- `require_slot_room(date, window)` raises "Sat, 17 Oct is fully booked in the morning window. Please choose another day or time."; `require_capacity` (single-wash checkout) now checks a closed day (migration 39) and then this.
+- **Free-wash claim:** `pick_campaign_slot` chooses the quietest window that is NOT full, passes over days with none, and says "Every day this offer is open is fully booked" when there is no room anywhere (it no longer falls back to a red day).
+- **Membership exact dates** (`create_monthly_membership_request` and the older `create_membership_request`): each date picked must have room in the plan's time window.
+- **Moving a membership wash** (`app_private.reschedule_wash`: customer and specialist): the new day must be a working day and its window must have room.
+- **Not blocked:** an admin (booking a wash for a customer, or moving one), the automatic spread of a plan (it only prefers quieter days), and a plan that is already paid.
+The booking pages grey a full window out in red with "Full" and a short red message; the Capacity page says the same.
+Not applied to production by Claude: run it in the Supabase SQL Editor (the last part of `bundles/safe-migrations.sql`).
+

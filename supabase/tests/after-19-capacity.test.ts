@@ -95,7 +95,7 @@ describe('how crowded a day is', () => {
     }));
 });
 
-describe('a rush day or window is shown red but is never closed', () => {
+describe('a full day or window (red) cannot be booked by a customer; amber only warns (migration 42)', () => {
   const setup = async (s: any) => {
     const u = await createCustomer(s);
     const addr = await createAddress(s, u.profileId);
@@ -108,17 +108,27 @@ describe('a rush day or window is shown red but is never closed', () => {
     return s.err(`select public.create_booking_payment_intent('${c.veh}','${c.svc}','${date}'::date,'${slot}'::public.time_slot,'${c.addr}')`);
   };
 
-  it('a single wash can still be started for a window past the red number (it is only reported red)', async () =>
+  it('a single wash is refused for a window at its red number, with a short message; the other windows still book', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const wed = await nextDow(s, 3);
       await load(s, wed, 'morning', 9);
       expect((await one(s, wed)).slots.morning.state).toBe('full'); // red
-      expect(await intent(s, c, wed, 'morning')).toBeNull();        // and still bookable
+      expect(await intent(s, c, wed, 'morning')).toMatch(/^\w{3}, \d{1,2} \w{3} is fully booked in the morning window\. Please choose another day or time\.$/);
       expect(await intent(s, c, wed, 'afternoon')).toBeNull();
+      expect(await intent(s, c, wed, 'night')).toBeNull();
     }));
 
-  it('a day past the red number in total is red for every window, and every window can still be booked', async () =>
+  it('a window that is only amber (busy) still books', async () =>
+    inTx(async (s) => {
+      const c = await setup(s);
+      const wed = await nextDow(s, 3);
+      await load(s, wed, 'morning', 6);
+      expect((await one(s, wed)).slots.morning.state).toBe('busy');
+      expect(await intent(s, c, wed, 'morning')).toBeNull();
+    }));
+
+  it('a day past the red number in total is full for every window, and none can be booked', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const fri = await nextDow(s, 5);
@@ -126,19 +136,21 @@ describe('a rush day or window is shown red but is never closed', () => {
       await load(s, fri, 'afternoon', 5);
       await load(s, fri, 'night', 5);
       expect((await one(s, fri)).state).toBe('full');
-      for (const slot of ['morning', 'afternoon', 'night']) expect(await intent(s, c, fri, slot), slot).toBeNull();
+      for (const slot of ['morning', 'afternoon', 'night']) expect(await intent(s, c, fri, slot), slot).toMatch(/fully booked/);
     }));
 
-  it('there is no upper limit: far past the red number it still books', async () =>
+  it('the limits are the owner\'s to change: raising the red number opens the window again', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const wed = await nextDow(s, 3);
-      await load(s, wed, 'morning', 40);
-      expect((await one(s, wed)).state).toBe('full');
+      await load(s, wed, 'morning', 9);
+      expect(await intent(s, c, wed, 'morning')).toMatch(/fully booked/);
+      await s.as('postgres');
+      await s.q(`update public.capacity_rules set slot_full = 12, day_full = 20 where day_kind = 'weekday'`);
       expect(await intent(s, c, wed, 'morning')).toBeNull();
     }));
 
-  it('a free-wash claim is placed by WASHO on the earliest day that is not red, and is never refused for a crowd', async () =>
+  it('a free-wash claim goes to the quietest window that is not full, on the earliest day with one; and says so when every day is full', async () =>
     inTx(async (s) => {
       const people = [await setup(s), await setup(s), await setup(s)];
       const days = [] as string[];
@@ -150,19 +162,21 @@ describe('a rush day or window is shown red but is never closed', () => {
          values ($1,'Free wash',true,current_date,current_date + 3,current_date + 20,50,false) returning id`, [`t-${uid().slice(0, 8)}`]))[0].id;
       const claim = async (c: any) => { await s.as('authenticated', c.u.authId); return (await s.q(`select public.claim_campaign_wash($1::uuid,$2::uuid,null,null,$3::uuid,'P1') r`, [camp, c.veh, c.addr]))[0].r; };
       const r1 = await claim(people[0]);
-      // from now on one wash is enough to turn a day red: the next claim goes to a day that is not
+      // from now on one wash is enough to fill a window: the next claim goes where there is room
       await s.as('postgres');
-      await s.q(`update public.capacity_rules set day_busy = 1, day_full = 1, slot_busy = 1, slot_full = 1`);
+      await s.q(`update public.capacity_rules set day_busy = 1, day_full = 2, slot_busy = 1, slot_full = 1`);
       const r2 = await claim(people[1]);
-      expect(r2.scheduled_date > r1.scheduled_date).toBe(true);
-      // and when EVERY day is red, it is still booked, on the earliest day, not refused
-      for (const d of days) await load(s, d, 'morning', 1);
-      const r3 = await claim(people[2]);
-      expect(r3.booking_id).toBeTruthy();
-      expect(r3.scheduled_date <= r2.scheduled_date).toBe(true);
+      expect(r2.scheduled_date >= r1.scheduled_date).toBe(true);
+      await s.as('postgres');
+      const taken = (await s.q(`select 1 from public.bookings where id = $1 and scheduled_date = $2::date and time_slot = $3::public.time_slot`, [r2.booking_id, r2.scheduled_date, r2.time_slot])).length;
+      expect(taken).toBe(1);
+      // and when EVERY window of EVERY day is full, the claim says so instead of booking
+      for (const d of days) for (const slot of ['morning', 'afternoon', 'night'] as const) await load(s, d, slot, 1);
+      await s.as('authenticated', people[2].u.authId);
+      expect(await s.err(`select public.claim_campaign_wash($1::uuid,$2::uuid,null,null,$3::uuid,'P1')`, [camp, people[2].veh, people[2].addr])).toMatch(/Every day this offer is open is fully booked/);
     }));
 
-  it('WASHO can still book a wash on a full day (the admin booking is not blocked)', async () =>
+  it('WASHO can still book a wash on a full window (the admin booking is not blocked)', async () =>
     inTx(async (s) => {
       const c = await setup(s);
       const admin = await createAdmin(s);

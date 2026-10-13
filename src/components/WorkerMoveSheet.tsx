@@ -18,7 +18,7 @@ const REASONS = [
 /**
  * The specialist moves a membership wash because the customer's vehicle is not available that day: to the next day with one tap, or to any
  * day they choose. The database applies the membership's rules (inside the term, not a day the vehicle already has a wash) and tells the
- * customer. A busy or rush day is flagged, not forbidden: WASHO's own crew decides.
+ * customer. A busy day is flagged; a full window or a day WASHO is unavailable cannot be picked (Admin -> Capacity, Working Days).
  */
 export function WorkerMoveSheet({ wash, onClose, onMove }: { wash: WorkerWash | null; onClose: () => void; onMove: (date: string, slot: SlotId, reason: string) => Promise<boolean> }) {
   // Mounted only while open, so the choices start fresh each time.
@@ -74,7 +74,6 @@ function MoveForm({ wash, onClose, onMove }: { wash: WorkerWash; onClose: () => 
 
         <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={today} days={45} label="different day" crowd={crowd} />
         {state === 'busy' && <p className="-mt-2 rounded-2xl border border-warn/30 bg-warn/10 p-3 text-sm text-warn">That day is busy. You can still move it there.</p>}
-        {state === 'full' && <p className="-mt-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad">That day is a rush day (red). You can still move it there, but the crew will be stretched.</p>}
 
         <div>
           <p className="mb-2 text-[13px] font-medium text-mist">Why</p>

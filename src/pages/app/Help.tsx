@@ -76,7 +76,7 @@ export default function Help() {
                   <Link to={`/app/help/${t.id}`} className="glass flex items-center gap-3 p-4 transition-colors hover:border-washo-400/40">
                     <MessageCircle className="h-5 w-5 shrink-0 text-washo-300" aria-hidden />
                     <span className="min-w-0 flex-1"><span className="block truncate font-semibold">{t.subject}</span><span className="block text-xs text-fog">{t.reference_code} · {prettyDate(t.created_at.slice(0, 10))}</span></span>
-                    {t.last_from_admin && t.status !== 'closed' && <Badge tone="green">WASHO replied</Badge>}
+                    {t.last_from_admin && t.status !== 'closed' && <Badge tone="green">Agent replied</Badge>}
                     <Badge tone={STATUS_TONE[t.status]}>{STATUS_TEXT[t.status]}</Badge>
                   </Link>
                 </li>

@@ -384,7 +384,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           <motion.section key="s4" {...slide}>
             <h1 className="text-3xl font-extrabold">When should we start?</h1>
             <p className="mt-1.5 mb-6 text-fog">Your washes run on your chosen days at this time. The first wash is the first of those days on or after your start date.</p>
-            <DateSlotPicker date={start} slot={slot} onDate={setStart} onSlot={setSlot} min={minStart} days={start ? Math.max(21, Math.round((Date.parse(start) - Date.parse(minStart)) / 86_400_000) + 8) : 21} label="start date" crowd={crowd} closedMode="ignore" />
+            <DateSlotPicker date={start} slot={slot} onDate={setStart} onSlot={setSlot} min={minStart} days={start ? Math.max(21, Math.round((Date.parse(start) - Date.parse(minStart)) / 86_400_000) + 8) : 21} label="start date" crowd={crowd} closedMode="ignore" fullMode="ignore" />
 
             {start && slot && (
               <div className="mt-8 space-y-4">
@@ -393,7 +393,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                   <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your {perMonth} washes a month do not all fit on those days, because this vehicle already has a wash on some of them. Choose more days or a later start, or pick exact dates below.</p>
                 )}
                 {preview.data && !customActive && preview.data.fits && preview.data.dates.some((d) => d.state === 'full') && (
-                  <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'One of your washes falls on a rush day' : `${preview.data.dates.filter((d) => d.state === 'full').length} of your washes fall on rush days`}, so there might be a slight delay on {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'that day' : 'those days'}. Everything is still booked as you chose.</p>
+                  <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'One of your washes falls on a very busy day' : `${preview.data.dates.filter((d) => d.state === 'full').length} of your washes fall on very busy days`}, so there might be a slight delay on {preview.data.dates.filter((d) => d.state === 'full').length === 1 ? 'that day' : 'those days'}. Everything is still booked as you chose.</p>
                 )}
                 {preview.data && !customActive && preview.data.fits && !preview.data.dates.some((d) => d.state === 'full') && preview.data.dates.some((d) => d.state === 'busy') && (
                   <p className="flex items-start gap-2 rounded-2xl border border-warn/30 bg-warn/10 p-4 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Some of your days are getting busy. Everything is still booked as you chose.</p>

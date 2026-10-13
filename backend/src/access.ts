@@ -46,7 +46,7 @@ export async function adminAccessFor(claims: Claims): Promise<AdminAccess | null
 
 // The first part of an /api/admin/... path -> the area it belongs to.
 const AREA_OF: Record<string, string> = {
-  overview: 'overview', dashboard: 'overview',
+  overview: 'overview', dashboard: 'overview', search: 'overview',
   'membership-requests': 'requests',
   bookings: 'bookings', reviews: 'bookings',
   memberships: 'memberships', reminders: 'memberships', renewals: 'memberships',

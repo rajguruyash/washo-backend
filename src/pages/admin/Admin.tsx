@@ -22,6 +22,7 @@ import { ROLE_LABEL, canDo, isReadOnly } from '../../lib/adminAccess';
 import { useAuth } from '../../state/auth';
 import Activity from './Activity';
 import { AddWashSheet } from './AddWash';
+import { AdminSearch, type SearchPick } from './AdminSearch';
 import { BookingSheet } from './BookingSheet';
 import Capacity from './Capacity';
 import WorkingDays from './WorkingDays';
@@ -30,7 +31,7 @@ import Export from './Export';
 import Campaigns from './Campaigns';
 import History from './History';
 import Paid from './Paid';
-import People from './People';
+import People, { CustomerSheet } from './People';
 import Discounts from './Discounts';
 import ServicesAdmin from './ServicesAdmin';
 import Renewals from './Renewals';
@@ -390,9 +391,16 @@ export default function Admin() {
   const readOnly = Boolean(area) && isReadOnly(access, area!);
   // "Book a wash" is available from the Washes tab (pick any customer) and from a customer's page (that customer).
   const [adding, setAdding] = useState<{ customerId: string | null } | null>(null);
+  // The master search opens a customer or a wash right where you are; a membership shows its washes, a complaint opens in Support.
+  const [focus, setFocus] = useState<{ kind: 'customer' | 'wash'; id: string } | null>(null);
+  const pick = (p: SearchPick) => {
+    if (p.kind === 'customer' || p.kind === 'wash') setFocus({ kind: p.kind, id: p.id });
+    else if (p.kind === 'membership') go('bookings', { membership: p.id });
+    else go('support', { ticket: p.id });
+  };
   return (
     <StaffLayout role="admin" title={access ? `Admin · ${ROLE_LABEL[access.access]}` : 'Admin'}>
-      <div className="mb-6"><h1 className="text-3xl font-extrabold">WASHO admin</h1></div>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4"><h1 className="text-3xl font-extrabold">WASHO admin</h1>{access && <AdminSearch onPick={pick} />}</div>
       {!access ? (
         <div role="alert" className="glass max-w-xl p-6"><h2 className="text-lg font-bold">Your account has no role yet</h2><p className="mt-2 text-sm text-fog">You are signed in, but the super admin has not given you a role, so there is nothing you can open. Ask them to add you under Team.</p></div>
       ) : (
@@ -420,6 +428,8 @@ export default function Admin() {
           {tab === 'settings' && <Settings canEdit={canDo(access, 'settings', 'manage')} />}
         </>
       )}
+      <BookingSheet id={focus?.kind === 'wash' ? focus.id : null} onClose={() => setFocus(null)} />
+      <CustomerSheet id={focus?.kind === 'customer' ? focus.id : null} onClose={() => setFocus(null)} onBook={(customerId) => { setFocus(null); setAdding({ customerId }); }} />
       <AddWashSheet open={Boolean(adding)} customerId={adding?.customerId} onClose={() => setAdding(null)} onCreated={() => go('bookings')} />
     </StaffLayout>
   );

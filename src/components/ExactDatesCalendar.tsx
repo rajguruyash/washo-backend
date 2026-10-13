@@ -1,7 +1,6 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../lib/cn';
-import { RUSH_NOTE } from '../lib/crowd';
 import { exactDatesProblem, type Need } from '../lib/schedule';
 import type { CapacityDay, ExactDate, SlotId, WashKind } from '../lib/types';
 
@@ -12,7 +11,7 @@ const longDay = (date: string) => new Intl.DateTimeFormat('en-IN', { weekday: 's
 
 /**
  * Every wash of the membership on a calendar, picked by hand. Body washes are blue and Deep cleans yellow; choose a kind, then tap days.
- * Busy days are marked amber and rush days red (with a note about a slight delay), but any of them can be picked; nothing before the earliest start (not today or tomorrow) and
+ * Busy days are marked amber (still pickable); a day whose time window is full is marked red and cannot be picked; nothing before the earliest start (not today or tomorrow) and
  * nothing after the term can be chosen; one wash a day (any days, even one after another). The database checks all of it again before payment.
  */
 export function ExactDatesCalendar({ start, end, minDate, need, value, onChange, onReset, crowd, slot }: {
@@ -92,16 +91,16 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
                 const out = date < minDate || date < start || date > end;
                 const c = stateOf(date);
                 const shut = !out && Boolean(crowd?.[date]?.closed);   // a day WASHO does not wash (Admin -> Working Days)
-                const rush = !out && !shut && c === 'full';
+                const rush = !out && !shut && c === 'full';   // the plan's time window is full that day: it cannot be picked (a day already chosen can still be tapped to remove it)
                 const busy = !out && !shut && c === 'busy';
-                const disabled = out || (shut && !kind);
+                const disabled = out || ((shut || rush) && !kind);
                 return (
                   <button
                     key={date}
                     type="button"
                     disabled={disabled}
                     aria-pressed={Boolean(kind)}
-                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${shut ? ', WASHO is currently unavailable on this day' : ''}${out ? ', not available' : ''}`}
+                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', full, cannot be picked' : busy && !kind ? ', busy' : ''}${shut ? ', WASHO is currently unavailable on this day' : ''}${out ? ', not available' : ''}`}
                     title={shut ? (crowd?.[date]?.closed_reason ? `Closed: ${crowd[date].closed_reason}` : 'WASHO is currently unavailable on this day') : undefined}
                     onClick={() => pick(date)}
                     className={cn(
@@ -109,7 +108,7 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
                       kind === 'body' ? 'border-washo-400 bg-washo-500 text-white' : kind === 'deep' ? 'border-offer bg-offer text-ink-950' :
                       out ? 'cursor-not-allowed border-transparent text-white/20' :
                       shut ? 'cursor-not-allowed border-transparent text-white/25 line-through decoration-white/40' :
-                      rush ? 'border-bad/50 bg-bad/10 text-bad hover:border-bad' :
+                      rush ? 'cursor-not-allowed border-bad/40 bg-bad/10 text-bad/70' :
                       busy ? 'border-warn/50 bg-warn/10 hover:border-warn' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25',
                       kind && rush && 'ring-2 ring-bad'
                     )}
@@ -129,10 +128,10 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-washo-500" /> Body wash</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-offer" /> Deep clean</span>
         <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-warn/60 bg-warn/20" /> Busy day</span>
-        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-bad/40 bg-bad/20" /> Rush day (slight delay possible)</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-bad/40 bg-bad/20" /> Full (cannot be picked)</span>
         <span>Greyed: before {longDay(minDate)} or after your membership ends</span>
       </div>
-      {rushChosen > 0 && <p role="note" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {rushChosen === 1 ? 'One of your days is a rush day' : `${rushChosen} of your days are rush days`}. {RUSH_NOTE.replace('It is a rush on this day, so there', 'There')}</p>}
+      {rushChosen > 0 && <p role="alert" className="flex items-start gap-2 text-sm font-semibold text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {rushChosen === 1 ? 'One of the days you chose is now full' : `${rushChosen} of the days you chose are now full`}. Tap {rushChosen === 1 ? 'it' : 'them'} to take {rushChosen === 1 ? 'it' : 'them'} off and pick another day.</p>}
       <button type="button" onClick={onReset} className="inline-flex items-center gap-1.5 text-sm font-semibold text-washo-300 hover:text-white"><RotateCcw className="h-4 w-4" /> Back to the automatic spread</button>
     </div>
   );

@@ -99,7 +99,7 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
         </div>
       ) : view === 'move' ? (
         <div className="space-y-5">
-          <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={45} crowd={crowd} closedMode="warn" />
+          <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={45} crowd={crowd} closedMode="warn" fullMode="warn" />
           <Input label="Reason" optional value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} />
           <div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setView('details')}>Back</Button><Button disabled={!date || !slot} loading={act.isPending} onClick={() => void run(`bookings/${b.id}/reschedule`, { date, time_slot: slot, reason }, 'Rescheduled')}>Move wash</Button></div>
         </div>
