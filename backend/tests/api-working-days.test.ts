@@ -150,7 +150,7 @@ describe('booking on a closed day', () => {
     expectOk(await admin.c.post('/api/admin/working-days/dates', { from: tue, open: false, reason: 'Diwali' }));
     const refused = await singleWash(cust, tue);
     expect(refused.status).toBeGreaterThanOrEqual(400);
-    expect(refused.body.message).toMatch(/^WASHO does not wash on Tuesday, \d{1,2} [A-Z][a-z]{2} \(Diwali\)\. The next day you can book is [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}\.$/);
+    expect(refused.body.message).toMatch(/^WASHO is currently unavailable on Tuesday, \d{1,2} [A-Z][a-z]{2} \(Diwali\)\. The next day you can book is [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}\.$/);
     expectOk(await singleWash(cust, sat));
   });
 
@@ -161,12 +161,12 @@ describe('booking on a closed day', () => {
     const base = { vehicle_id: cust.vehicle.id, address_id: cust.addr.id, duration_months: 1, time_slot: 'morning', start_date: istDate(4) };
     const monday = await cust.c.post('/api/payments/membership-checkout', { ...base, monthly: { body: 4, deep: 0, weekdays: [1] } });
     expect(monday.status).toBeGreaterThanOrEqual(400);
-    expect(monday.body.message).toBe('WASHO does not wash on Mondays. Choose from Saturdays, Sundays.');
+    expect(monday.body.message).toBe('WASHO is currently unavailable on Mondays. Choose from Saturdays, Sundays.');
     const days = Array.from({ length: 24 }, (_, i) => addDays(istDate(4), i));
     const weekdayDates = days.filter((d) => ![0, 6].includes(dow(d))).slice(0, 4).map((date) => ({ date, kind: 'body' }));
     const exact = await cust.c.post('/api/payments/membership-checkout', { ...base, monthly: { body: 4, deep: 0, weekdays: [] }, custom_dates: weekdayDates });
     expect(exact.status).toBeGreaterThanOrEqual(400);
-    expect(exact.body.message).toMatch(/^WASHO does not wash on /);
+    expect(exact.body.message).toMatch(/^WASHO is currently unavailable on /);
     // weekends are fine
     const ok = await cust.c.post('/api/payments/membership-checkout', { ...base, monthly: { body: 4, deep: 0, weekdays: [6] } });
     expectOk(ok);
@@ -191,7 +191,7 @@ describe('booking on a closed day', () => {
     expectOk(await admin.c.post('/api/admin/working-days/dates', { from: target, open: false, reason: 'Rain' }));
     const refused = await m.c.post(`/api/bookings/${wash.id}/reschedule`, { date: target, time_slot: 'morning' });
     expect(refused.status).toBeGreaterThanOrEqual(400);
-    expect(refused.body.message).toMatch(/^WASHO does not wash on .*\(Rain\)\. The next day you can book is/);
+    expect(refused.body.message).toMatch(/^WASHO is currently unavailable on .*\(Rain\)\. The next day you can book is/);
     // the admin may make the exception
     expectOk(await admin.c.post(`/api/admin/bookings/${wash.id}/reschedule`, { date: target, time_slot: 'morning', reason: 'Customer asked' }));
     expect(expectOk(await admin.c.get(`/api/admin/bookings/${wash.id}`)).body.booking.scheduled_date).toBe(target);

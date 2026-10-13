@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createAddress, createAdmin, createCustomer, createVehicle, createWorker, inTx, istDate, paidMembership, serviceId, uid } from './helpers';
 
 const NOT_ADMIN = /admin access required|permission denied/i;
-const closedMsg = /^WASHO does not wash on [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}( \(.+\))?\. The next day you can book is [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}\.$/;
+const closedMsg = /^WASHO is currently unavailable on [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}( \(.+\))?\. The next day you can book is [A-Z][a-z]+, \d{1,2} [A-Z][a-z]{2}\.$/;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const dow = (d: string) => new Date(`${d}T00:00:00Z`).getUTCDay();
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -229,8 +229,8 @@ describe('a membership', () => {
       const c = await customer(s);
       const start = await istDate(s, 4);
       await openOnly(s, a, [6, 0]);
-      expect(await request(s, c, { weekdays: [1, 3], start })).toBe('WASHO does not wash on Mondays, Wednesdays. Choose from Saturdays, Sundays.');
-      expect(await request(s, c, { weekdays: [1, 6], start })).toBe('WASHO does not wash on Mondays. Choose from Saturdays, Sundays.');
+      expect(await request(s, c, { weekdays: [1, 3], start })).toBe('WASHO is currently unavailable on Mondays, Wednesdays. Choose from Saturdays, Sundays.');
+      expect(await request(s, c, { weekdays: [1, 6], start })).toBe('WASHO is currently unavailable on Mondays. Choose from Saturdays, Sundays.');
       expect(await request(s, c, { weekdays: [6, 0], start })).toBeNull();
     }));
 
@@ -239,7 +239,7 @@ describe('a membership', () => {
       const a = await createAdmin(s);
       const c = await customer(s);
       await openOnly(s, a, []);
-      expect(await request(s, c, { weekdays: [2], start: await istDate(s, 4) })).toBe('WASHO does not wash on Tuesdays. We are not taking memberships right now.');
+      expect(await request(s, c, { weekdays: [2], start: await istDate(s, 4) })).toBe('WASHO is currently unavailable on Tuesdays. We are not taking memberships right now.');
     }));
 
   it('lands every wash of the spread on a day WASHO works, and passes over a closed date', async () =>
@@ -276,7 +276,7 @@ describe('a membership', () => {
       for (const d of sats) await setDates(s, a, d, d, false, 'Closed');
       const r = await preview(s, c, { body: 4, weekdays: [6], start });
       expect(r.fits).toBe(false);
-      expect(await request(s, c, { weekdays: [6], start })).toMatch(/WASHO does not wash on Saturdays|cannot fit/);
+      expect(await request(s, c, { weekdays: [6], start })).toMatch(/WASHO is currently unavailable on Saturdays|cannot fit/);
     }));
 
   it('exact dates cannot include a closed day; open days are accepted', async () =>
@@ -388,7 +388,7 @@ describe('a free-wash campaign claim', () => {
       await setDates(s, a, await istDate(s, 0), await istDate(s, 12), false, 'Holiday');
       await s.as('authenticated', p.u.authId);
       const err = await s.err(`select public.claim_campaign_wash($1::uuid, $2::uuid, current_date, 'morning', $3::uuid, 'Basement P1')`, [camp, p.veh, p.addr]);
-      expect(err).toMatch(/^WASHO has no working day left while this offer is open\. WASHO does not wash on .*\(Holiday\)\./);
+      expect(err).toMatch(/^WASHO has no available day left while this offer is open\. WASHO is currently unavailable on .*\(Holiday\)\./);
     }));
 });
 

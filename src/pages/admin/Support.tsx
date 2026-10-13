@@ -1,6 +1,7 @@
-import { LifeBuoy, MessageSquare } from 'lucide-react';
-import { useState } from 'react';
+import { Camera, LifeBuoy, Loader2, MessageSquare, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
+import { SupportPictures } from '../../components/SupportPictures';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Select, TextArea } from '../../components/ui/Field';
@@ -8,12 +9,14 @@ import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
 import { prettyPhone } from '../../lib/format';
-import { useAdminAction, useAdminSupport, useAdminSupportTicket } from '../../lib/queries';
+import { compressImage } from '../../lib/image';
+import { uploadSupportPicture, useAdminAction, useAdminSupport, useAdminSupportTicket } from '../../lib/queries';
 import { ADMIN_STATUS_LABEL as STATUS_LABEL, CATEGORY_LABEL, STATUS_TONE } from '../../lib/support';
 import type { TicketStatus } from '../../lib/types';
 import { Loading, errText } from './shared';
 
 
+const MAX_PICTURES = 4;
 const when = (iso: string) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(iso));
 
 function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolean; onClose: () => void }) {
@@ -22,13 +25,33 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
   const toast = useToast();
   const [text, setText] = useState('');
   const [status, setStatus] = useState<TicketStatus | ''>('');
+  // Pictures added to the reply being written: stored as soon as they are chosen, shown to the customer only when the reply is sent.
+  const [pics, setPics] = useState<{ id: string; url: string | null }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const picker = useRef<HTMLInputElement | null>(null);
   const t = data?.ticket;
+  const addPictures = async (files: FileList | null) => {
+    if (!files?.length || !id) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files).slice(0, MAX_PICTURES - pics.length)) {
+        try {
+          const added = await uploadSupportPicture(id, await compressImage(file));
+          setPics((cur) => [...cur, added]);
+        } catch (e) { toast.error(errText(e)); }
+      }
+    } finally {
+      setUploading(false);
+      if (picker.current) picker.current.value = '';
+    }
+  };
   const send = async () => {
     try {
-      await act.mutateAsync({ path: `support/${id}/reply`, body: { message: text.trim(), ...(status ? { status } : {}) } });
-      toast.success('Reply sent. The customer sees it in their app.');
+      await act.mutateAsync({ path: `support/${id}/reply`, body: { message: text.trim(), ...(status ? { status } : {}), ...(pics.length ? { picture_ids: pics.map((p) => p.id) } : {}) } });
+      toast.success(pics.length ? 'Reply sent with your pictures. The customer sees them in their app.' : 'Reply sent. The customer sees it in their app.');
       setText('');
       setStatus('');
+      setPics([]);
     } catch (e) { toast.error(errText(e)); }
   };
   const setTo = async (s: TicketStatus) => {
@@ -40,13 +63,24 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
       footer={canReply && t && t.status !== 'closed' ? (
         <div className="space-y-3">
           <TextArea label="Your reply" value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} placeholder="Say what you did, or what happens next." />
+          <div className="flex flex-wrap items-center gap-2">
+            {pics.map((p, i) => (
+              <span key={p.id} className="relative h-16 w-16 overflow-hidden rounded-xl border border-white/10">
+                {p.url ? <img src={p.url} alt={`Picture ${i + 1} to send`} className="h-full w-full object-cover" /> : <span className="grid h-full w-full place-items-center text-xs text-fog">Added</span>}
+                <button type="button" onClick={() => setPics((cur) => cur.filter((x) => x.id !== p.id))} aria-label={`Remove picture ${i + 1}`} className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-black/70 text-white hover:bg-bad"><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+            <input ref={picker} type="file" accept="image/*" multiple className="sr-only" aria-label="Add pictures to this reply" disabled={uploading || pics.length >= MAX_PICTURES} onChange={(e) => void addPictures(e.target.files)} />
+            <Button size="sm" variant="glass" disabled={uploading || pics.length >= MAX_PICTURES} icon={uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} onClick={() => picker.current?.click()}>{uploading ? 'Adding…' : pics.length ? 'Add another picture' : 'Add pictures'}</Button>
+            <span className="text-xs text-fog">{pics.length}/{MAX_PICTURES} · the customer sees them with this reply</span>
+          </div>
           <div className="grid grid-cols-[1fr_auto] items-end gap-3">
             <Select label="Then mark it" value={status} onChange={(e) => setStatus(e.target.value as TicketStatus | '')}>
               <option value="">Leave as it is (in progress)</option>
               <option value="resolved">Resolved</option>
               <option value="closed">Closed (customer cannot reply)</option>
             </Select>
-            <Button loading={act.isPending} disabled={!text.trim()} onClick={() => void send()}>Send reply</Button>
+            <Button loading={act.isPending} disabled={!text.trim() || uploading} onClick={() => void send()}>Send reply</Button>
           </div>
         </div>
       ) : undefined}>
@@ -64,6 +98,7 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
               <li key={m.id} className={m.from_admin ? 'ml-6 rounded-2xl rounded-tr-md border border-washo-500/30 bg-washo-500/10 p-3.5' : 'mr-6 rounded-2xl rounded-tl-md border border-white/10 bg-white/[0.04] p-3.5'}>
                 <p className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-fog"><span className="font-semibold text-mist">{m.from_admin ? `WASHO${m.author ? ` · ${m.author}` : ''}` : (t.customer_name ?? 'Customer')}</span><span>{when(m.created_at)}</span></p>
                 <p className="mt-1.5 whitespace-pre-wrap text-sm">{m.body}</p>
+                <SupportPictures pictures={m.attachments} />
               </li>
             ))}
           </ul>

@@ -723,12 +723,15 @@ export interface AdminSupportTicket extends SupportTicket {
   booking_reference: string | null;
   messages: number;
 }
+/** A picture WASHO sent with a reply: a short-lived link (null if it could not be made). */
+export interface SupportPicture { id: string; content_type: string; url: string | null }
 export interface SupportMessage {
   id: string;
   from_admin: boolean;
   body: string;
   created_at: string;
   author?: string | null;
+  attachments?: SupportPicture[];
 }
 export interface SupportThread {
   ticket: { id: string; reference_code: string; category: TicketCategory; subject: string; status: TicketStatus; created_at: string; booking_id: string | null; booking_reference: string | null; customer_id?: string; customer_name?: string | null; customer_phone?: string | null };

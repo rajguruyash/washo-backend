@@ -338,6 +338,20 @@ export async function uploadWashPhoto(bookingId: string, phase: 'before' | 'afte
   }
 }
 
+/** Sends one picture for a complaint reply (admin, support role). It is stored at once but reaches the customer only when the reply it is attached to is sent. */
+export async function uploadSupportPicture(ticketId: string, blob: Blob): Promise<{ id: string; url: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/admin/support/${ticketId}/attachments`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
+  } catch {
+    throw new Error("We couldn't reach WASHO. Check your connection and try again.");
+  }
+  let body: { id?: string; url?: string | null; message?: string } = {};
+  try { body = await res.json(); } catch { /* keep default */ }
+  if (!res.ok || !body.id) throw new Error(body.message ?? 'The picture could not be added. Please try again.');
+  return { id: body.id, url: body.url ?? null };
+}
+
 // ───────── admin ─────────
 export const useAdminOverview = () => useQuery({ queryKey: keys.admin('overview'), queryFn: async () => (await get<{ overview: AdminOverview }>('/admin/overview')).overview, refetchInterval: 60_000 });
 

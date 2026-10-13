@@ -283,7 +283,7 @@ Not applied to production by Claude: run it in the Supabase SQL Editor (it is th
 
 `20261004000039_working_days.sql`, additive and re-runnable; nothing changes until an admin turns something off (every weekday starts on, no date is set). Admin -> Working Days.
 - `working_weekdays` (0 = Sunday ... 6 = Saturday, `is_open`) and `working_dates` (a date turned off or on, with a reason up to 120 characters; a date beats its weekday). Neither table can be read or written directly: booking pages use `get_working_days(from, to)` (public: the weekdays, the closed days in the range with reasons, the next open day), admins use `admin_working_days()`, `admin_set_working_weekdays(open_days)`, `admin_set_working_dates(from, to, open, reason)` (up to 92 days at a time, today or later) and `admin_clear_working_date(day)`. Every change is in the activity log.
-- The rule lives in one place, `app_private.is_working_day(date)`, with `next_working_day`, `closed_day_message` ("WASHO does not wash on Monday, 13 Oct (Diwali). The next day you can book is Saturday, 17 Oct.") and `require_working_day`.
+- The rule lives in one place, `app_private.is_working_day(date)`, with `next_working_day`, `closed_day_message` ("WASHO is currently unavailable on Monday, 13 Oct (Diwali). The next day you can book is Saturday, 17 Oct.") and `require_working_day`.
 - **Single wash and free wash:** `require_capacity()` (called by single-wash checkout and the free-wash claim since migration 19, and a no-op for crowding since 22) now refuses a closed day. `pick_campaign_slot()` skips closed days and, when the offer has none left, says so.
 - **Membership:** the weekdays chosen must each have a working day in the term (`require_open_weekdays` says which are closed and what can be chosen); `plan_monthly_washes` and `plan_membership_washes` only use working days; exact dates cannot be a closed day (`check_custom_dates_counts`, `check_custom_dates`). A plan that is ALREADY PAID is never refused: if its weekdays no longer have room at fulfilment, the spread falls back to any day, open days first.
 - **Moving a membership wash** (`app_private.reschedule_wash`, shared by the customer, the specialist and the admin): the new day must be a working day unless the one moving it is an admin.
@@ -291,4 +291,19 @@ Not applied to production by Claude: run it in the Supabase SQL Editor (it is th
 - Washes already booked on a day that is later closed are not touched; the Working Days page lists them so they can be moved.
 - The BFF adds `closed` and `closed_reason` to each day of `/api/capacity` (so every picker greys closed days out and says when the next open day is), serves `/api/working-days`, and `/api/admin/working-days` (+ `/weekdays`, `/dates`) under the Capacity role. A database without this migration reports no closed days, and the admin tab says the migration is needed.
 Not applied to production by Claude: run it in the Supabase SQL Editor (it is the last part of `bundles/safe-migrations.sql`).
+
+## Working Days wording (migration 40)
+
+`20261004000040_working_days_wording.sql`, re-runnable, wording only: `closed_day_message`, `require_open_weekdays`, `pick_campaign_slot` and `create_monthly_membership_request` (migration 39's, word for word) now say "WASHO is currently unavailable on ..." instead of "WASHO does not wash on ...", the same as the booking pages. No rule, table or row changes.
+
+## Pictures in a complaint (migration 41)
+
+`20261004000041_support_pictures.sql`, additive and re-runnable. In Admin -> Support an admin with the support role (or a super admin) can add up to 4 pictures to a reply; the customer sees them with that reply on their complaint page (Account -> Help).
+- `support_attachments` (ticket, message once the reply is sent, who added it, file path, type JPG/PNG/WebP, size up to 20 MB): closed to everyone but the functions below.
+- `admin_support_add_attachment(ticket, path, type, bytes)`: support manage role; the complaint must exist and not be closed; the path must be `<complaint id>/support-<name>` (inside the complaint's own folder of the private photo bucket, never a wash photo's); at most 40 pictures on a complaint and 8 added but not yet sent. The website records the picture FIRST and stores the file in the same transaction, so a picture without a file (or a file without a row) is not left behind.
+- `admin_support_reply_with_pictures(ticket, message, status, picture_ids)`: `admin_support_reply` unchanged, plus up to 4 of the same admin's pictures for this complaint; if any is not theirs, not this complaint's, or already sent, nothing is sent at all.
+- `my_support_ticket` and `admin_support_get` (replaced; nothing else about them changes) list each message's pictures. A picture that was added but not sent is in neither. The website turns each stored path into a short-lived link (15 minutes) and never sends the path to the browser; a customer only ever gets their own complaint's pictures.
+- BFF: `POST /api/admin/support/:id/attachments` (raw JPG/PNG/WebP, checked by the file's own bytes, up to 8 MB), `POST /api/admin/support/:id/reply` takes `picture_ids`, and `GET /api/admin/support/:id` and `GET /api/support/:id` carry each message's pictures as links. A database without migration 41 shows no pictures, and adding one says the migration is needed.
+Customers cannot add pictures yet (the table already records who added each one, so that can be added without changing it).
+Not applied to production by Claude: run 40 and 41 in the Supabase SQL Editor (they are the last parts of `bundles/safe-migrations.sql`).
 

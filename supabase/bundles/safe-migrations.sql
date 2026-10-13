@@ -9642,4 +9642,277 @@ END $$;
 REVOKE ALL ON FUNCTION public.admin_working_days(), public.admin_set_working_weekdays(integer[]), public.admin_set_working_dates(date, date, boolean, text), public.admin_clear_working_date(date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_working_days(), public.admin_set_working_weekdays(integer[]), public.admin_set_working_dates(date, date, boolean, text), public.admin_clear_working_date(date) TO authenticated;  -- require_admin() inside
 
+-- ═════════════ 20261004000040_working_days_wording.sql ═════════════
+-- 20261004000040_working_days_wording.sql
+-- SAFE / re-runnable. WORDING ONLY for Working Days (migration 39): what the server says when a day cannot be booked now reads "WASHO is currently unavailable on ..." instead of
+-- "WASHO does not wash on ...", the same as the booking pages. No table, no row and no rule changes; the four functions below are migration 39's, word for word, except for their messages.
+--
+--   closed_day_message(date)        "WASHO is currently unavailable on Monday, 13 Oct (Diwali). The next day you can book is Saturday, 17 Oct."
+--   require_open_weekdays(...)      "WASHO is currently unavailable on Mondays, Wednesdays. Choose from Saturdays, Sundays."
+--   pick_campaign_slot(...)         "WASHO has no available day left while this offer is open. ..."
+--   create_monthly_membership_request(...)   its "We cannot fit all N washes ..." message says "or WASHO is currently unavailable on them"
+
+CREATE OR REPLACE FUNCTION app_private.closed_day_message(p_date date) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_reason text;
+  v_next date;
+BEGIN
+  SELECT d.reason INTO v_reason FROM public.working_dates d WHERE d.day = p_date AND NOT d.is_open;
+  v_next := app_private.next_working_day(GREATEST(p_date, v_today) + 1);
+  RETURN 'WASHO is currently unavailable on ' || to_char(p_date, 'FMDay, FMDD Mon') || CASE WHEN v_reason IS NOT NULL THEN ' (' || v_reason || ')' ELSE '' END || '. '
+      || CASE WHEN v_next IS NULL THEN 'We are not taking bookings right now.' ELSE 'The next day you can book is ' || to_char(v_next, 'FMDay, FMDD Mon') || '.' END;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.require_open_weekdays(p_days smallint[], p_start date, p_end date) RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_bad smallint[]; v_open smallint[];
+BEGIN
+  IF p_days IS NULL OR cardinality(p_days) = 0 THEN RETURN; END IF;
+  SELECT array_agg(d::smallint ORDER BY d) INTO v_bad FROM unnest(p_days) d
+   WHERE NOT EXISTS (SELECT 1 FROM generate_series(p_start::timestamp, p_end::timestamp, interval '1 day') g
+                      WHERE extract(dow FROM g)::integer = d AND app_private.is_working_day(g::date));
+  IF v_bad IS NULL THEN RETURN; END IF;
+  SELECT array_agg(d::smallint ORDER BY d) INTO v_open FROM generate_series(0, 6) d
+   WHERE EXISTS (SELECT 1 FROM generate_series(p_start::timestamp, p_end::timestamp, interval '1 day') g
+                  WHERE extract(dow FROM g)::integer = d AND app_private.is_working_day(g::date));
+  RAISE EXCEPTION '%', 'WASHO is currently unavailable on ' || app_private.weekday_words(v_bad) || '. '
+    || CASE WHEN v_open IS NULL THEN 'We are not taking memberships right now.' ELSE 'Choose from ' || app_private.weekday_words(v_open) || '.' END;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.pick_campaign_slot(p_campaign public.campaigns, p_vehicle uuid, OUT o_date date, OUT o_slot public.time_slot)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_lead integer := app_private.setting('on_demand_min_lead_hours');
+  d date; s public.time_slot; best public.time_slot; best_n integer; n integer; v_taken integer;
+  fb_date date; fb_slot public.time_slot; v_skipped date;
+BEGIN
+  FOR i IN 0 .. GREATEST(p_campaign.use_by_date - v_today, -1) LOOP
+    d := v_today + i;
+    IF NOT app_private.is_working_day(d) THEN v_skipped := COALESCE(v_skipped, d); CONTINUE; END IF;
+    IF app_private.vehicle_has_live_booking(p_vehicle, d) THEN CONTINUE; END IF;
+    IF p_campaign.daily_cap IS NOT NULL THEN
+      SELECT count(*) INTO v_taken FROM public.campaign_claims cl JOIN public.bookings b ON b.id = cl.booking_id
+       WHERE cl.campaign_id = p_campaign.id AND cl.status <> 'released' AND b.scheduled_date = d;
+      IF v_taken >= p_campaign.daily_cap THEN CONTINUE; END IF;
+    END IF;
+    best := NULL; best_n := NULL;
+    FOREACH s IN ARRAY ARRAY['morning', 'afternoon', 'night']::public.time_slot[] LOOP
+      IF app_private.slot_start(d, s) < now() + make_interval(hours => v_lead) THEN CONTINUE; END IF;
+      n := app_private.washes_on(d, s);
+      IF best IS NULL OR n < best_n THEN best := s; best_n := n; END IF;
+    END LOOP;
+    IF best IS NULL THEN CONTINUE; END IF;
+    IF fb_date IS NULL THEN fb_date := d; fb_slot := best; END IF;
+    IF app_private.crowd_state(d, best) <> 'full' THEN o_date := d; o_slot := best; RETURN; END IF;
+  END LOOP;
+  IF fb_date IS NULL AND v_skipped IS NOT NULL THEN
+    RAISE EXCEPTION '%', 'WASHO has no available day left while this offer is open. ' || app_private.closed_day_message(v_skipped);
+  END IF;
+  o_date := fb_date; o_slot := fb_slot;
+END $$;
+REVOKE ALL ON FUNCTION app_private.pick_campaign_slot(public.campaigns, uuid) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.create_monthly_membership_request(
+  p_vehicle_id uuid,
+  p_body integer,
+  p_deep integer,
+  p_weekdays integer[],
+  p_duration_months integer,
+  p_time_slot public.time_slot,
+  p_start_date date,
+  p_address_id uuid DEFAULT NULL,
+  p_parking_location text DEFAULT NULL,
+  p_customer_notes text DEFAULT NULL,
+  p_target_completion_time text DEFAULT NULL,
+  p_custom_dates jsonb DEFAULT NULL,
+  p_coupon text DEFAULT NULL
+) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_profile uuid := public.current_profile_id();
+  v_vehicle public.vehicles%ROWTYPE;
+  v_addr uuid := p_address_id;
+  v_quote jsonb;
+  v_id uuid;
+  v_total integer;
+  v_end date;
+  v_custom jsonb;
+  v_days smallint[];
+  v_n integer := COALESCE(p_body, 0) + COALESCE(p_deep, 0);
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+BEGIN
+  IF v_profile IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_profile AND role = 'customer') THEN
+    RAISE EXCEPTION 'Customer profile not found' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO v_vehicle FROM public.vehicles WHERE id = p_vehicle_id AND customer_profile_id = v_profile AND is_active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
+  IF v_addr IS NULL THEN v_addr := v_vehicle.address_id; END IF;
+  IF v_addr IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.customer_addresses WHERE id = v_addr AND customer_profile_id = v_profile) THEN
+    RAISE EXCEPTION 'Address not found';
+  END IF;
+  IF p_start_date IS NULL OR p_start_date < v_today + app_private.setting('membership_min_lead_days') THEN
+    RAISE EXCEPTION 'Your membership can start from % at the earliest', v_today + app_private.setting('membership_min_lead_days');
+  END IF;
+
+  -- Validates the counts (4 to 28 a month), the length and the vehicle; raises a message a customer can read.
+  v_quote := app_private.compute_monthly_quote(v_vehicle.vehicle_type, p_body, p_deep, p_duration_months);
+  -- A coupon the customer typed in: an extra percentage off the plan price, as its own line. Raises a message a customer can read if it cannot be used.
+  v_quote := app_private.apply_coupon(v_quote, p_coupon, v_profile);
+  v_days := app_private.clean_weekdays(p_weekdays);
+  v_total := (v_quote->>'washes_total')::integer;
+  v_end := app_private.membership_term_end(p_start_date, p_duration_months);
+
+  IF p_custom_dates IS NULL THEN
+    PERFORM app_private.require_open_weekdays(v_days, p_start_date, v_end);
+    -- every month needs room for every wash: at least 4 days a month for each weekday chosen, so n washes need ceil(n / 4) weekdays
+    IF cardinality(v_days) < CEIL(v_n / 4.0)::integer THEN
+      RAISE EXCEPTION 'Pick at least % day% of the week so your % washes a month fit', CEIL(v_n / 4.0)::integer, CASE WHEN CEIL(v_n / 4.0) = 1 THEN '' ELSE 's' END, v_n;
+    END IF;
+    IF (SELECT count(*) FROM app_private.plan_monthly_washes(p_vehicle_id, p_start_date, p_duration_months, p_body, p_deep, v_days)) < v_total THEN
+      RAISE EXCEPTION 'We cannot fit all % washes on those days: some days already have a wash for this vehicle, or WASHO is currently unavailable on them. Choose more days, or pick exact dates.', v_total;
+    END IF;
+  ELSE
+    v_custom := app_private.check_custom_dates_counts(p_vehicle_id, p_start_date, v_end, p_body * p_duration_months, p_deep * p_duration_months, CEIL(v_n / 4.0)::integer, p_custom_dates);
+  END IF;
+
+  BEGIN
+    INSERT INTO public.membership_requests (
+      customer_profile_id, vehicle_id, address_id, parking_location, frequency_per_week, duration_months,
+      weekly_pattern, time_slot, target_completion_time, start_date, customer_notes, system_quote, custom_dates,
+      monthly_body, monthly_deep, preferred_weekdays
+    ) VALUES (
+      v_profile, p_vehicle_id, v_addr, COALESCE(NULLIF(trim(p_parking_location), ''), v_vehicle.parking_location),
+      (v_quote->>'frequency_per_week')::integer, p_duration_months, '[]'::jsonb, p_time_slot, p_target_completion_time,
+      p_start_date, NULLIF(trim(p_customer_notes), ''), v_quote, v_custom,
+      p_body, p_deep, v_days
+    ) RETURNING id INTO v_id;
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'You already have a membership request in progress for this vehicle';
+  END;
+
+  PERFORM app_private.audit('membership_request', v_id, 'membership_requested',
+    jsonb_build_object('washes_per_month', v_n, 'body', p_body, 'deep', p_deep, 'duration_months', p_duration_months));
+  RETURN v_id;
+END $$;
+
+-- ═════════════ 20261004000041_support_pictures.sql ═════════════
+-- 20261004000041_support_pictures.sql
+-- SAFE / additive and re-runnable. PICTURES IN A COMPLAINT. An admin with the support role can add pictures (up to 4) to a reply in Admin -> Support, and the customer sees them
+-- in that reply on their own complaint page. Nothing existing is touched: no complaint, message or customer row changes when this is applied.
+--
+--   support_attachments                       one row per picture: which complaint, which message (empty until the reply is sent), who added it, where the file is
+--   admin_support_add_attachment(...)         records a picture for a complaint BEFORE the file is stored (the website stores the file only if this succeeds, in the same
+--                                             transaction, so a picture without a row or a row without a file cannot be left behind). Support role, complaint not closed.
+--   admin_support_reply_with_pictures(...)    the reply (admin_support_reply, unchanged) and the pictures that go with it, all or nothing
+--   my_support_ticket(id)                     (replaced) each message also lists its pictures
+--   admin_support_get(id)                     (replaced) the same for the admin
+-- A picture is only ever reachable through the website, which asks these functions first (a customer gets only their own complaint's pictures, and only the ones that were
+-- sent with a reply) and then makes a short-lived link. The files live in the same private bucket as wash photos, in a folder named after the complaint.
+
+CREATE TABLE IF NOT EXISTS public.support_attachments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
+  message_id uuid REFERENCES public.support_messages(id) ON DELETE CASCADE,   -- NULL until the reply it goes with is sent
+  uploaded_by uuid NOT NULL REFERENCES public.profiles(id),
+  from_admin boolean NOT NULL,
+  storage_path text NOT NULL UNIQUE,
+  content_type text NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  bytes integer NOT NULL CHECK (bytes BETWEEN 1 AND 20971520),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS support_attachments_ticket_idx ON public.support_attachments (ticket_id, created_at);
+CREATE INDEX IF NOT EXISTS support_attachments_message_idx ON public.support_attachments (message_id);
+ALTER TABLE public.support_attachments ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.support_attachments FROM PUBLIC, anon, authenticated;
+
+-- Record a picture. The file's path must be in the complaint's own folder and start with "support-" (so it can never point at a wash photo).
+CREATE OR REPLACE FUNCTION public.admin_support_add_attachment(p_ticket uuid, p_path text, p_content_type text, p_bytes integer) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_access('support', 'manage');
+  v_t public.support_tickets%ROWTYPE;
+  v_id uuid;
+BEGIN
+  SELECT * INTO v_t FROM public.support_tickets WHERE id = p_ticket FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Complaint not found'; END IF;
+  IF v_t.status = 'closed' THEN RAISE EXCEPTION 'This complaint is closed'; END IF;
+  IF p_path IS NULL OR char_length(p_path) > 200 OR p_path !~ ('^' || p_ticket::text || '/support-[A-Za-z0-9._-]+$') THEN RAISE EXCEPTION 'That is not a valid picture'; END IF;
+  IF (SELECT count(*) FROM public.support_attachments WHERE ticket_id = p_ticket) >= 40 THEN RAISE EXCEPTION 'This complaint already has as many pictures as it can hold'; END IF;
+  IF (SELECT count(*) FROM public.support_attachments WHERE ticket_id = p_ticket AND uploaded_by = v_me AND message_id IS NULL) >= 8 THEN
+    RAISE EXCEPTION 'Send your reply before adding more pictures';
+  END IF;
+  INSERT INTO public.support_attachments (ticket_id, uploaded_by, from_admin, storage_path, content_type, bytes)
+  VALUES (p_ticket, v_me, true, p_path, p_content_type, p_bytes) RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+REVOKE ALL ON FUNCTION public.admin_support_add_attachment(uuid, text, text, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_support_add_attachment(uuid, text, text, integer) TO authenticated;
+
+-- The reply as admin_support_reply always was, with up to 4 of the pictures the same admin added to this complaint. If any picture is not theirs, not this complaint's, or
+-- already sent, nothing is sent at all.
+CREATE OR REPLACE FUNCTION public.admin_support_reply_with_pictures(p_id uuid, p_message text, p_status text, p_attachment_ids uuid[]) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_access('support', 'manage');
+  v_ids uuid[] := ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(p_attachment_ids, ARRAY[]::uuid[])) x);
+  v_msg uuid;
+  n integer;
+BEGIN
+  IF cardinality(v_ids) > 4 THEN RAISE EXCEPTION 'Add up to 4 pictures to one reply'; END IF;
+  PERFORM public.admin_support_reply(p_id, p_message, p_status);
+  IF cardinality(v_ids) = 0 THEN RETURN true; END IF;
+  SELECT m.id INTO v_msg FROM public.support_messages m WHERE m.ticket_id = p_id AND m.from_admin AND m.author_profile_id = v_me ORDER BY m.created_at DESC, m.id LIMIT 1;
+  UPDATE public.support_attachments SET message_id = v_msg
+   WHERE id = ANY (v_ids) AND ticket_id = p_id AND message_id IS NULL AND uploaded_by = v_me AND from_admin;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> cardinality(v_ids) THEN RAISE EXCEPTION 'One of the pictures could not be found. Add it again'; END IF;
+  PERFORM app_private.audit('support_ticket', p_id, 'support_pictures_sent', jsonb_build_object('pictures', n));
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.admin_support_reply_with_pictures(uuid, text, text, uuid[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_support_reply_with_pictures(uuid, text, text, uuid[]) TO authenticated;
+
+-- Migration 27's two readers, with each message's pictures added. Nothing else about them changes.
+CREATE OR REPLACE FUNCTION public.my_support_ticket(p_id uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_customer();
+  v_t public.support_tickets%ROWTYPE;
+BEGIN
+  SELECT * INTO v_t FROM public.support_tickets WHERE id = p_id AND customer_profile_id = v_me;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Complaint not found'; END IF;
+  RETURN jsonb_build_object(
+    'ticket', jsonb_build_object('id', v_t.id, 'reference_code', v_t.reference_code, 'category', v_t.category, 'subject', v_t.subject, 'status', v_t.status,
+                                 'created_at', v_t.created_at, 'booking_id', v_t.booking_id,
+                                 'booking_reference', (SELECT b.reference_code FROM public.bookings b WHERE b.id = v_t.booking_id)),
+    'messages', (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', m.id, 'from_admin', m.from_admin, 'body', m.body, 'created_at', m.created_at,
+                   'attachments', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'storage_path', a.storage_path, 'content_type', a.content_type) ORDER BY a.created_at, a.id)
+                                              FROM public.support_attachments a WHERE a.message_id = m.id), '[]'::jsonb)) ORDER BY m.created_at), '[]'::jsonb)
+                   FROM public.support_messages m WHERE m.ticket_id = v_t.id));
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_support_get(p_id uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_t public.support_tickets%ROWTYPE;
+BEGIN
+  PERFORM app_private.require_access('support', 'view');
+  SELECT * INTO v_t FROM public.support_tickets WHERE id = p_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Complaint not found'; END IF;
+  RETURN jsonb_build_object(
+    'ticket', jsonb_build_object('id', v_t.id, 'reference_code', v_t.reference_code, 'category', v_t.category, 'subject', v_t.subject, 'status', v_t.status,
+                                 'created_at', v_t.created_at, 'booking_id', v_t.booking_id,
+                                 'booking_reference', (SELECT b.reference_code FROM public.bookings b WHERE b.id = v_t.booking_id),
+                                 'customer_id', v_t.customer_profile_id,
+                                 'customer_name', (SELECT full_name FROM public.profiles WHERE id = v_t.customer_profile_id),
+                                 'customer_phone', (SELECT phone FROM public.profiles WHERE id = v_t.customer_profile_id)),
+    'messages', (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', m.id, 'from_admin', m.from_admin, 'body', m.body, 'created_at', m.created_at,
+                   'author', (SELECT full_name FROM public.profiles WHERE id = m.author_profile_id),
+                   'attachments', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'storage_path', a.storage_path, 'content_type', a.content_type) ORDER BY a.created_at, a.id)
+                                              FROM public.support_attachments a WHERE a.message_id = m.id), '[]'::jsonb)) ORDER BY m.created_at), '[]'::jsonb)
+                   FROM public.support_messages m WHERE m.ticket_id = v_t.id));
+END $$;
+
 COMMIT;

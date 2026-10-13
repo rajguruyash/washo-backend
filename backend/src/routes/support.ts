@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { HttpError, parse } from '../errors';
 import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { notifyAdminOfComplaint } from '../notify';
+import { withPictureLinks } from '../supportPictures';
 
 /** A customer's complaints: raise one (optionally about a wash), follow the answers, write back. Everything about who may see what is in the database (migration 27). */
 export const supportRouter = Router();
@@ -44,7 +45,8 @@ supportRouter.get(
     const id = parse(uuid, req.params.id);
     const out = await req.db(async (c) => (await c.query('SELECT public.my_support_ticket($1) AS t', [id])).rows[0].t);
     if (!out) throw new HttpError(404, 'not_found', 'Complaint not found');
-    res.json({ success: true, ...out });
+    // The pictures WASHO sent with a reply, as short-lived links (only this customer's own complaint gets this far).
+    res.json({ success: true, ticket: out.ticket, messages: await withPictureLinks(out.messages) });
   })
 );
 

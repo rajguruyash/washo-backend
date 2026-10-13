@@ -1,4 +1,5 @@
-import { Router } from 'express';
+import crypto from 'crypto';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { forgetAccess } from '../access';
 import { config } from '../config';
@@ -8,7 +9,8 @@ import { asyncHandler, requireRole, requireSession } from '../middleware/http';
 import { mailConfigured } from '../notify';
 import { strongPassword } from '../password';
 import { forgetProfile } from '../profile';
-import { gotrueAdmin } from '../supabase';
+import { gotrueAdmin, photoStorage } from '../supabase';
+import { picturesNotInstalled, sniffImage, withPictureLinks } from '../supportPictures';
 import { secondStepAvailable } from '../adminSession';
 
 /**
@@ -74,7 +76,34 @@ adminOpsRouter.get(
   '/admin/support/:id',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    res.json({ success: true, ...(await one<Record<string, unknown>>(req, 'SELECT public.admin_support_get($1) AS r', [id])) });
+    const t = await one<{ ticket: unknown; messages: { attachments?: { id: string; storage_path: string; content_type: string }[] }[] }>(req, 'SELECT public.admin_support_get($1) AS r', [id]);
+    res.json({ success: true, ticket: t.ticket, messages: await withPictureLinks(t.messages) });
+  })
+);
+
+// A picture for a reply. The database records it FIRST (support role, complaint open, path inside the complaint's own folder), then the file is stored; the row is kept only
+// if the file was. The picture reaches the customer only when the reply it is attached to is sent.
+adminOpsRouter.post(
+  '/admin/support/:id/attachments',
+  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: config.photos.maxBytes }),
+  asyncHandler(async (req, res) => {
+    const id = parse(uuid, req.params.id);
+    const bytes = req.body as Buffer;
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new HttpError(400, 'no_picture', 'Choose a picture to add.');
+    const kind = sniffImage(bytes);
+    if (!kind) throw new HttpError(415, 'bad_picture', 'Please add a JPG, PNG or WebP picture.');
+    const path = `${id}/support-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${kind.ext}`;
+    const pictureId = await req
+      .db(async (c) => {
+        const { rows } = await c.query('SELECT public.admin_support_add_attachment($1, $2, $3, $4) AS id', [id, path, kind.mime, bytes.length]);
+        await photoStorage.upload(path, bytes, kind.mime);
+        return rows[0].id as string;
+      })
+      .catch((err) => {
+        if (picturesNotInstalled(err)) throw new HttpError(409, 'pictures_not_installed', 'Pictures in complaints are not switched on yet. Ask whoever looks after the database to apply migration 41.');
+        throw err;
+      });
+    res.status(201).json({ success: true, id: pictureId, url: await photoStorage.signedUrl(path) });
   })
 );
 
@@ -82,8 +111,24 @@ adminOpsRouter.post(
   '/admin/support/:id/reply',
   asyncHandler(async (req, res) => {
     const id = parse(uuid, req.params.id);
-    const b = parse(z.object({ message: z.string().trim().min(1, 'Write your reply.').max(2000, 'Keep it under 2000 characters.'), status: ticketStatus.optional() }), req.body);
-    await req.db((c) => c.query('SELECT public.admin_support_reply($1, $2, $3)', [id, b.message, b.status ?? null]));
+    const b = parse(
+      z.object({
+        message: z.string().trim().min(1, 'Write your reply.').max(2000, 'Keep it under 2000 characters.'),
+        status: ticketStatus.optional(),
+        picture_ids: z.array(uuid).max(4, 'Add up to 4 pictures to one reply.').optional(),
+      }),
+      req.body
+    );
+    if (b.picture_ids?.length) {
+      await req
+        .db((c) => c.query('SELECT public.admin_support_reply_with_pictures($1, $2, $3, $4::uuid[])', [id, b.message, b.status ?? null, b.picture_ids]))
+        .catch((err) => {
+          if (picturesNotInstalled(err)) throw new HttpError(409, 'pictures_not_installed', 'Pictures in complaints are not switched on yet. Ask whoever looks after the database to apply migration 41.');
+          throw err;
+        });
+    } else {
+      await req.db((c) => c.query('SELECT public.admin_support_reply($1, $2, $3)', [id, b.message, b.status ?? null]));
+    }
     res.json({ success: true });
   })
 );
