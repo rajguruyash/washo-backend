@@ -8,8 +8,8 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select, TextArea } from '../../components/ui/Field';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
-import { prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
-import { useAdminAction, useAdminBooking, useAdminCustomer, useAdminWorkers } from '../../lib/queries';
+import { addDays, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
+import { useAdminAction, useAdminBooking, useAdminCustomer, useAdminWorkers, useCapacity } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { MOVABLE_STATUSES, payKind, payLabel, staffStatus } from '../../lib/status';
 import type { SlotId } from '../../lib/types';
@@ -20,6 +20,8 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
   const { data } = useAdminBooking(id ?? undefined);
   const workers = useAdminWorkers();
   const act = useAdminAction();
+  // Days WASHO does not wash (Admin -> Working Days) are marked when moving a wash, but an admin may still move it onto one.
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 44), Boolean(id));
   const toast = useToast();
   const [view, setView] = useState<'details' | 'move' | 'cancel' | 'edit'>('details');
   const [addrId, setAddrId] = useState('');
@@ -97,7 +99,7 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
         </div>
       ) : view === 'move' ? (
         <div className="space-y-5">
-          <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={45} />
+          <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={45} crowd={crowd} closedMode="warn" />
           <Input label="Reason" optional value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} />
           <div className="grid grid-cols-2 gap-3"><Button variant="glass" onClick={() => setView('details')}>Back</Button><Button disabled={!date || !slot} loading={act.isPending} onClick={() => void run(`bookings/${b.id}/reschedule`, { date, time_slot: slot, reason }, 'Rescheduled')}>Move wash</Button></div>
         </div>

@@ -24,6 +24,7 @@ import Activity from './Activity';
 import { AddWashSheet } from './AddWash';
 import { BookingSheet } from './BookingSheet';
 import Capacity from './Capacity';
+import WorkingDays from './WorkingDays';
 import { Dashboard } from './Dashboard';
 import Export from './Export';
 import Campaigns from './Campaigns';
@@ -40,7 +41,7 @@ import Team from './Team';
 import { Loading, errText } from './shared';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'paid' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+type Tab = 'overview' | 'requests' | 'bookings' | 'paid' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'workingdays' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
 const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
   { value: 'overview', label: 'Dashboard', area: 'overview' },
@@ -55,6 +56,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'discounts', label: 'Discounts', area: (a) => canDo(a, 'services') || canDo(a, 'campaigns') },
   { value: 'campaigns', label: 'Campaigns', area: 'campaigns' },
   { value: 'capacity', label: 'Capacity', area: 'capacity' },
+  { value: 'workingdays', label: 'Working Days', area: 'capacity' },
   { value: 'attention', label: 'Payments & refunds', area: 'payments' },
   { value: 'support', label: 'Support', area: 'support' },
   { value: 'export', label: 'Export', area: (a) => ['customers', 'washes', 'memberships', 'payments', 'refunds', 'support', 'activity'].some((k) => canDo(a, `export_${k}`, 'manage')) },
@@ -63,7 +65,7 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'settings', label: 'Settings', area: 'settings' },
 ];
 /** The area a tab's content is governed by (used to say "view only"). */
-const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', paid: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', paid: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', workingdays: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
@@ -409,6 +411,7 @@ export default function Admin() {
           {tab === 'discounts' && <Discounts rules={canDo(access, 'services')} editRules={canDo(access, 'services', 'manage')} coupons={canDo(access, 'campaigns')} editCoupons={canDo(access, 'campaigns', 'manage')} />}
           {tab === 'campaigns' && <Campaigns />}
           {tab === 'capacity' && <Capacity />}
+          {tab === 'workingdays' && <WorkingDays canManage={canDo(access, 'capacity', 'manage')} />}
           {tab === 'attention' && <Attention />}
           {tab === 'support' && <Support canReply={canDo(access, 'support', 'manage')} />}
           {tab === 'export' && <Export />}

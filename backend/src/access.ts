@@ -55,7 +55,7 @@ const AREA_OF: Record<string, string> = {
   history: 'history',
   services: 'services', pricing: 'services', discounts: 'services', 'pricing-settings': 'services',
   campaigns: 'campaigns', coupons: 'campaigns',
-  capacity: 'capacity',
+  capacity: 'capacity', 'working-days': 'capacity',
   support: 'support',
   activity: 'activity',
   settings: 'settings',

@@ -7,9 +7,9 @@ import { Input, Select } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
-import { formatPlate, prettyPhone, rupees, todayIST, vehicleLabel } from '../../lib/format';
+import { addDays, formatPlate, prettyPhone, rupees, todayIST, vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
-import { useAdminAction, useAdminCustomer, useAdminCustomers, useCatalog } from '../../lib/queries';
+import { useAdminAction, useAdminCustomer, useAdminCustomers, useCapacity, useCatalog } from '../../lib/queries';
 import type { SlotId } from '../../lib/types';
 import { errText } from './shared';
 
@@ -17,6 +17,8 @@ import { errText } from './shared';
 export function AddWashSheet({ open, customerId, onClose, onCreated }: { open: boolean; customerId?: string | null; onClose: () => void; onCreated: (bookingId: string) => void }) {
   const toast = useToast();
   const act = useAdminAction();
+  // Days WASHO does not wash (Admin -> Working Days) are marked, but an admin may still book one.
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 29));
   const catalog = useCatalog();
   const [picked, setPicked] = useState<string | null>(customerId ?? null);
   const [q, setQ] = useState('');
@@ -109,7 +111,7 @@ export function AddWashSheet({ open, customerId, onClose, onCreated }: { open: b
                       <option value="">Choose…</option>
                       {services.map((s) => <option key={s.id} value={s.id}>{s.name} · {rupees(s.price!)}</option>)}
                     </Select>
-                    <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={30} />
+                    <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={todayIST()} days={30} crowd={crowd} closedMode="warn" />
                     <Select label="Address" value={addressId} onChange={(e) => { setAddressId(e.target.value); const a = addresses.find((x) => x.id === e.target.value); if (a) setParking(a.parking_location); }}>
                       <option value="">Their usual address</option>
                       {addresses.map((a) => <option key={a.id} value={a.id}>{a.label} · {a.society_name}, {a.flat_number}</option>)}

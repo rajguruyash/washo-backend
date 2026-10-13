@@ -2,7 +2,7 @@ import { AlertTriangle, Moon, Sun, Sunrise } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { cn } from '../lib/cn';
 import { RUSH_NOTE, RUSH_SHORT } from '../lib/crowd';
-import { addDays, dayNumber, monthShort, todayIST, weekdayShort } from '../lib/format';
+import { addDays, dayNumber, friendlyDay, monthShort, todayIST, weekdayShort } from '../lib/format';
 import { SLOTS } from '../lib/slots';
 import type { CapacityDay, SlotId } from '../lib/types';
 
@@ -14,7 +14,7 @@ const startsAt = (date: string, slot: SlotId) => new Date(`${date}T${String(STAR
 
 /** A strip of dates (earliest `min`, up to `days` ahead, never past `max`) and the three daily windows. */
 export function DateSlotPicker({
-  date, slot, onDate, onSlot, min, max, days = 21, showSlot = true, label = 'date', disabledDates, leadHours, crowd,
+  date, slot, onDate, onSlot, min, max, days = 21, showSlot = true, label = 'date', disabledDates, leadHours, crowd, closedMode = 'block',
 }: {
   date: string | null;
   slot: SlotId | null;
@@ -32,6 +32,11 @@ export function DateSlotPicker({
   leadHours?: number;
   /** How crowded each day and window is (Admin → Capacity): busy ones show amber, rush ones red with a note about a slight delay. Neither is ever closed. */
   crowd?: Record<string, CapacityDay>;
+  /**
+   * Days WASHO does not wash (Admin -> Working Days; they arrive in `crowd`). 'block' (customers, specialists): they cannot be picked and the page says when the next day
+   * is. 'warn' (admins, who may always make an exception): they can be picked, with a note. 'ignore' (a membership's start day, which need not be a working day).
+   */
+  closedMode?: 'block' | 'warn' | 'ignore';
 }) {
   const dates = useMemo(() => {
     const out: string[] = [];
@@ -46,7 +51,13 @@ export function DateSlotPicker({
   const tooSoon = (d: string, s: SlotId) => leadHours != null && startsAt(d, s) < Date.now() + leadHours * 3_600_000;
   const dayGone = (d: string) => showSlot && leadHours != null && (['morning', 'afternoon', 'night'] as SlotId[]).every((s) => tooSoon(d, s));
   // crowd: a rush day (red) is only a warning; nothing is closed because of it
-  const noneLeft = dates.length > 0 && dates.every((d) => dayGone(d) || (disabledDates?.includes(d) ?? false));
+  const closedOn = (d: string) => (closedMode !== 'ignore' && crowd?.[d]?.closed ? { reason: crowd[d].closed_reason ?? null } : null);
+  const closedBlocked = (d: string) => closedMode === 'block' && closedOn(d) !== null;
+  const noneLeft = dates.length > 0 && dates.every((d) => dayGone(d) || closedBlocked(d) || (disabledDates?.includes(d) ?? false));
+  // the first day in this strip that can be picked, said to the customer when some days are closed
+  const nextBookable = dates.find((d) => !dayGone(d) && !closedBlocked(d) && !(disabledDates?.includes(d) ?? false));
+  const closedCount = dates.filter((d) => closedBlocked(d)).length;
+  const closedPicked = date ? closedOn(date) : null;
   const rushNote = Boolean(date) && (crowd?.[date!]?.state === 'full' || (slot != null && crowd?.[date!]?.slots[slot]?.state === 'full'));
 
   // A window chosen for one day may be too soon on another: drop it rather than let the booking be refused at the end.
@@ -63,10 +74,12 @@ export function DateSlotPicker({
           {dates.map((d) => {
             const active = d === date;
             const campaignFull = disabledDates?.includes(d) ?? false;
-            const full = campaignFull || dayGone(d);
-            const soon = !campaignFull && dayGone(d);
-            const rush = !full && crowd?.[d]?.state === 'full';
-            const busy = !full && crowd?.[d]?.state === 'busy';
+            const closed = closedOn(d);
+            const shut = closedBlocked(d);
+            const full = campaignFull || dayGone(d) || shut;
+            const soon = !campaignFull && !shut && dayGone(d);
+            const rush = !full && !closed && crowd?.[d]?.state === 'full';
+            const busy = !full && !closed && crowd?.[d]?.state === 'busy';
             return (
               <button
                 key={d}
@@ -75,25 +88,32 @@ export function DateSlotPicker({
                 aria-checked={active}
                 aria-disabled={full || undefined}
                 disabled={full}
-                title={soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : rush ? 'Rush: there might be a slight delay' : busy ? 'Getting busy' : undefined}
+                title={shut ? (closed?.reason ? `Closed: ${closed.reason}` : 'WASHO does not wash on this day') : closed ? `WASHO does not wash on this day${closed.reason ? ` (${closed.reason})` : ''}` : soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : rush ? 'Rush: there might be a slight delay' : busy ? 'Getting busy' : undefined}
                 onClick={() => onDate(d)}
                 className={cn(
                   'flex h-[76px] w-16 shrink-0 flex-col items-center justify-center rounded-2xl border transition-all',
-                  campaignFull && !soon ? 'cursor-not-allowed border-bad/40 bg-bad/10' : full ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                  campaignFull && !soon && !shut ? 'cursor-not-allowed border-bad/40 bg-bad/10' : full ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
                     : rush ? (active ? 'border-bad bg-bad/25 shadow-[0_0_24px_-8px_rgb(255_107_122/0.8)]' : 'border-bad/50 bg-bad/10 hover:border-bad/80')
                     : active ? 'border-washo-400/70 bg-washo-500/20 shadow-[0_0_24px_-8px_rgb(63_124_255/0.8)]'
+                    : closed ? (active ? 'border-warn bg-warn/20' : 'border-dashed border-warn/50 bg-warn/[0.07] hover:border-warn')
                     : busy ? 'border-warn/50 bg-warn/10 hover:border-warn/80' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
                 )}
               >
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-fog">{d === today ? 'Today' : weekdayShort(d)}</span>
                 <span className={cn('font-display text-xl font-extrabold leading-tight', full && 'line-through')}>{dayNumber(d)}</span>
-                <span className={cn('text-[10px] font-semibold uppercase', rush || campaignFull ? 'text-bad' : busy ? 'text-warn' : 'text-fog')}>{soon ? 'Soon' : full ? 'Full' : rush ? 'Rush' : busy ? 'Busy' : monthShort(d)}</span>
+                <span className={cn('text-[10px] font-semibold uppercase', rush || (campaignFull && !shut) ? 'text-bad' : busy || closed ? 'text-warn' : 'text-fog')}>{shut || closed ? 'Closed' : soon ? 'Soon' : full ? 'Full' : rush ? 'Rush' : busy ? 'Busy' : monthShort(d)}</span>
               </button>
             );
           })}
         </div>
+        {closedCount > 0 && !noneLeft && (
+          <p role="note" className="mt-2 text-sm text-warn">
+            WASHO does not wash on the days marked Closed.{nextBookable ? ` The next day you can book is ${friendlyDay(nextBookable)}.` : ''}
+          </p>
+        )}
+        {closedMode === 'warn' && closedPicked && <p role="note" className="mt-2 text-sm text-warn">WASHO is closed that day{closedPicked.reason ? ` (${closedPicked.reason})` : ''}. You can still book it as an admin.</p>}
         {max && dates.length === 0 && <p className="mt-2 text-sm text-warn">There are no dates left to choose from.</p>}
-        {noneLeft && <p className="mt-2 text-sm text-warn">No time is bookable in this range right now{leadHours ? `: a wash needs ${leadHours} hours' notice` : ''}.</p>}
+        {noneLeft && <p className="mt-2 text-sm text-warn">{closedCount > 0 ? 'WASHO does not wash on any of these days (they are marked Closed). Please look at a later week.' : `No time is bookable in this range right now${leadHours ? `: a wash needs ${leadHours} hours' notice` : ''}.`}</p>}
         {showSlot && leadHours != null && leadHours >= 3 && !noneLeft && <p className="mt-2 text-xs text-fog">Bookings need at least {leadHours} hours' notice, so the soonest times are greyed out.</p>}
       </div>
 

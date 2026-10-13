@@ -26,6 +26,7 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
   const problem = exactDatesProblem({ value, need, minDate, end });
   const stateOf = (date: string) => (slot ? crowd?.[date]?.slots[slot]?.state : crowd?.[date]?.state);
   const rushChosen = value.filter((v) => stateOf(v.date) === 'full').length;
+  const anyClosed = Object.values(crowd ?? {}).some((c) => c.closed && c.date >= minDate && c.date >= start && c.date <= end);
 
   const months = useMemo(() => {
     const out: { y: number; m: number }[] = [];
@@ -73,6 +74,8 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
       </div>
       <p role="status" className={cn('min-h-5 text-sm', problem ? 'text-fog' : 'font-semibold text-ok')}>{note || problem || `All ${value.length} washes are placed. You can still move any of them.`}</p>
 
+      {anyClosed && <p role="note" className="text-sm text-warn">Days with a line through them are days WASHO does not wash. They cannot be picked.</p>}
+
       {months.map(({ y, m }) => {
         const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
         const lead = (first + 6) % 7;
@@ -88,21 +91,24 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
                 const kind = kindOf.get(date);
                 const out = date < minDate || date < start || date > end;
                 const c = stateOf(date);
-                const rush = !out && c === 'full';
-                const busy = !out && c === 'busy';
-                const disabled = out;
+                const shut = !out && Boolean(crowd?.[date]?.closed);   // a day WASHO does not wash (Admin -> Working Days)
+                const rush = !out && !shut && c === 'full';
+                const busy = !out && !shut && c === 'busy';
+                const disabled = out || (shut && !kind);
                 return (
                   <button
                     key={date}
                     type="button"
                     disabled={disabled}
                     aria-pressed={Boolean(kind)}
-                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${out ? ', not available' : ''}`}
+                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${shut ? ', WASHO does not wash on this day' : ''}${out ? ', not available' : ''}`}
+                    title={shut ? (crowd?.[date]?.closed_reason ? `Closed: ${crowd[date].closed_reason}` : 'WASHO does not wash on this day') : undefined}
                     onClick={() => pick(date)}
                     className={cn(
                       'relative grid aspect-square place-items-center rounded-xl border text-sm font-bold transition-colors',
                       kind === 'body' ? 'border-washo-400 bg-washo-500 text-white' : kind === 'deep' ? 'border-offer bg-offer text-ink-950' :
                       out ? 'cursor-not-allowed border-transparent text-white/20' :
+                      shut ? 'cursor-not-allowed border-transparent text-white/25 line-through decoration-white/40' :
                       rush ? 'border-bad/50 bg-bad/10 text-bad hover:border-bad' :
                       busy ? 'border-warn/50 bg-warn/10 hover:border-warn' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25',
                       kind && rush && 'ring-2 ring-bad'

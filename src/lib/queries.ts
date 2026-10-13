@@ -3,7 +3,7 @@ import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
   ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
-  CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
+  AdminWorkingDays, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
 export const keys = {
@@ -43,6 +43,10 @@ export const useCapacity = (from: string, to: string, enabled = true) =>
     enabled,
     retry: false,
   });
+
+/** Which weekdays WASHO works and the days it is closed (Admin -> Working Days). The booking pages grey out closed days and say when the next open day is. */
+export const useWorkingDays = (enabled = true) =>
+  useQuery({ queryKey: ['working-days'], queryFn: async () => { const r = await get<WorkingDays & { success: boolean }>('/working-days'); return { weekdays: r.weekdays, closed: r.closed, next_open: r.next_open } as WorkingDays; }, staleTime: 30_000, enabled, retry: false });
 
 /** The washes in a month (4 to 28, any mix) and the weekdays the customer likes. */
 export interface MonthlyPlan { body: number; deep: number; weekdays?: number[] }
@@ -132,7 +136,7 @@ export function useRefreshAll() {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate', 'capacity', 'plan-preview'].map((k) =>
+      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate', 'capacity', 'working-days', 'plan-preview'].map((k) =>
         qc.invalidateQueries({ queryKey: [k] })
       )
     );
@@ -437,6 +441,7 @@ export const useAdminCampaignClaims = (id: string | undefined, status: string, q
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
   });
+export const useAdminWorkingDays = () => useQuery({ queryKey: keys.admin('working-days'), queryFn: () => get<AdminWorkingDays & { success: boolean }>('/admin/working-days') });
 export const useAdminCapacity = (from: string, to: string) =>
   useQuery({ queryKey: keys.admin('capacity', from, to), queryFn: () => get<{ rules: CapacityRule[]; days: CapacityDay[] }>(`/admin/capacity?from=${from}&to=${to}`) });
 export const useAdminServices = () => useQuery({ queryKey: keys.admin('services'), queryFn: async () => (await get<{ services: AdminService[] }>('/admin/services')).services });
@@ -448,8 +453,8 @@ export const useAdminAttention = () => useQuery({ queryKey: keys.admin('attentio
 export const useAdminAction = () => {
   const refresh = useRefreshAll();
   return useMutation({
-    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: Record<string, unknown>; method?: 'POST' | 'PUT' }) =>
-      method === 'PUT' ? put<Record<string, any>>(`/admin/${path}`, body ?? {}) : post<Record<string, any>>(`/admin/${path}`, body ?? {}),
+    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: Record<string, unknown>; method?: 'POST' | 'PUT' | 'DELETE' }) =>
+      method === 'PUT' ? put<Record<string, any>>(`/admin/${path}`, body ?? {}) : method === 'DELETE' ? del<Record<string, any>>(`/admin/${path}`) : post<Record<string, any>>(`/admin/${path}`, body ?? {}),
     onSuccess: () => refresh(),
   });
 };

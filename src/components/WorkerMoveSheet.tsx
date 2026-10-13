@@ -38,6 +38,7 @@ function MoveForm({ wash, onClose, onMove }: { wash: WorkerWash; onClose: () => 
   const base = wash.scheduled_date < today ? today : wash.scheduled_date;
   const quick = [addDays(base, 1), addDays(base, 2)];
   const state = date ? crowd?.[date]?.state : undefined;
+  const shut = (d: string) => Boolean(crowd?.[d]?.closed);   // a day WASHO does not wash (Admin -> Working Days)
   const text = [reason, note.trim()].filter((t) => t && t !== 'Other').join(': ') || 'Other';
 
   const submit = async () => {
@@ -63,15 +64,15 @@ function MoveForm({ wash, onClose, onMove }: { wash: WorkerWash; onClose: () => 
           <p className="mb-2 text-[13px] font-medium text-mist">Quick pick</p>
           <div className="grid grid-cols-2 gap-2" role="group" aria-label="Quick pick">
             {quick.map((d, i) => (
-              <button key={d} type="button" aria-pressed={date === d} onClick={() => setDate(d)} className={cn('rounded-2xl border p-3.5 text-left transition-colors', date === d ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
+              <button key={d} type="button" aria-pressed={date === d} disabled={shut(d)} onClick={() => setDate(d)} className={cn('rounded-2xl border p-3.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45', date === d ? 'border-washo-400/70 bg-washo-500/15' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20')}>
                 <span className="block text-sm font-bold">{i === 0 ? 'Next day' : 'Day after'}</span>
-                <span className="block text-xs text-fog">{friendlyDay(d)}</span>
+                <span className="block text-xs text-fog">{friendlyDay(d)}{shut(d) ? ' · closed' : ''}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={today} days={45} label="different day" />
+        <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={today} days={45} label="different day" crowd={crowd} />
         {state === 'busy' && <p className="-mt-2 rounded-2xl border border-warn/30 bg-warn/10 p-3 text-sm text-warn">That day is busy. You can still move it there.</p>}
         {state === 'full' && <p className="-mt-2 rounded-2xl border border-bad/30 bg-bad/10 p-3 text-sm text-bad">That day is a rush day (red). You can still move it there, but the crew will be stretched.</p>}
 

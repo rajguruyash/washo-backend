@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { Plate } from '../../components/brand/Plate';
@@ -18,7 +18,7 @@ import { TextArea } from '../../components/ui/Field';
 import { cn } from '../../lib/cn';
 import { addDays, duration, istDay, percent, prettyDate, rupees, todayIST, WEEKDAYS } from '../../lib/format';
 import { ApiError, post } from '../../lib/http';
-import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, usePublicSettings, useStartMembershipPayment, useVehicles } from '../../lib/queries';
+import { useAddresses, useCampaign, useCapacity, useCatalog, useEstimate, useMembership, usePlanPreview, usePublicSettings, useStartMembershipPayment, useVehicles, useWorkingDays } from '../../lib/queries';
 import { offerBpFor, shortDayIST } from '../../lib/campaign';
 import { usePay } from '../../lib/usePay';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
@@ -103,7 +103,11 @@ function Wizard({ renewing }: { renewing?: Membership }) {
     const n = Number(params.get('perWeek'));
     return Number.isInteger(n) && n >= 1 && n <= 7 ? startingMix(n, params.get('type') === 'bike') : { body: MIN_PER_MONTH, deep: 0 };
   });
-  const [days, setDays] = useState<number[]>(renewDays);
+  const [pickedDays, setDays] = useState<number[]>(renewDays);
+  // Weekdays WASHO does not work (Admin -> Working Days) cannot be chosen; if the customer already had them (a renewal), they are left out.
+  const working = useWorkingDays().data;
+  const shutDays = useMemo(() => new Set((working?.weekdays ?? []).filter((w) => !w.open).map((w) => w.weekday)), [working]);
+  const days = useMemo(() => pickedDays.filter((d) => !shutDays.has(d)), [pickedDays, shutDays]);
   const [info, setInfo] = useState<WashKind | null>(null);
   const [daysInfo, setDaysInfo] = useState(false);
   // The two steps that need something before they go on show it in red when Continue is pressed too early.
@@ -141,6 +145,8 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const tooFew = perMonth < MIN_PER_MONTH;
   const needDays = daysNeeded(perMonth);
   const daysOk = days.length >= needDays;
+  const openDayCount = 7 - shutDays.size;
+  const washNames = (ids: number[]) => ids.map((id) => `${WEEKDAYS[id].long}s`).join(', ').replace(/, ([^,]*)$/, ' and $1');
   // "N washes a month" earns the discount of the same many washes a week (4-7 = 1 a week, 8-11 = 2, 12 or more = 3 and up), as the database counts it
   const freqKey = Math.min(7, Math.max(1, Math.floor(perMonth / 4)));
   const minStart = addDays(todayIST(), 2);
@@ -330,15 +336,22 @@ function Wizard({ renewing }: { renewing?: Membership }) {
               {WEEK_ORDER.map((id) => {
                 const on = days.includes(id);
                 const d = WEEKDAYS[id];
+                const shut = shutDays.has(id);
                 return (
-                  <button key={id} type="button" aria-pressed={on} aria-label={d.long} onClick={() => toggleDay(id)}
-                    className={cn('flex h-[4.5rem] flex-col items-center justify-center rounded-2xl border text-sm font-bold transition-all', on ? 'border-washo-400 bg-washo-500 text-white shadow-[0_0_24px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25')}>
+                  <button key={id} type="button" aria-pressed={on} aria-label={shut ? `${d.long}, WASHO does not wash on this day` : d.long} disabled={shut} onClick={() => toggleDay(id)}
+                    className={cn('flex h-[4.5rem] flex-col items-center justify-center rounded-2xl border text-sm font-bold transition-all', shut ? 'cursor-not-allowed border-dashed border-white/[0.08] bg-white/[0.02] text-white/30' : on ? 'border-washo-400 bg-washo-500 text-white shadow-[0_0_24px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25')}>
                     {d.short}
-                    <span className={cn('mt-0.5 text-[9px] font-semibold uppercase', on ? 'opacity-80' : 'text-fog')}>{on ? 'chosen' : 'tap'}</span>
+                    <span className={cn('mt-0.5 text-[9px] font-semibold uppercase', on ? 'opacity-80' : 'text-fog')}>{shut ? 'closed' : on ? 'chosen' : 'tap'}</span>
                   </button>
                 );
               })}
             </div>
+            {shutDays.size > 0 && (
+              <p role="note" className="mt-3 text-sm text-warn">
+                {openDayCount > 0 ? `WASHO washes on ${washNames(WEEK_ORDER.filter((id) => !shutDays.has(id)))} only. The other days are closed.` : 'WASHO is not taking memberships right now.'}
+                {openDayCount > 0 && openDayCount < needDays ? ` That is ${openDayCount} day${openDayCount > 1 ? 's' : ''} a week, so go back and choose fewer washes a month (${openDayCount * 4} at the most).` : ''}
+              </p>
+            )}
             <p className={cn('mt-3 text-sm', daysOk ? 'text-ok' : 'text-fog')}>{daysOk ? dayNames(days) : `Pick at least ${needDays} day${needDays > 1 ? 's' : ''}.`}</p>
             {!daysOk && daysTried > 0 && <p key={daysTried} id="days-error" role="alert" className="mt-2 animate-shake text-sm font-semibold text-bad">Pick at least {needDays} day{needDays > 1 ? 's' : ''} of the week.</p>}
             {planReady && monthly.data && <p className="mt-4 text-sm text-mist">Price for this plan: <span className="font-bold text-white">{rupees(monthly.data.final_cents)}</span> a month.</p>}
@@ -371,7 +384,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           <motion.section key="s4" {...slide}>
             <h1 className="text-3xl font-extrabold">When should we start?</h1>
             <p className="mt-1.5 mb-6 text-fog">Your washes run on your chosen days at this time. The first wash is the first of those days on or after your start date.</p>
-            <DateSlotPicker date={start} slot={slot} onDate={setStart} onSlot={setSlot} min={minStart} days={start ? Math.max(21, Math.round((Date.parse(start) - Date.parse(minStart)) / 86_400_000) + 8) : 21} label="start date" crowd={crowd} />
+            <DateSlotPicker date={start} slot={slot} onDate={setStart} onSlot={setSlot} min={minStart} days={start ? Math.max(21, Math.round((Date.parse(start) - Date.parse(minStart)) / 86_400_000) + 8) : 21} label="start date" crowd={crowd} closedMode="ignore" />
 
             {start && slot && (
               <div className="mt-8 space-y-4">

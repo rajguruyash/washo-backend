@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { addDays, prettyDate, todayIST } from '../lib/format';
 import { ApiError } from '../lib/http';
-import { useRescheduleWash } from '../lib/queries';
+import { useCapacity, useRescheduleWash } from '../lib/queries';
 import { slotLabel } from '../lib/slots';
 import type { SlotId } from '../lib/types';
 import { DateSlotPicker } from './DateSlotPicker';
@@ -16,6 +16,9 @@ export function RescheduleSheet({ wash, endDate, onClose }: { wash: { id: string
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
   const [error, setError] = useState('');
+  // Closed days (Admin -> Working Days) arrive with the crowd; they cannot be picked and the picker says when the next open day is.
+  const earliest = addDays(todayIST(), 2);
+  const { data: crowd } = useCapacity(earliest, endDate && endDate > earliest && endDate <= addDays(earliest, 400) ? endDate : addDays(earliest, 44), Boolean(wash));
 
   useEffect(() => {
     setDate(null);
@@ -44,7 +47,7 @@ export function RescheduleSheet({ wash, endDate, onClose }: { wash: { id: string
       size="lg"
       footer={<Button full size="lg" disabled={!date || !slot} loading={move.isPending} onClick={() => void submit()}>Move this wash</Button>}
     >
-      <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={addDays(todayIST(), 2)} max={endDate} days={45} />
+      <DateSlotPicker date={date} slot={slot} onDate={setDate} onSlot={setSlot} min={earliest} max={endDate} days={45} crowd={crowd} />
       {error && <p role="alert" className="mt-4 text-sm text-bad">{error}</p>}
     </Sheet>
   );

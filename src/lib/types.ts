@@ -653,6 +653,22 @@ export interface CapacityDay {
   limit: number;
   state: CrowdState;
   slots: Record<SlotId, { n: number; limit: number; state: CrowdState }>;
+  /** A day WASHO does not wash (Admin -> Working Days), and why when a reason was given. */
+  closed?: boolean;
+  closed_reason?: string | null;
+}
+/** Which weekdays WASHO works (0 = Sunday ... 6 = Saturday), the closed days ahead and the next open day. Nothing closed when the database has no Working Days yet. */
+export interface WorkingDays {
+  weekdays: { weekday: number; open: boolean }[];
+  closed: { date: string; reason: string | null }[];
+  next_open: string | null;
+}
+export interface AdminWorkingDays {
+  installed: boolean;
+  weekdays: { weekday: number; open: boolean }[];
+  dates: { day: string; open: boolean; reason: string | null; washes: number }[];
+  booked_on_closed: { date: string; washes: number }[];
+  next_open: string | null;
 }
 export interface CapacityRule { day_kind: 'weekday' | 'weekend'; day_busy: number; day_full: number; slot_busy: number; slot_full: number }
 /** Where a membership plan would land, day by day (nothing is saved), and whether it fits at all. */
