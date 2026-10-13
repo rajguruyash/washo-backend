@@ -338,7 +338,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                 const d = WEEKDAYS[id];
                 const shut = shutDays.has(id);
                 return (
-                  <button key={id} type="button" aria-pressed={on} aria-label={shut ? `${d.long}, WASHO does not wash on this day` : d.long} disabled={shut} onClick={() => toggleDay(id)}
+                  <button key={id} type="button" aria-pressed={on} aria-label={shut ? `${d.long}, WASHO is currently unavailable on this day` : d.long} disabled={shut} onClick={() => toggleDay(id)}
                     className={cn('flex h-[4.5rem] flex-col items-center justify-center rounded-2xl border text-sm font-bold transition-all', shut ? 'cursor-not-allowed border-dashed border-white/[0.08] bg-white/[0.02] text-white/30' : on ? 'border-washo-400 bg-washo-500 text-white shadow-[0_0_24px_-8px_rgb(63_124_255/0.7)]' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/25')}>
                     {d.short}
                     <span className={cn('mt-0.5 text-[9px] font-semibold uppercase', on ? 'opacity-80' : 'text-fog')}>{shut ? 'closed' : on ? 'chosen' : 'tap'}</span>
@@ -348,7 +348,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
             </div>
             {shutDays.size > 0 && (
               <p role="note" className="mt-3 text-sm text-warn">
-                {openDayCount > 0 ? `WASHO washes on ${washNames(WEEK_ORDER.filter((id) => !shutDays.has(id)))} only. The other days are closed.` : 'WASHO is not taking memberships right now.'}
+                {openDayCount > 0 ? `WASHO is currently available on ${washNames(WEEK_ORDER.filter((id) => !shutDays.has(id)))} only. It is unavailable on the other days.` : 'WASHO is not taking memberships right now.'}
                 {openDayCount > 0 && openDayCount < needDays ? ` That is ${openDayCount} day${openDayCount > 1 ? 's' : ''} a week, so go back and choose fewer washes a month (${openDayCount * 4} at the most).` : ''}
               </p>
             )}

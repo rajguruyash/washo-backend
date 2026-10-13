@@ -33,7 +33,7 @@ export function DateSlotPicker({
   /** How crowded each day and window is (Admin → Capacity): busy ones show amber, rush ones red with a note about a slight delay. Neither is ever closed. */
   crowd?: Record<string, CapacityDay>;
   /**
-   * Days WASHO does not wash (Admin -> Working Days; they arrive in `crowd`). 'block' (customers, specialists): they cannot be picked and the page says when the next day
+   * Days WASHO is unavailable (Admin -> Working Days; they arrive in `crowd`). 'block' (customers, specialists): they cannot be picked and the page says when the next day
    * is. 'warn' (admins, who may always make an exception): they can be picked, with a note. 'ignore' (a membership's start day, which need not be a working day).
    */
   closedMode?: 'block' | 'warn' | 'ignore';
@@ -88,7 +88,7 @@ export function DateSlotPicker({
                 aria-checked={active}
                 aria-disabled={full || undefined}
                 disabled={full}
-                title={shut ? (closed?.reason ? `Closed: ${closed.reason}` : 'WASHO does not wash on this day') : closed ? `WASHO does not wash on this day${closed.reason ? ` (${closed.reason})` : ''}` : soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : rush ? 'Rush: there might be a slight delay' : busy ? 'Getting busy' : undefined}
+                title={shut ? (closed?.reason ? `Closed: ${closed.reason}` : 'WASHO is currently unavailable on this day') : closed ? `WASHO is currently unavailable on this day${closed.reason ? ` (${closed.reason})` : ''}` : soon ? `Needs ${leadHours} hours' notice` : full ? 'Fully booked' : rush ? 'Rush: there might be a slight delay' : busy ? 'Getting busy' : undefined}
                 onClick={() => onDate(d)}
                 className={cn(
                   'flex h-[76px] w-16 shrink-0 flex-col items-center justify-center rounded-2xl border transition-all',
@@ -108,12 +108,12 @@ export function DateSlotPicker({
         </div>
         {closedCount > 0 && !noneLeft && (
           <p role="note" className="mt-2 text-sm text-warn">
-            WASHO does not wash on the days marked Closed.{nextBookable ? ` The next day you can book is ${friendlyDay(nextBookable)}.` : ''}
+            WASHO is currently unavailable on these days.{nextBookable ? ` The next day you can book is ${friendlyDay(nextBookable)}.` : ''}
           </p>
         )}
-        {closedMode === 'warn' && closedPicked && <p role="note" className="mt-2 text-sm text-warn">WASHO is closed that day{closedPicked.reason ? ` (${closedPicked.reason})` : ''}. You can still book it as an admin.</p>}
+        {closedMode === 'warn' && closedPicked && <p role="note" className="mt-2 text-sm text-warn">WASHO is currently unavailable that day{closedPicked.reason ? ` (${closedPicked.reason})` : ''}. You can still book it as an admin.</p>}
         {max && dates.length === 0 && <p className="mt-2 text-sm text-warn">There are no dates left to choose from.</p>}
-        {noneLeft && <p className="mt-2 text-sm text-warn">{closedCount > 0 ? 'WASHO does not wash on any of these days (they are marked Closed). Please look at a later week.' : `No time is bookable in this range right now${leadHours ? `: a wash needs ${leadHours} hours' notice` : ''}.`}</p>}
+        {noneLeft && <p className="mt-2 text-sm text-warn">{closedCount > 0 ? 'WASHO is currently unavailable on all of these days. Please look at a later week.' : `No time is bookable in this range right now${leadHours ? `: a wash needs ${leadHours} hours' notice` : ''}.`}</p>}
         {showSlot && leadHours != null && leadHours >= 3 && !noneLeft && <p className="mt-2 text-xs text-fog">Bookings need at least {leadHours} hours' notice, so the soonest times are greyed out.</p>}
       </div>
 

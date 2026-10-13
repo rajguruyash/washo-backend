@@ -74,7 +74,7 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
       </div>
       <p role="status" className={cn('min-h-5 text-sm', problem ? 'text-fog' : 'font-semibold text-ok')}>{note || problem || `All ${value.length} washes are placed. You can still move any of them.`}</p>
 
-      {anyClosed && <p role="note" className="text-sm text-warn">Days with a line through them are days WASHO does not wash. They cannot be picked.</p>}
+      {anyClosed && <p role="note" className="text-sm text-warn">WASHO is currently unavailable on the days with a line through them. They cannot be picked.</p>}
 
       {months.map(({ y, m }) => {
         const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
@@ -101,8 +101,8 @@ export function ExactDatesCalendar({ start, end, minDate, need, value, onChange,
                     type="button"
                     disabled={disabled}
                     aria-pressed={Boolean(kind)}
-                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${shut ? ', WASHO does not wash on this day' : ''}${out ? ', not available' : ''}`}
-                    title={shut ? (crowd?.[date]?.closed_reason ? `Closed: ${crowd[date].closed_reason}` : 'WASHO does not wash on this day') : undefined}
+                    aria-label={`${longDay(date)}${kind ? `, ${kind === 'body' ? 'Body wash' : 'Deep clean'}` : ''}${rush ? ', rush day, there might be a slight delay' : busy && !kind ? ', busy' : ''}${shut ? ', WASHO is currently unavailable on this day' : ''}${out ? ', not available' : ''}`}
+                    title={shut ? (crowd?.[date]?.closed_reason ? `Closed: ${crowd[date].closed_reason}` : 'WASHO is currently unavailable on this day') : undefined}
                     onClick={() => pick(date)}
                     className={cn(
                       'relative grid aspect-square place-items-center rounded-xl border text-sm font-bold transition-colors',
