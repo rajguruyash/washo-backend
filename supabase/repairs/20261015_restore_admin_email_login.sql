@@ -7,8 +7,8 @@
 --
 -- What this does, all or nothing (a single statement: if anything below is not as expected it stops and changes NOTHING):
 --   1. finds the email login and the admin profile (by the admin's mobile number or email),
---   2. if the email login has a stray customer profile, deletes it, but ONLY if it has no washes, plans, payments, refunds, requests, claims, complaints or reviews (a vehicle or
---      an address added while it was stuck in the customer app goes with it),
+--   2. if the email login has a stray customer profile, deletes it, but ONLY if it has no washes, plans, payments, refunds, requests, claims or reviews. A vehicle or an address added
+--      while it was stuck in the customer app goes with it; a complaint it wrote is MOVED to the admin profile (nothing is lost),
 --   3. points the admin profile back at the email login.
 -- Nothing else changes: the admin's role, access level, history and settings stay as they are. The phone login is left in place with no profile.
 --
@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION pg_temp.rows_pointing_at(p uuid) RETURNS bigint LANGU
        + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p)
 $f$;
 
--- the records that MATTER: washes, plans, payments, refunds, requests, free-wash claims, complaints, reviews, coupon uses. (A vehicle or an address is just set-up data.)
+-- the records that MATTER: washes, plans, payments, refunds, requests, free-wash claims, reviews, coupon uses. (A vehicle or an address is just set-up data; a complaint is moved to the admin profile, not lost.)
 CREATE OR REPLACE FUNCTION pg_temp.important_rows(p uuid) RETURNS bigint LANGUAGE sql AS $f$
   SELECT (SELECT count(*) FROM public.bookings               WHERE customer_profile_id = p)
        + (SELECT count(*) FROM public.memberships            WHERE customer_profile_id = p)
@@ -41,7 +41,6 @@ CREATE OR REPLACE FUNCTION pg_temp.important_rows(p uuid) RETURNS bigint LANGUAG
        + (SELECT count(*) FROM public.payments               WHERE customer_profile_id = p)
        + (SELECT count(*) FROM public.refunds                WHERE customer_profile_id = p)
        + (SELECT count(*) FROM public.campaign_claims        WHERE customer_profile_id = p)
-       + (SELECT count(*) FROM public.support_tickets        WHERE customer_profile_id = p)
        + (SELECT count(*) FROM public.wash_reviews           WHERE customer_profile_id = p)
        + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p)
 $f$;
@@ -100,6 +99,14 @@ BEGIN
       END IF;
       v_rows := pg_temp.important_rows(v_stray);
       IF v_rows > 0 THEN RAISE EXCEPTION 'The stray customer profile has records that matter (%). Nothing was changed.', pg_temp.what_points_at(v_stray); END IF;
+      -- A complaint written while the person was stuck in the customer app is kept: it moves to the admin profile (the same person). Nothing is deleted.
+      IF EXISTS (SELECT 1 FROM public.support_tickets WHERE customer_profile_id = v_stray OR resolved_by = v_stray) THEN
+        UPDATE public.support_messages    SET author_profile_id = v_admin WHERE author_profile_id = v_stray;
+        UPDATE public.support_attachments SET uploaded_by       = v_admin WHERE uploaded_by       = v_stray;
+        UPDATE public.support_tickets     SET resolved_by       = v_admin WHERE resolved_by       = v_stray;
+        UPDATE public.support_tickets     SET customer_profile_id = v_admin WHERE customer_profile_id = v_stray;
+        RAISE NOTICE 'The complaint(s) on the stray profile were moved to the admin profile.';
+      END IF;
       -- (only set-up data such as a vehicle or an address can be left on it: it goes with the profile)
       PERFORM set_config('washo.allow_profile_merge', 'on', true);   -- the same switch the sign-in merge uses to let a profile go
       DELETE FROM public.profiles WHERE id = v_stray AND role = 'customer';
