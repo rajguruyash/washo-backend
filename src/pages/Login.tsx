@@ -442,6 +442,12 @@ export default function Login() {
               </AnimatePresence>
               {/* outside the AnimatePresence above, whose initial={false} would skip the pop-up's own opening animation */}
               {step === 'done' && <LoginCelebration name={welcomeName} ms={CELEBRATE_MS} />}
+              {step !== 'done' && (
+                <p className="mt-6 text-center text-xs text-fog">
+                  By continuing you agree to our <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-semibold text-washo-300 hover:text-white">Terms of Service</a> and{' '}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-semibold text-washo-300 hover:text-white">Privacy Policy</a>.
+                </p>
+              )}
             </motion.div>
           </div>
         </div>

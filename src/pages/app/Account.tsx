@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AddressSheet, addressLine } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
+import { DeleteAccountCard } from '../../components/DeleteAccountCard';
 import { PhoneEntry } from '../../components/PhoneEntry';
 import { PageHeader } from '../../components/EmptyState';
 import { Badge } from '../../components/ui/Badge';
@@ -95,6 +96,7 @@ export default function Account() {
             </div>
             <Link to="/app/help" className="text-sm font-semibold text-washo-300 hover:text-white">Open</Link>
           </div>
+          <DeleteAccountCard />
           <Button variant="glass" full icon={<LogOut className="h-4 w-4" />} onClick={() => void logout()}>Sign out</Button>
         </div>
       </div>

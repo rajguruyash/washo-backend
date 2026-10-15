@@ -7,6 +7,7 @@ import { CampaignBanner } from '../components/CampaignBanner';
 import { MaintenanceNotice } from '../components/MaintenanceNotice';
 import { ButtonLink } from '../components/ui/Button';
 import { useAuth } from '../state/auth';
+import { POLICY_LINKS } from '../pages/legal/facts';
 
 const links = [
   { to: '/#how', label: 'How it works' },
@@ -93,7 +94,12 @@ export function PublicLayout() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-white/[0.06] py-5 text-center text-xs text-fog">© {new Date().getFullYear()} WASHO. All rights reserved.</div>
+        <div className="border-t border-white/[0.06] px-4 py-5 text-center text-xs text-fog">
+          <ul className="mb-3 flex flex-wrap justify-center gap-x-5 gap-y-1.5" aria-label="Policies">
+            {POLICY_LINKS.map((l) => <li key={l.to}><Link to={l.to} className="hover:text-white">{l.label}</Link></li>)}
+          </ul>
+          © {new Date().getFullYear()} WASHO. All rights reserved.
+        </div>
       </footer>
       <ScrollRestoration />
     </>
