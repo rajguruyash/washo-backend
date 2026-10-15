@@ -12,6 +12,7 @@ import { useToast } from '../../components/ui/Toast';
 import { prettyPhone } from '../../lib/format';
 import { compressImage } from '../../lib/image';
 import { uploadSupportPicture, useAdminAction, useAdminSupport, useAdminSupportTicket } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { ADMIN_STATUS_LABEL as STATUS_LABEL, CATEGORY_LABEL, STATUS_TONE } from '../../lib/support';
 import type { TicketStatus } from '../../lib/types';
 import { Loading, errText } from './shared';
@@ -111,7 +112,7 @@ function Thread({ id, canReply, onClose }: { id: string | null; canReply: boolea
 
 /** Complaints from customers, in one place. Answer them here; the customer sees the reply in their app. */
 export default function Support({ canReply }: { canReply: boolean }) {
-  const [status, setStatus] = useState<TicketStatus | 'all'>('open');
+  const [status, setStatus] = useSticky<TicketStatus | 'all'>('admin.support.status', 'open');
   const { data, isLoading, isError, refetch } = useAdminSupport(status);
   // A complaint found with the master search arrives as ?ticket=<id> and opens at once.
   const [params, setParams] = useSearchParams();

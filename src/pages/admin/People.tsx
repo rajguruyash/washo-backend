@@ -11,6 +11,7 @@ import { ErrorState } from '../../components/EmptyState';
 import { formatPlate, prettyDate, prettyPhone, rupees, vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminCustomer, useAdminCustomers, useAdminWorkers } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminAddress, AdminVehicle, Specialist, VehicleType } from '../../lib/types';
@@ -340,9 +341,9 @@ export function CustomerSheet({ id, onClose, onBook }: { id: string | null; onCl
 
 // ───────────────────────── the tab ─────────────────────────
 export default function People({ onBook }: { onBook: (customerId: string) => void }) {
-  const [scope, setScope] = useState<Scope>('active');
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
+  const [scope, setScope] = useSticky<Scope>('admin.people.scope', 'active');
+  const [q, setQ] = useSticky('admin.people.q', '');
+  const [debounced, setDebounced] = useState(q);
   useEffect(() => { const t = setTimeout(() => setDebounced(q), 300); return () => clearTimeout(t); }, [q]);
   const workers = useAdminWorkers(scope);
   const customers = useAdminCustomers(debounced, scope);

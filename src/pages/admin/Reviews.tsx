@@ -1,15 +1,15 @@
 import { Star } from 'lucide-react';
-import { useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
 import { Segmented } from '../../components/ui/Segmented';
 import { Stars } from '../../components/WashRating';
 import { prettyDate, relativeTime } from '../../lib/format';
 import { useAdminReviews } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { Loading } from './shared';
 
 /** What customers said about their washes: the average, how many of each star, and the latest ratings (all, or only the low ones, up to 3 stars). */
 export default function Reviews() {
-  const [low, setLow] = useState<'all' | 'low'>('all');
+  const [low, setLow] = useSticky<'all' | 'low'>('admin.reviews.low', 'all');
   const { data, isLoading, isError, refetch } = useAdminReviews(low === 'low' ? 3 : null);
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;

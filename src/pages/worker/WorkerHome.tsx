@@ -1,5 +1,5 @@
 import { ChevronRight, MapPin, RefreshCw } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState } from '../../components/EmptyState';
 import { Plate } from '../../components/brand/Plate';
@@ -8,18 +8,19 @@ import { Button } from '../../components/ui/Button';
 import { Segmented } from '../../components/ui/Segmented';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
-import { ALL_BUILDINGS, buildingOptions, inBuilding } from '../../lib/buildings';
+import { ALL_BUILDINGS, ALL_SOCIETIES, buildingOptions, inBuilding, inSociety, societyOptions } from '../../lib/buildings';
 import { friendlyDay } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useWorkerPool, useWorkerQueue, useWorkerStep } from '../../lib/queries';
 import { slotLabel, slotWindow } from '../../lib/slots';
+import { useSticky } from '../../lib/sticky';
 import { staffStatus } from '../../lib/status';
 import type { WorkerBucket, WorkerWash } from '../../lib/types';
 
 type Tab = WorkerBucket | 'available';
 
 // A wash that is no longer yours has its details hidden, building included, so it can only be found under "All buildings".
-const asRow = (r: WorkerWash) => ({ building_block: r.building_block, hidden: r.bucket === 'changed' });
+const asRow = (r: WorkerWash) => ({ building_block: r.building_block, society_name: r.society_name, hidden: r.bucket === 'changed' });
 
 export function ChangeNote({ w }: { w: WorkerWash }) {
   const c = w.change;
@@ -68,23 +69,32 @@ export default function WorkerHome() {
   const pool = useWorkerPool();
   const step = useWorkerStep();
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('today');
-  const [building, setBuilding] = useState(ALL_BUILDINGS);
+  // The tab, society and building stay as the specialist chose them: open a wash, press the back arrow, and the list is exactly as it was left.
+  const [tab, setTab] = useSticky<Tab>('worker.tab', 'today');
+  const [society, setSociety] = useSticky('worker.society', ALL_SOCIETIES);
+  const [building, setBuilding] = useSticky('worker.building', ALL_BUILDINGS);
   const all = useMemo(() => queue.data ?? [], [queue.data]);
-  const buildings = useMemo(() => buildingOptions(all.map(asRow)), [all]);
-  // The chosen building may have no washes left after a refresh: fall back to all of them rather than show an empty page.
-  const choice = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
-  const rows = all.filter((r) => inBuilding(asRow(r), choice));
+  const poolRows = useMemo(() => pool.data ?? [], [pool.data]);
+  // Society first (only when the specialist works in more than one), then the buildings of that society. Available (unclaimed washes) can be narrowed by society only.
+  const societies = useMemo(() => societyOptions<{ society_name: string | null; hidden?: boolean }>(tab === 'available' ? poolRows : all.map(asRow)), [tab, poolRows, all]);
+  // A remembered choice that does not apply (no such society in this list any more) means "all", but is kept for when it applies again.
+  const soc = society === ALL_SOCIETIES || societies.some((x) => x.value === society) ? society : ALL_SOCIETIES;
+  const inSoc = useMemo(() => all.filter((r) => inSociety(asRow(r), soc)), [all, soc]);
+  const buildings = useMemo(() => buildingOptions(inSoc.map(asRow)), [inSoc]);
+  const bld = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
+  const rows = inSoc.filter((r) => inBuilding(asRow(r), bld));
   const by = (b: WorkerBucket) => rows.filter((r) => r.bucket === b);
   // Washes moved but still in the queue also appear under "Cancelled / moved" so nothing changes silently.
-  const movedLive = rows.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled');
-  const changed = [...by('changed'), ...movedLive];
-  const list: WorkerWash[] = tab === 'changed' ? changed : tab === 'available' ? [] : by(tab);
-  const inTab = (value: string) => {
-    const mine = all.filter((r) => inBuilding(asRow(r), value));
-    return (tab === 'changed' ? [...mine.filter((r) => r.bucket === 'changed'), ...mine.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled')] : tab === 'available' ? [] : mine.filter((r) => r.bucket === tab)).length;
-  };
-  const chosenLabel = buildings.find((b) => b.value === choice)?.label;
+  const changedOf = (l: WorkerWash[]) => [...l.filter((r) => r.bucket === 'changed'), ...l.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled')];
+  const inOpenTab = (l: WorkerWash[]) => (tab === 'changed' ? changedOf(l) : tab === 'available' ? [] : l.filter((r) => r.bucket === tab));
+  const changed = changedOf(rows);
+  const list: WorkerWash[] = tab === 'available' ? [] : tab === 'changed' ? changed : by(tab);
+  const poolShown = poolRows.filter((p) => inSociety(p, soc));
+  // chip counts are for the tab that is open
+  const societyCount = (value: string) => (tab === 'available' ? poolRows.filter((p) => inSociety(p, value)).length : inOpenTab(all.filter((r) => inSociety(asRow(r), value))).length);
+  const buildingCount = (value: string) => inOpenTab(inSoc.filter((r) => inBuilding(asRow(r), value))).length;
+  const placeLabel = [buildings.find((b) => b.value === bld)?.label, societies.find((x) => x.value === soc)?.label].filter(Boolean).join(' · ');
+  const filtered = soc !== ALL_SOCIETIES || bld !== ALL_BUILDINGS;
 
   const claim = async (id: string) => {
     try {
@@ -107,19 +117,24 @@ export default function WorkerHome() {
         { value: 'upcoming', label: 'Upcoming', count: by('upcoming').length },
         { value: 'completed', label: 'Completed' },
         { value: 'changed', label: 'Cancelled / moved', count: changed.length },
-        { value: 'available', label: 'Available', count: pool.data?.length },
+        { value: 'available', label: 'Available', count: poolShown.length },
       ]} />
 
-      {tab !== 'available' && buildings.length > 0 && (
+      {societies.length > 1 && (
         <div className="mt-3">
-          <Segmented label="Building" value={choice} onChange={setBuilding} options={[{ value: ALL_BUILDINGS, label: 'All buildings' }, ...buildings.map((b) => ({ value: b.value, label: b.label, count: inTab(b.value) }))]} />
-          {choice !== ALL_BUILDINGS && tab === 'changed' && <p className="mt-2 text-xs text-fog">Washes that are no longer yours do not show a building, so they are only under All buildings.</p>}
+          <Segmented label="Society" value={soc} onChange={setSociety} options={[{ value: ALL_SOCIETIES, label: 'All societies' }, ...societies.map((x) => ({ value: x.value, label: x.label, count: societyCount(x.value) }))]} />
         </div>
       )}
+      {tab !== 'available' && buildings.length > 0 && (
+        <div className="mt-3">
+          <Segmented label="Building" value={bld} onChange={setBuilding} options={[{ value: ALL_BUILDINGS, label: 'All buildings' }, ...buildings.map((b) => ({ value: b.value, label: b.label, count: buildingCount(b.value) }))]} />
+        </div>
+      )}
+      {filtered && tab === 'changed' && <p className="mt-2 text-xs text-fog">Washes that are no longer yours do not show where they are, so they are only under All societies and All buildings.</p>}
 
       <div className="mt-5 space-y-3">
         {queue.isError ? <ErrorState onRetry={() => void queue.refetch()} /> : queue.isLoading ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-32" />) : tab === 'available' ? (
-          pool.data?.length ? pool.data.map((p) => (
+          poolShown.length ? poolShown.map((p) => (
             <div key={p.booking_id} className="glass flex items-center justify-between gap-3 p-4">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wider text-washo-300">{friendlyDay(p.scheduled_date)} · {slotLabel(p.time_slot)}</p>
@@ -128,13 +143,11 @@ export default function WorkerHome() {
               </div>
               <Button size="sm" loading={step.isPending && step.variables?.id === p.booking_id} onClick={() => void claim(p.booking_id)}>Claim</Button>
             </div>
-          )) : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
-        ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : (
-          chosenLabel ? (
-          <EmptyState title={`No washes in ${chosenLabel} here`} text="Choose another building, or All buildings." />
+          )) : soc !== ALL_SOCIETIES ? <EmptyState title={`No unassigned washes in ${placeLabel}`} text="Choose another society, or All societies." /> : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
+        ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : filtered ? (
+          <EmptyState title={`No washes in ${placeLabel} here`} text="Choose another building or society, or All." />
         ) : (
           <EmptyState title={{ today: 'Nothing due today', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
-        )
         )}
       </div>
     </div>

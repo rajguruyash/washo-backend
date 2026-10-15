@@ -11,6 +11,7 @@ import { claimWindow, closesLabel, dayOf, fromIstInput, istInput, opensLabel, sh
 import { addDays, percent, prettyDate, prettyPhone, rupees, todayIST, vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminCampaign, useAdminCampaignClaims, useAdminCampaigns } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminCampaign, AdminCampaignClaim } from '../../lib/types';
@@ -191,9 +192,9 @@ function CampaignDetail({ id, onBack, onEdit }: { id: string; onBack: () => void
   const { data, isLoading, isError, error, refetch } = useAdminCampaign(id);
   const act = useAdminAction();
   const toast = useToast();
-  const [status, setStatus] = useState('');
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
+  const [status, setStatus] = useSticky('admin.campaign.claims.status', '');
+  const [q, setQ] = useSticky('admin.campaign.claims.q', '');
+  const [debounced, setDebounced] = useState(() => q.trim());
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   const claims = useAdminCampaignClaims(id, status, debounced);
   const [open, setOpen] = useState<string | null>(null);

@@ -8,7 +8,9 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select, TextArea } from '../../components/ui/Field';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
-import { addDays, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
+import { PhoneAction } from '../../components/PhoneAction';
+import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
+import { waMessage, washKindWords } from '../../lib/whatsapp';
 import { useAdminAction, useAdminBooking, useAdminCustomer, useAdminWorkers, useCapacity } from '../../lib/queries';
 import { slotLabel } from '../../lib/slots';
 import { MOVABLE_STATUSES, payKind, payLabel, staffStatus } from '../../lib/status';
@@ -46,7 +48,7 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
         <div className="space-y-5">
           <div className="flex flex-wrap gap-2"><Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>{b.payment_kind && <Badge tone={payKind[b.payment_kind].tone}>{payLabel(b.payment_kind, b.payment_provider)}</Badge>}{b.source === 'admin' && <Badge>Booked by WASHO</Badge>}{b.campaign_name && <Badge tone="yellow">Campaign · {b.campaign_name}</Badge>}{b.customer_confirmed_at && <Badge tone="green">Customer confirmed</Badge>}</div>
           <div className="grid gap-4 text-sm sm:grid-cols-2">
-            <div><p className="eyebrow">Customer</p><p className="font-semibold">{b.customer_name}</p><a href={`tel:${b.customer_phone}`} className="text-washo-300">{prettyPhone(b.customer_phone)}</a></div>
+            <div><p className="eyebrow">Customer</p><p className="font-semibold">{b.customer_name}</p><PhoneAction phone={b.customer_phone} message={waMessage(b.customer_name, washKindWords(b))} /></div>
             <div><p className="eyebrow">Vehicle</p><p>{b.vehicle_type.toUpperCase()} · {b.vehicle_model} {b.vehicle_color ?? ''}</p><p className="text-fog">{b.registration_number}</p></div>
             <div><p className="eyebrow">Address</p><p>{[b.society_name, b.building_block, b.flat_number].filter(Boolean).join(', ')}</p><p className="text-fog">{b.parking_location}</p></div>
             <div><p className="eyebrow">Specialist</p><p className="font-semibold">{b.worker_name ?? 'Unassigned'}</p></div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_BUILDINGS, NO_BUILDING, buildingKey, buildingOptions, inBuilding } from './buildings';
+import { ALL_BUILDINGS, ALL_SOCIETIES, NO_BUILDING, buildingKey, buildingOptions, inBuilding, inSociety, societyKey, societyOptions } from './buildings';
 
 const row = (building_block: string | null, hidden = false) => ({ building_block, hidden });
 
@@ -38,5 +38,30 @@ describe('building filter', () => {
     expect(inBuilding(row(null, true), ALL_BUILDINGS)).toBe(true);
     expect(inBuilding(row(null, true), NO_BUILDING)).toBe(false);
     expect(inBuilding(row('B2', true), 'B2')).toBe(false);
+  });
+});
+
+describe('society filter', () => {
+  const row = (society_name: string | null, hidden = false) => ({ society_name, hidden });
+
+  it('treats one society written differently as the same one', () => {
+    expect(societyKey('Yashwin Orizzonte')).toBe('yashwin orizzonte');
+    expect(societyKey('  yashwin   ORIZZONTE ')).toBe('yashwin orizzonte');
+    expect(societyKey(null)).toBe('');
+  });
+
+  it('lists each society once, A to Z, and ignores washes with no details or no society', () => {
+    const rows = [row('Yashwin Orizzonte'), row('Amar Residency'), row('yashwin  orizzonte'), row(null), row('  '), row('Zen Heights', true)];
+    expect(societyOptions(rows)).toEqual([{ value: 'amar residency', label: 'Amar Residency' }, { value: 'yashwin orizzonte', label: 'Yashwin Orizzonte' }]);
+    expect(societyOptions([])).toEqual([]);
+  });
+
+  it('matches a wash to the chosen society; hidden washes only show under All societies', () => {
+    expect(inSociety(row('Yashwin  Orizzonte'), 'yashwin orizzonte')).toBe(true);
+    expect(inSociety(row('Amar Residency'), 'yashwin orizzonte')).toBe(false);
+    expect(inSociety(row(null), 'yashwin orizzonte')).toBe(false);
+    expect(inSociety(row(null), ALL_SOCIETIES)).toBe(true);
+    expect(inSociety(row('Amar Residency', true), 'amar residency')).toBe(false);
+    expect(inSociety(row('Amar Residency', true), ALL_SOCIETIES)).toBe(true);
   });
 });

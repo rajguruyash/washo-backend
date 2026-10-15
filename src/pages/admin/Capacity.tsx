@@ -9,6 +9,7 @@ import { cn } from '../../lib/cn';
 import { addDays, prettyDate, todayIST } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAdminAction, useAdminCapacity } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import type { CapacityDay, CapacityRule, CrowdState } from '../../lib/types';
 import { Loading, errText } from './shared';
 
@@ -97,7 +98,7 @@ function Row({ d }: { d: CapacityDay }) {
 }
 
 export default function Capacity() {
-  const [span, setSpan] = useState<'14' | '28' | '60'>('28');
+  const [span, setSpan] = useSticky<'14' | '28' | '60'>('admin.capacity.span', '28');
   const from = useMemo(() => todayIST(), []);
   const { data, isLoading, isError, error, refetch } = useAdminCapacity(from, addDays(from, Number(span) - 1));
   if (isError) return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />;

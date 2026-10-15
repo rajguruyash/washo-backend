@@ -1,15 +1,18 @@
 import { CalendarClock, ChevronDown, ChevronUp, Eye } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
+import { PhoneAction } from '../../components/PhoneAction';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { Segmented } from '../../components/ui/Segmented';
-import { addDays, fullDate, istDay, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
+import { addDays, fullDate, istDay, prettyDate, rupees, todayIST } from '../../lib/format';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 import { useAdminBookings, useAdminMemberships } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { slotLabel } from '../../lib/slots';
+import { waMessage, washKindWords } from '../../lib/whatsapp';
 import { MOVABLE_STATUSES, payKind, payLabel, staffStatus } from '../../lib/status';
 import type { AdminBooking, AdminMembership, BookingStatus } from '../../lib/types';
 import { BookingSheet } from './BookingSheet';
@@ -36,8 +39,8 @@ const matches = (search: string, ...fields: (string | null | undefined)[]) => {
  * "All" adds the free, refunded and unpaid ones. The Washes tab has every wash.
  */
 export default function Paid({ canManage }: { canManage: boolean }) {
-  const [view, setView] = useState<'plans' | 'single'>('plans');
-  const [search, setSearch] = useState('');
+  const [view, setView] = useSticky<'plans' | 'single'>('admin.paid.view', 'plans');
+  const [search, setSearch] = useSticky('admin.paid.search', '');
   const [open, setOpen] = useState<{ id: string; startIn: 'details' | 'move' } | null>(null);
   const onOpen = (id: string, startIn: 'details' | 'move' = 'details') => setOpen({ id, startIn });
   return (
@@ -84,7 +87,7 @@ function PlanCard({ m, open, onToggle, canManage, onOpen }: { m: AdminMembership
         <div className="min-w-0">
           <p className="eyebrow">{m.reference_code}</p>
           <p className="mt-1 text-lg font-bold">{planTitle(m, { short: true })}</p>
-          <p className="mt-1 text-sm font-semibold">{m.customer_name} <a href={`tel:${m.customer_phone}`} className="font-normal text-washo-300">{m.customer_phone ? prettyPhone(m.customer_phone) : ''}</a></p>
+          <p className="mt-1 text-sm font-semibold">{m.customer_name} <PhoneAction phone={m.customer_phone} message={waMessage(m.customer_name, 'membership')} className="font-normal text-washo-300 underline decoration-washo-300/40 underline-offset-2 hover:text-white" /></p>
         </div>
         <div className="flex flex-wrap items-center gap-2"><Badge tone="green">Paid · {paid}</Badge><Badge tone="blue">On</Badge></div>
       </div>
@@ -128,10 +131,10 @@ type Phase = 'upcoming' | 'live' | 'history';
 
 function Singles({ search, canManage, onOpen }: { search: string; canManage: boolean; onOpen: (id: string, startIn?: 'details' | 'move') => void }) {
   const today = todayIST();
-  const [phase, setPhase] = useState<Phase>('upcoming');
-  const [paid, setPaid] = useState<'paid' | 'all'>('paid');
-  const [from, setFrom] = useState(addDays(today, -90));
-  const [to, setTo] = useState(addDays(today, 30));
+  const [phase, setPhase] = useSticky<Phase>('admin.paid.phase', 'upcoming');
+  const [paid, setPaid] = useSticky<'paid' | 'all'>('admin.paid.paid', 'paid');
+  const [from, setFrom] = useSticky('admin.paid.from', addDays(today, -90));
+  const [to, setTo] = useSticky('admin.paid.to', addDays(today, 30));
   const pay = paid === 'paid' ? 'paid' : undefined;
   // Upcoming and live come from one list (a wash that started and was never finished is still live days later); history has its own dates and is newest first.
   const ahead = useAdminBookings({ type: 'on_demand', pay, from: addDays(today, -14), to: addDays(today, 90) });
@@ -201,7 +204,7 @@ function SingleCard({ b, canManage, onOpen }: { b: AdminBooking; canManage: bool
         </div>
       </div>
       <div className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-        <p className="text-mist"><span className="font-semibold text-white">{b.customer_name ?? 'Customer'}</span> <a href={`tel:${b.customer_phone}`} className="text-washo-300">{b.customer_phone ? prettyPhone(b.customer_phone) : ''}</a></p>
+        <p className="text-mist"><span className="font-semibold text-white">{b.customer_name ?? 'Customer'}</span> <PhoneAction phone={b.customer_phone} message={waMessage(b.customer_name, washKindWords(b))} /></p>
         <p className="text-mist">{b.vehicle_type?.toUpperCase()} · {b.vehicle_model} · {b.registration_number}{b.vehicle_color ? ` · ${b.vehicle_color}` : ''}</p>
         <p className="text-mist">{where || 'No address on file'}{b.parking_location ? ` · ${b.parking_location}` : ''}</p>
         <p className="text-mist">Specialist: <span className="font-semibold text-white">{b.worker_name ?? <span className="text-warn">none yet</span>}</span>{b.customer_confirmed_at && OPEN.includes(b.status) ? ' · customer confirmed by phone' : ''}</p>

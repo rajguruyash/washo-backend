@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { rupees } from '../../lib/format';
 import { useAdminActivity } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import type { ActivityEvent } from '../../lib/types';
 import { Loading } from './shared';
 
@@ -65,8 +66,8 @@ function details(e: ActivityEvent): string {
 
 /** Who changed what, and when. The super admin's view. Search by what happened, by person, or by anything in the details. */
 export default function Activity() {
-  const [q, setQ] = useState('');
-  const [typed, setTyped] = useState('');
+  const [q, setQ] = useSticky('admin.activity.q', '');
+  const [typed, setTyped] = useSticky('admin.activity.typed', '');
   const [limit, setLimit] = useState(100);
   const { data, isLoading, isError, refetch, isFetching } = useAdminActivity(q, limit);
   return (

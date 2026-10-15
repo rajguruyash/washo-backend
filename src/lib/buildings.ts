@@ -34,3 +34,29 @@ export function inBuilding(r: { building_block: string | null; hidden?: boolean 
   const key = buildingKey(r.building_block);
   return choice === NO_BUILDING ? key === '' : key === choice;
 }
+
+// ───────── societies (the same idea one level up: a specialist who washes in several societies filters by society, then by building) ─────────
+
+/** Choose "All societies". */
+export const ALL_SOCIETIES = 'all';
+
+/** One society written any way ("Yashwin  Orizzonte", "yashwin orizzonte") is the same society. */
+export const societyKey = (s: string | null | undefined): string => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** The societies in `rows`, A to Z. Rows without details (hidden) or without a society are ignored. */
+export function societyOptions<T extends { society_name: string | null; hidden?: boolean }>(rows: T[]): BuildingOption[] {
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    if (r.hidden) continue;
+    const key = societyKey(r.society_name);
+    if (key && !seen.has(key)) seen.set(key, (r.society_name ?? '').trim().replace(/\s+/g, ' '));
+  }
+  return [...seen].sort((a, b) => a[1].localeCompare(b[1], 'en', { numeric: true })).map(([value, label]) => ({ value, label }));
+}
+
+/** Does this wash belong to the chosen society? Hidden rows (details not shown) only match "All societies". */
+export function inSociety(r: { society_name: string | null; hidden?: boolean }, choice: string): boolean {
+  if (choice === ALL_SOCIETIES) return true;
+  if (r.hidden) return false;
+  return societyKey(r.society_name) === choice;
+}

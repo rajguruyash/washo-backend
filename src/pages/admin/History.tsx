@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Input, Select } from '../../components/ui/Field';
 import { addDays, prettyDate, rupees, todayIST } from '../../lib/format';
 import { useAdminHistory, useAdminWorkers } from '../../lib/queries';
+import { useSticky } from '../../lib/sticky';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminBooking } from '../../lib/types';
@@ -19,12 +20,12 @@ const RANGES = [
 
 /** Every wash that has happened (or been cancelled) in a date range, newest first, with totals for what is on screen. */
 export default function History() {
-  const [from, setFrom] = useState(addDays(todayIST(), -30));
-  const [to, setTo] = useState(todayIST());
-  const [status, setStatus] = useState('');
-  const [worker, setWorker] = useState('');
-  const [q, setQ] = useState('');
-  const [debounced, setDebounced] = useState('');
+  const [from, setFrom] = useSticky('admin.history.from', addDays(todayIST(), -30));
+  const [to, setTo] = useSticky('admin.history.to', todayIST());
+  const [status, setStatus] = useSticky('admin.history.status', '');
+  const [worker, setWorker] = useSticky('admin.history.worker', '');
+  const [q, setQ] = useSticky('admin.history.q', '');
+  const [debounced, setDebounced] = useState(() => q.trim());
   useEffect(() => { const t = setTimeout(() => setDebounced(q.trim()), 300); return () => clearTimeout(t); }, [q]);
   const workers = useAdminWorkers('all');
   const filter = useMemo(() => ({ from, to, status: status || undefined, worker: worker || undefined, q: debounced || undefined }), [from, to, status, worker, debounced]);

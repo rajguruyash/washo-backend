@@ -2,6 +2,7 @@ import { AlertTriangle, CalendarPlus, Check, Hourglass } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ErrorState } from '../../components/EmptyState';
+import { PhoneAction } from '../../components/PhoneAction';
 import { QuoteBreakdownView } from '../../components/Quote';
 import { patternLabel } from '../../components/WashBits';
 import { Badge } from '../../components/ui/Badge';
@@ -11,6 +12,7 @@ import { Segmented } from '../../components/ui/Segmented';
 import { Sheet } from '../../components/ui/Sheet';
 import { useToast } from '../../components/ui/Toast';
 import { addDays, fullDate, istDay, prettyDate, prettyPhone, rupees, todayIST } from '../../lib/format';
+import { useSticky } from '../../lib/sticky';
 import {
   useAdminAction, useAdminAttention, useAdminBookings, useAdminMemberships, useAdminOverview, useAdminRequests, useAdminWorkers, useReviewRequest, useRefreshAll,
 } from '../../lib/queries';
@@ -19,6 +21,7 @@ import { PAY_KINDS, payKind, payLabel, staffStatus } from '../../lib/status';
 import type { AdminBooking, AdminMembership, AdminRequest, Attention as AttentionData, RequestStatus, SlotId } from '../../lib/types';
 import { StaffLayout } from '../../layouts/StaffLayout';
 import { ROLE_LABEL, canDo, isReadOnly } from '../../lib/adminAccess';
+import { waMessage, washKindWords } from '../../lib/whatsapp';
 import { useAuth } from '../../state/auth';
 import Activity from './Activity';
 import { AddWashSheet } from './AddWash';
@@ -149,7 +152,7 @@ function ReviewSheet({ req, onClose }: { req: AdminRequest | null; onClose: () =
 }
 
 function Requests() {
-  const [status, setStatus] = useState<'submitted' | 'quoted' | 'all'>('submitted');
+  const [status, setStatus] = useSticky<'submitted' | 'quoted' | 'all'>('admin.requests.status', 'submitted');
   const { data, isLoading, isError, refetch } = useAdminRequests(status === 'all' ? undefined : (status as RequestStatus));
   const [open, setOpen] = useState<AdminRequest | null>(null);
   return (
@@ -183,14 +186,15 @@ function Requests() {
 
 // ───────────────────────── bookings ─────────────────────────
 function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: boolean; onAdd: () => void }) {
-  const [from, setFrom] = useState(todayIST());
-  const [to, setTo] = useState(addDays(todayIST(), 7));
-  const [status, setStatus] = useState('');
-  const [unassigned, setUnassigned] = useState(false);
-  const [pay, setPay] = useState('');
+  // Filters stay as chosen when a wash is opened and the admin comes back (or switches tab and returns).
+  const [from, setFrom] = useSticky('admin.washes.from', todayIST());
+  const [to, setTo] = useSticky('admin.washes.to', addDays(todayIST(), 7));
+  const [status, setStatus] = useSticky('admin.washes.status', '');
+  const [unassigned, setUnassigned] = useSticky('admin.washes.unassigned', false);
+  const [pay, setPay] = useSticky('admin.washes.pay', '');
   // A search looks at every date, so the date range is set aside while there are words in the box.
-  const [search, setSearch] = useState('');
-  const [q, setQ] = useState('');
+  const [search, setSearch] = useSticky('admin.washes.search', '');
+  const [q, setQ] = useState(() => search.trim());
   useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t); }, [search]);
   const filter = useMemo(
     () => (membership ? { membership } : q ? { q, status: status || undefined, unassigned, pay: pay || undefined } : { from, to, status: status || undefined, unassigned, pay: pay || undefined }),
@@ -224,13 +228,13 @@ function Bookings({ membership, canAdd, onAdd }: { membership?: string; canAdd: 
       {isError ? <ErrorState onRetry={() => void refetch()} /> : isLoading ? <Loading /> : !data?.length ? <div className="panel p-8 text-center text-fog">No washes match.</div> : (
         <div className="space-y-2">
           {data.map((b: AdminBooking) => (
-            <button key={b.id} onClick={() => setOpen(b.id)} className="glass flex w-full flex-wrap items-center gap-x-5 gap-y-2 p-4 text-left transition-colors hover:border-washo-400/40">
+            <div key={b.id} role="button" tabIndex={0} onClick={() => setOpen(b.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(b.id); } }} className="glass flex w-full cursor-pointer flex-wrap items-center gap-x-5 gap-y-2 p-4 text-left transition-colors hover:border-washo-400/40 focus:border-washo-400/60 focus:outline-none">
               <div className="w-28 shrink-0"><p className="text-sm font-bold">{prettyDate(b.scheduled_date)}</p><p className="text-xs text-fog">{slotLabel(b.time_slot)}</p></div>
-              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}{b.campaign_name ? ' · free wash' : ''}</p><p className="truncate text-xs text-fog">{b.customer_name} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-semibold">{b.service_name} · {b.registration_number}{b.campaign_name ? ' · free wash' : ''}</p><p className="truncate text-xs text-fog">{b.customer_name}{b.customer_phone && <> · <PhoneAction phone={b.customer_phone} message={waMessage(b.customer_name, washKindWords(b))} className="font-medium text-washo-300 underline decoration-washo-300/40 underline-offset-2 hover:text-white" /></>} · {[b.society_name, b.flat_number].filter(Boolean).join(', ')}</p></div>
               <p className="w-32 truncate text-sm text-mist">{b.worker_name ?? <span className="text-warn">Unassigned</span>}</p>
               <Badge tone={payKind[b.payment_kind]?.tone ?? 'slate'}>{b.payment_kind ? payLabel(b.payment_kind, b.payment_provider) : 'Payment unknown'}</Badge>
               <Badge tone={staffStatus[b.status].tone}>{staffStatus[b.status].label}</Badge>
-            </button>
+            </div>
           ))}
         </div>
       )}
