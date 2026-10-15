@@ -15,15 +15,30 @@
 -- Until then, do NOT ask for a phone code with the admin's own number.
 --
 -- It can also CHANGE the number on the admin profile (v_new_phone), which frees the old number to sign in as an ordinary customer. Leave v_new_phone empty to keep the number as it is.
--- Replace the three values on the first lines of PART 2 (and the email and number in PART 1 and PART 3) before running.
+-- Replace the email and the two numbers: 'owner@example.com', '0000000000' (the number the admin profile has now) and '1111111111' (the number it should have) in PART 1, and the three values on the first lines of PART 2.
+
+-- a profile counts as empty when nothing points at it (no washes, plans, payments, vehicles, addresses, ...)
+CREATE OR REPLACE FUNCTION pg_temp.rows_pointing_at(p uuid) RETURNS bigint LANGUAGE sql AS $f$
+  SELECT (SELECT count(*) FROM public.bookings               WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.memberships            WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.membership_requests    WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.payments               WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.refunds                WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.vehicles               WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.customer_addresses     WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.campaign_claims        WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.support_tickets        WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.wash_reviews           WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p)
+$f$;
 
 -- ───────── PART 1: LOOK (changes nothing). Check the picture matches the story above before running PART 2. ─────────
 SELECT p.id AS profile_id, p.role, p.full_name, p.phone AS profile_phone, p.email AS profile_email, p.created_at,
-       u.email AS login_email, u.phone AS login_phone,
-       (SELECT count(*) FROM public.bookings b WHERE b.customer_profile_id = p.id) AS washes
+       u.email AS login_email, u.phone AS login_phone, pg_temp.rows_pointing_at(p.id) AS records_pointing_at_it
   FROM public.profiles p JOIN auth.users u ON u.id = p.auth_user_id
  WHERE lower(u.email) = 'owner@example.com'
-    OR right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = '0000000000'
+    OR right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) IN ('0000000000', '1111111111')
+    OR right(regexp_replace(COALESCE(u.phone, ''), '\D', '', 'g'), 10) IN ('0000000000', '1111111111')
     OR (p.role = 'admin' AND lower(COALESCE(p.email, '')) = 'owner@example.com')
  ORDER BY p.created_at;
 
@@ -36,6 +51,7 @@ DECLARE
   v_login  uuid;
   v_admin  uuid;
   v_stray  uuid;
+  v_holder record;
   v_cur    text;
   v_rows   bigint;
 BEGIN
@@ -50,38 +66,38 @@ BEGIN
    ORDER BY p.created_at LIMIT 1;
   IF v_admin IS NULL THEN RAISE EXCEPTION 'Could not find the admin profile (role admin, with that mobile number or email). Nothing was changed.'; END IF;
 
-  -- a number is never shared between profiles
-  IF NULLIF(v_new_phone, '') IS NOT NULL AND EXISTS (
-    SELECT 1 FROM public.profiles p WHERE p.id <> v_admin AND right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = v_new_phone
-  ) THEN
-    RAISE EXCEPTION 'Another profile already has the number %. Nothing was changed.', v_new_phone;
-  END IF;
-
+  -- 1. the stray customer profile the email login got (only if the admin profile is not on that login already). It must be completely empty.
   IF (SELECT auth_user_id FROM public.profiles WHERE id = v_admin) <> v_login THEN
     SELECT id INTO v_stray FROM public.profiles WHERE auth_user_id = v_login;
     IF v_stray IS NOT NULL THEN
       IF (SELECT role FROM public.profiles WHERE id = v_stray) <> 'customer' THEN
         RAISE EXCEPTION 'The email login already has a profile that is not a customer one. Nothing was changed.';
       END IF;
-      -- the stray customer profile must be completely empty: refuse if anything points at it
-      SELECT (SELECT count(*) FROM public.bookings               WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.memberships            WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.membership_requests    WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.payments               WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.refunds                WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.vehicles               WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.customer_addresses     WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.campaign_claims        WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.support_tickets        WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.wash_reviews           WHERE customer_profile_id = v_stray)
-           + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = v_stray)
-        INTO v_rows;
+      v_rows := pg_temp.rows_pointing_at(v_stray);
       IF v_rows > 0 THEN RAISE EXCEPTION 'The stray customer profile is not empty (% records point at it). Nothing was changed.', v_rows; END IF;
-
       PERFORM set_config('washo.allow_profile_merge', 'on', true);   -- the same switch the sign-in merge uses to let a profile go
       DELETE FROM public.profiles WHERE id = v_stray AND role = 'customer';
       PERFORM set_config('washo.allow_profile_merge', 'off', true);
     END IF;
+  END IF;
+
+  -- 2. the new number: a number is never shared between profiles. Any OTHER profile that has it must be an EMPTY customer profile (it is removed);
+  --    anything else (a team member, or a customer with washes, plans, vehicles...) stops the repair, and the message says exactly which profile it is.
+  IF NULLIF(v_new_phone, '') IS NOT NULL THEN
+    FOR v_holder IN
+      SELECT p.id, p.role::text AS role, p.full_name, p.phone, p.email, u.email AS login_email, u.phone AS login_phone, pg_temp.rows_pointing_at(p.id) AS pointing
+        FROM public.profiles p LEFT JOIN auth.users u ON u.id = p.auth_user_id
+       WHERE p.id <> v_admin AND right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = v_new_phone
+    LOOP
+      IF v_holder.role = 'customer' AND v_holder.pointing = 0 THEN
+        PERFORM set_config('washo.allow_profile_merge', 'on', true);
+        DELETE FROM public.profiles WHERE id = v_holder.id AND role = 'customer';
+        PERFORM set_config('washo.allow_profile_merge', 'off', true);
+      ELSE
+        RAISE EXCEPTION 'The number % belongs to another profile that is not an empty customer one: id %, role %, name %, number %, email %, login email %, login number %, % records point at it. Nothing was changed.',
+          v_new_phone, v_holder.id, v_holder.role, COALESCE(v_holder.full_name, '(none)'), v_holder.phone, COALESCE(v_holder.email, '(none)'), COALESCE(v_holder.login_email, '(none)'), COALESCE(v_holder.login_phone, '(none)'), v_holder.pointing;
+      END IF;
+    END LOOP;
   END IF;
 
   PERFORM set_config('washo.allow_identity_change', 'on', true);
