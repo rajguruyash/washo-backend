@@ -71,6 +71,16 @@ authRouter.post(
     const session = await gotrue.verifyOtp(phone, code);
 
     const claims = { sub: session.user.id, phone: session.user.phone, email: session.user.email };
+    // A team member (admin, specialist) signs in with email and password. A phone code with THEIR number must not sign anyone in, and must leave nothing behind.
+    // (Before migration 44 the database also let such a code move the team member's profile onto the phone login: see supabase/repairs/.)
+    const staffNumber = await withUser(claims, async (c) => (await c.query<{ s: boolean }>('SELECT public.my_phone_is_staff() AS s')).rows[0].s).catch((err) => {
+      if ((err as { code?: string }).code === '42883') return false; // a database from before migration 44
+      throw err;
+    });
+    if (staffNumber) {
+      await gotrue.logout(session.access_token);
+      throw new HttpError(403, 'staff_use_email', 'This mobile number belongs to a WASHO team account. Team members sign in with their email and password. Choose "Continue with Email".');
+    }
     let profile: Profile;
     try {
       profile = await profileForOrRepair(claims);
