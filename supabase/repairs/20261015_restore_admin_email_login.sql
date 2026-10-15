@@ -7,7 +7,8 @@
 --
 -- What this does, all or nothing (a single statement: if anything below is not as expected it stops and changes NOTHING):
 --   1. finds the email login and the admin profile (by the admin's mobile number or email),
---   2. if the email login has a stray customer profile, deletes it, but ONLY if it is completely empty (no washes, plans, payments, vehicles, addresses, ...),
+--   2. if the email login has a stray customer profile, deletes it, but ONLY if it has no washes, plans, payments, refunds, requests, claims, complaints or reviews (a vehicle or
+--      an address added while it was stuck in the customer app goes with it),
 --   3. points the admin profile back at the email login.
 -- Nothing else changes: the admin's role, access level, history and settings stay as they are. The phone login is left in place with no profile.
 --
@@ -32,9 +33,33 @@ CREATE OR REPLACE FUNCTION pg_temp.rows_pointing_at(p uuid) RETURNS bigint LANGU
        + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p)
 $f$;
 
+-- the records that MATTER: washes, plans, payments, refunds, requests, free-wash claims, complaints, reviews, coupon uses. (A vehicle or an address is just set-up data.)
+CREATE OR REPLACE FUNCTION pg_temp.important_rows(p uuid) RETURNS bigint LANGUAGE sql AS $f$
+  SELECT (SELECT count(*) FROM public.bookings               WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.memberships            WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.membership_requests    WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.payments               WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.refunds                WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.campaign_claims        WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.support_tickets        WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.wash_reviews           WHERE customer_profile_id = p)
+       + (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p)
+$f$;
+
+-- what is there, in words
+CREATE OR REPLACE FUNCTION pg_temp.what_points_at(p uuid) RETURNS text LANGUAGE sql AS $f$
+  SELECT format('washes %s, plans %s, plan requests %s, payments %s, refunds %s, free-wash claims %s, complaints %s, reviews %s, coupon uses %s, vehicles %s, addresses %s',
+    (SELECT count(*) FROM public.bookings WHERE customer_profile_id = p), (SELECT count(*) FROM public.memberships WHERE customer_profile_id = p),
+    (SELECT count(*) FROM public.membership_requests WHERE customer_profile_id = p), (SELECT count(*) FROM public.payments WHERE customer_profile_id = p),
+    (SELECT count(*) FROM public.refunds WHERE customer_profile_id = p), (SELECT count(*) FROM public.campaign_claims WHERE customer_profile_id = p),
+    (SELECT count(*) FROM public.support_tickets WHERE customer_profile_id = p), (SELECT count(*) FROM public.wash_reviews WHERE customer_profile_id = p),
+    (SELECT count(*) FROM public.membership_coupon_redemptions WHERE customer_profile_id = p), (SELECT count(*) FROM public.vehicles WHERE customer_profile_id = p),
+    (SELECT count(*) FROM public.customer_addresses WHERE customer_profile_id = p))
+$f$;
+
 -- ───────── PART 1: LOOK (changes nothing). Check the picture matches the story above before running PART 2. ─────────
 SELECT p.id AS profile_id, p.role, p.full_name, p.phone AS profile_phone, p.email AS profile_email, p.created_at,
-       u.email AS login_email, u.phone AS login_phone, pg_temp.rows_pointing_at(p.id) AS records_pointing_at_it
+       u.email AS login_email, u.phone AS login_phone, pg_temp.what_points_at(p.id) AS what_points_at_it
   FROM public.profiles p JOIN auth.users u ON u.id = p.auth_user_id
  WHERE lower(u.email) = 'owner@example.com'
     OR right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) IN ('0000000000', '1111111111')
@@ -73,8 +98,9 @@ BEGIN
       IF (SELECT role FROM public.profiles WHERE id = v_stray) <> 'customer' THEN
         RAISE EXCEPTION 'The email login already has a profile that is not a customer one. Nothing was changed.';
       END IF;
-      v_rows := pg_temp.rows_pointing_at(v_stray);
-      IF v_rows > 0 THEN RAISE EXCEPTION 'The stray customer profile is not empty (% records point at it). Nothing was changed.', v_rows; END IF;
+      v_rows := pg_temp.important_rows(v_stray);
+      IF v_rows > 0 THEN RAISE EXCEPTION 'The stray customer profile has records that matter (%). Nothing was changed.', pg_temp.what_points_at(v_stray); END IF;
+      -- (only set-up data such as a vehicle or an address can be left on it: it goes with the profile)
       PERFORM set_config('washo.allow_profile_merge', 'on', true);   -- the same switch the sign-in merge uses to let a profile go
       DELETE FROM public.profiles WHERE id = v_stray AND role = 'customer';
       PERFORM set_config('washo.allow_profile_merge', 'off', true);
@@ -85,7 +111,7 @@ BEGIN
   --    anything else (a team member, or a customer with washes, plans, vehicles...) stops the repair, and the message says exactly which profile it is.
   IF NULLIF(v_new_phone, '') IS NOT NULL THEN
     FOR v_holder IN
-      SELECT p.id, p.role::text AS role, p.full_name, p.phone, p.email, u.email AS login_email, u.phone AS login_phone, pg_temp.rows_pointing_at(p.id) AS pointing
+      SELECT p.id, p.role::text AS role, p.full_name, p.phone, p.email, u.email AS login_email, u.phone AS login_phone, pg_temp.rows_pointing_at(p.id) AS pointing, pg_temp.what_points_at(p.id) AS what
         FROM public.profiles p LEFT JOIN auth.users u ON u.id = p.auth_user_id
        WHERE p.id <> v_admin AND right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = v_new_phone
     LOOP
@@ -94,8 +120,8 @@ BEGIN
         DELETE FROM public.profiles WHERE id = v_holder.id AND role = 'customer';
         PERFORM set_config('washo.allow_profile_merge', 'off', true);
       ELSE
-        RAISE EXCEPTION 'The number % belongs to another profile that is not an empty customer one: id %, role %, name %, number %, email %, login email %, login number %, % records point at it. Nothing was changed.',
-          v_new_phone, v_holder.id, v_holder.role, COALESCE(v_holder.full_name, '(none)'), v_holder.phone, COALESCE(v_holder.email, '(none)'), COALESCE(v_holder.login_email, '(none)'), COALESCE(v_holder.login_phone, '(none)'), v_holder.pointing;
+        RAISE EXCEPTION 'The number % belongs to another profile that is not an empty customer one: id %, role %, name %, number %, email %, login email %, login number %, what points at it: %. Nothing was changed.',
+          v_new_phone, v_holder.id, v_holder.role, COALESCE(v_holder.full_name, '(none)'), v_holder.phone, COALESCE(v_holder.email, '(none)'), COALESCE(v_holder.login_email, '(none)'), COALESCE(v_holder.login_phone, '(none)'), v_holder.what;
       END IF;
     END LOOP;
   END IF;
