@@ -85,6 +85,14 @@ export const config = {
     minIntervalMs: process.env.GEOCODE_MIN_INTERVAL_MS !== undefined ? Number(process.env.GEOCODE_MIN_INTERVAL_MS) : 1100,
   },
 
+  // Push to a closed phone (Firebase Cloud Messaging). Put the service-account key of the Firebase project in Render as FIREBASE_SERVICE_ACCOUNT_JSON (the whole JSON file, or that
+  // file base64-encoded); FIREBASE_SERVICE_ACCOUNT_FILE (a path) is for trying it on a computer. Not set: nothing is pushed, everything else works. Only tests set FCM_API_BASE.
+  push: {
+    serviceAccountJson: (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim(),
+    serviceAccountFile: (process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim(),
+    fcmBase: (process.env.FCM_API_BASE || 'https://fcm.googleapis.com').replace(/\/+$/, ''),
+  },
+
   // Optional. When set, an outside scheduler (Render Cron Job, cron-job.org, GitHub Actions) can call POST /api/cron/reminders with
   // `Authorization: Bearer <this>`. The site also runs the reminders itself every hour while it is awake, so this is only a safety net.
   cronSecret: process.env.CRON_SECRET || '',

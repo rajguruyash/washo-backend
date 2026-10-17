@@ -20,6 +20,17 @@ async function occupy(date: string, slot: 'morning' | 'afternoon' | 'night' = 'm
     [o.vehicle.id, date, slot]
   );
 }
+/**
+ * A day, `from` or more days ahead, with no washes booked on it at all. These tests set the crowd limits very tight (one wash fills a window), and the database is shared with test files
+ * that run at the same time (a membership books its washes across weeks of days), so a day picked by a fixed offset can already hold somebody else's wash and the window is "full" for the wrong reason.
+ */
+async function emptyDay(from: number): Promise<string> {
+  for (let n = from; n < from + 120; n++) {
+    const d = istDate(n);
+    if (!(await fake.admin.query(`select 1 from public.bookings where scheduled_date = $1 and status <> 'cancelled' limit 1`, [d])).rowCount) return d;
+  }
+  throw new Error('no empty day found');
+}
 const PLAN = [{ weekday: 3, kind: 'body' }, { weekday: 6, kind: 'deep' }];
 const planBody = (c: Awaited<ReturnType<typeof customerWithVehicle>>, o: Record<string, unknown> = {}) => ({
   vehicle_id: c.vehicle.id, weekly_pattern: PLAN, duration_months: 1, time_slot: 'morning', start_date: istDate(4), address_id: c.addr.id, ...o,
@@ -85,7 +96,7 @@ describe('a full window cannot be booked, and exact dates follow the rules', () 
   it('a single wash is refused for a window that is full (red), with a short message; another window of the same day books', async () => {
     const admin = await staffClient('admin');
     await setLimits(admin, TIGHT);
-    const day = istDate(23);
+    const day = await emptyDay(23);
     await occupy(day, 'afternoon');
     const c = await customerWithVehicle('car');
     const service = (await fake.admin.query(`select id from public.services where code='car-body-wash'`)).rows[0].id;
@@ -102,7 +113,7 @@ describe('a full window cannot be booked, and exact dates follow the rules', () 
   it('raising the red number opens the window again (the owner decides how many a window takes)', async () => {
     const admin = await staffClient('admin');
     await setLimits(admin, TIGHT);
-    const day = istDate(24);
+    const day = await emptyDay(24);
     await occupy(day, 'night');
     const c = await customerWithVehicle('car');
     const service = (await fake.admin.query(`select id from public.services where code='car-body-wash'`)).rows[0].id;

@@ -10,3 +10,7 @@ dist/
 # Local environment
 .env.*
 !.env.example
+
+# Firebase service-account keys (a secret: lets anyone send push as WASHO). Put the contents in Render, never in the repo.
+*firebase-adminsdk*.json
+*service-account*.json
