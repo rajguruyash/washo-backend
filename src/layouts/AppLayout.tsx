@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { BadgeCheck, CalendarDays, Car, ClipboardList, Home, LogOut, Plus, UserRound } from 'lucide-react';
+import { BadgeCheck, CalendarDays, Car, ClipboardList, Home, LogOut, UserRound } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
 import { Link, NavLink, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
@@ -119,11 +119,6 @@ function BottomBar() {
       <div className="mx-auto flex max-w-lg items-end px-2">
         {item('/app', 'Home', Home, true)}
         {item('/app/membership', 'Plans', BadgeCheck)}
-        <div className="flex flex-1 justify-center">
-          <Link to="/app/membership/new" aria-label="Start a membership" className="-mt-5 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-b from-washo-400 to-washo-700 text-white shadow-[0_10px_30px_-6px_rgb(42_98_230/0.9),inset_0_1px_0_rgb(255_255_255/0.3)] ring-4 ring-ink-950 transition-transform active:scale-90">
-            <Plus className="h-7 w-7" strokeWidth={2.5} />
-          </Link>
-        </div>
         {item('/app/bookings', 'Washes', ClipboardList)}
         {item('/app/account', 'Account', UserRound)}
       </div>
