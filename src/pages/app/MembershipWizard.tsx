@@ -105,7 +105,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   });
   const [pickedDays, setDays] = useState<number[]>(renewDays);
   // Weekdays WASHO does not work (Admin -> Working Days) cannot be chosen; if the customer already had them (a renewal), they are left out.
-  const working = useWorkingDays().data;
+  const working = useWorkingDays(true, 'membership').data;
   const shutDays = useMemo(() => new Set((working?.weekdays ?? []).filter((w) => !w.open).map((w) => w.weekday)), [working]);
   const days = useMemo(() => pickedDays.filter((d) => !shutDays.has(d)), [pickedDays, shutDays]);
   const [info, setInfo] = useState<WashKind | null>(null);
@@ -163,7 +163,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const minLeadDays = catalog?.booking_rules?.membership_min_lead_days ?? 2;
   const earliest = addDays(todayIST(), minLeadDays);
   const termEnd = preview.data?.end_date;
-  const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4);
+  const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4, 'membership');
   const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }, minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
   const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, ...(coupon ? { coupon } : {}) } : null);
   // A coupon that stopped working after it was applied (it ran out, or the plan changed to one it cannot go with): say so and let it be removed.

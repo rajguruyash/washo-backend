@@ -31,7 +31,7 @@ export default function BookWizard() {
   const [params] = useSearchParams();
   const { data: catalog, isLoading: catalogLoading, isError: catalogError, error: catalogErr, refetch: refetchCatalog } = useCatalog();
   const { data: vehicles } = useVehicles();
-  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22));
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22), true, 'single');
   const { data: addresses } = useAddresses();
   const start = useStartOnDemandPayment();
   const { pay, paying } = usePay();

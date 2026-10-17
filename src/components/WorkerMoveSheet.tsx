@@ -32,7 +32,7 @@ function MoveForm({ wash, onClose, onMove }: { wash: WorkerWash; onClose: () => 
   const [reason, setReason] = useState<(typeof REASONS)[number]['id']>(REASONS[0].id);
   const [note, setNote] = useState('');
   const [moving, setMoving] = useState(false);
-  const crowd = useCapacity(today, addDays(today, 44)).data;
+  const crowd = useCapacity(today, addDays(today, 44), true, 'membership').data;
 
   // "Next day" is the day after the wash was due (never a day already gone).
   const base = wash.scheduled_date < today ? today : wash.scheduled_date;

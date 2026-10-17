@@ -10,6 +10,7 @@ import { accountRouter } from './routes/account';
 import { adminRouter } from './routes/admin';
 import { adminCampaignsRouter } from './routes/adminCampaigns';
 import { adminAnnouncementsRouter } from './routes/adminAnnouncements';
+import { offersRouter } from './routes/offers';
 import { adminManageRouter } from './routes/adminManage';
 import { adminOpsRouter } from './routes/adminOps';
 import { adminSearchRouter } from './routes/adminSearch';
@@ -65,6 +66,14 @@ export function createApp() {
       },
     })
   );
+  // An API answer can carry the session's cookies (the sliding second step of an admin, a refreshed token). A cache that stores such an answer and replays its headers when a later
+  // request is told "not modified" puts an OLD cookie back: the Android app's own HTTP cache did exactly that and signed admins out. So API answers are never stored and carry no ETag
+  // (nothing can be revalidated). A route that wants caching (the public catalogue) says so itself, after this.
+  app.set('etag', false);
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use('/api', apiLimiter, sameOriginWrites);
   // Every admin request passes ONE gate first: signed in, second step done, has a role, and the role may do this (access.ts). Then maintenance mode.
   app.use('/api/admin', ...adminGate);
@@ -75,7 +84,7 @@ export function createApp() {
     next();
   });
   app.get('/api/health', (_req, res) => res.json({ success: true }));
-  app.use('/api', catalogRouter, settingsRouter, authRouter, accountRouter, supportRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminOpsRouter, adminSearchRouter, adminCampaignsRouter, adminAnnouncementsRouter, couponsRouter, remindersRouter, webhookRouter);
+  app.use('/api', catalogRouter, settingsRouter, authRouter, accountRouter, supportRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminOpsRouter, adminSearchRouter, adminCampaignsRouter, adminAnnouncementsRouter, offersRouter, couponsRouter, remindersRouter, webhookRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'Not found')));
 
   // Serve the built React app (same origin as the API, which keeps cookie auth simple).

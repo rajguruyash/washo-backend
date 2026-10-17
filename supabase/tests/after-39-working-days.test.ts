@@ -161,7 +161,7 @@ describe('single dates', () => {
       expect((await working(s, from, to)).closed.find((c) => c.date === d)!.reason).toBe('Heavy rain');
       await s.as('postgres');
       expect((await s.q(`select count(*)::int n from public.audit_events where event_type = 'working_dates_set'`))[0].n).toBe(2);
-      expect((await s.q(`select count(*)::int n from public.working_dates where day = $1`, [d]))[0].n).toBe(1);
+      expect((await s.q(`select kind, count(*)::int n from public.working_dates where day = $1 group by kind order by kind`, [d]))).toEqual([{ kind: 'membership', n: 1 }, { kind: 'single', n: 1 }]);   // one row per kind (migration 46), never a duplicate
     }));
 });
 
@@ -321,8 +321,10 @@ describe('moving a membership wash', () => {
       await s.as('authenticated', m.admin.authId);
       await s.q('select public.admin_assign_membership_worker($1,$2)', [m.membership, w.profileId]);
       const wash = m.washes[3];                         // a later wash, so the customer's 2 days' notice is no issue
-      const target = addDays(wash.d, 1);                // the day after: not one of this plan's own days
-      const target2 = addDays(wash.d, 2);
+      // two later days on which this vehicle has no other wash (what is "free" depends on the plan's weekdays and today's date, so look rather than assume)
+      const free = [1, 2, 3, 4, 5, 6].map((n) => addDays(wash.d, n)).filter((d) => !m.washes.some((w: any) => w.d === d));
+      const target = free[0];
+      const target2 = free[1];
       await setDates(s, m.admin, target, target, false, 'Rain');
 
       await s.as('authenticated', m.u.authId);

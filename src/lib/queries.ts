@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
-  ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
+  ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminOffer, DayKind, LiveOffer, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
   AdminSearchResults, AdminWorkingDays, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
@@ -34,19 +34,22 @@ export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () =
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
 export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
 
-/** How crowded each day and time window is, by date. Marks busy days amber and full days red (full ones cannot be booked by customers) on the booking pages. */
-export const useCapacity = (from: string, to: string, enabled = true) =>
+/**
+ * How crowded each day and time window is, by date, and which days are closed. Marks busy days amber and full ones red (full ones cannot be booked by customers) on the booking pages.
+ * `kind` is what the page books: single washes and memberships have their own working days. Without it the days closed for either are shown (an admin's pages, which may book anywhere).
+ */
+export const useCapacity = (from: string, to: string, enabled = true, kind?: DayKind) =>
   useQuery({
-    queryKey: ['capacity', from, to],
-    queryFn: async () => Object.fromEntries((await get<{ days: CapacityDay[] }>(`/capacity?from=${from}&to=${to}`)).days.map((d) => [d.date, d])) as Record<string, CapacityDay>,
+    queryKey: ['capacity', from, to, kind ?? 'both'],
+    queryFn: async () => Object.fromEntries((await get<{ days: CapacityDay[] }>(`/capacity?from=${from}&to=${to}${kind ? `&kind=${kind}` : ''}`)).days.map((d) => [d.date, d])) as Record<string, CapacityDay>,
     staleTime: 30_000,
     enabled,
     retry: false,
   });
 
-/** Which weekdays WASHO works and the days it is closed (Admin -> Working Days). The booking pages grey out closed days and say when the next open day is. */
-export const useWorkingDays = (enabled = true) =>
-  useQuery({ queryKey: ['working-days'], queryFn: async () => { const r = await get<WorkingDays & { success: boolean }>('/working-days'); return { weekdays: r.weekdays, closed: r.closed, next_open: r.next_open } as WorkingDays; }, staleTime: 30_000, enabled, retry: false });
+/** Which weekdays WASHO works and the days it is closed (Admin -> Working Days), for single washes or for memberships. The booking pages grey out closed days and say when the next open day is. */
+export const useWorkingDays = (enabled = true, kind?: DayKind) =>
+  useQuery({ queryKey: ['working-days', kind ?? 'both'], queryFn: async () => { const r = await get<WorkingDays & { success: boolean }>(`/working-days${kind ? `?kind=${kind}` : ''}`); return { weekdays: r.weekdays, closed: r.closed, next_open: r.next_open } as WorkingDays; }, staleTime: 30_000, enabled, retry: false });
 
 /** The washes in a month (4 to 28, any mix) and the weekdays the customer likes. */
 export interface MonthlyPlan { body: number; deep: number; weekdays?: number[] }
@@ -136,7 +139,7 @@ export function useRefreshAll() {
   const qc = useQueryClient();
   return () =>
     Promise.all(
-      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate', 'capacity', 'working-days', 'plan-preview'].map((k) =>
+      ['membership-requests', 'membership-request', 'memberships', 'membership', 'bookings', 'booking', 'photos', 'notifications', 'worker-queue', 'worker-pool', 'admin', 'catalog', 'addresses', 'vehicles', 'campaign', 'estimate', 'capacity', 'working-days', 'plan-preview', 'offers'].map((k) =>
         qc.invalidateQueries({ queryKey: [k] })
       )
     );
@@ -497,6 +500,9 @@ export const useAdminSupportTicket = (id: string | null) =>
 
 export const useAdminSettings = () => useQuery({ queryKey: keys.admin('settings'), queryFn: () => get<{ settings: AdminSettings; security: AdminSecurity }>('/admin/settings') });
 export const useAdminRenewals = () => useQuery({ queryKey: keys.admin('renewals'), queryFn: () => get<AdminRenewals & { success: boolean }>('/admin/renewals') });
+/** The offer an admin has switched on: the strip under the header. Anyone may ask; a failure just means no strip. */
+export const useOffers = () => useQuery({ queryKey: ['offers'], queryFn: async () => (await get<{ offers: LiveOffer[] }>('/offers')).offers, staleTime: 30_000, retry: false, refetchOnWindowFocus: true });
+export const useAdminOffers = () => useQuery({ queryKey: keys.admin('offers'), queryFn: async () => (await get<{ offers: AdminOffer[] }>('/admin/offers')).offers });
 export const useAdminCoupons = () => useQuery({ queryKey: keys.admin('coupons'), queryFn: async () => (await get<{ coupons: AdminCoupon[] }>('/admin/coupons')).coupons });
 export const useAdminCouponUses = (id: string | null) => useQuery({ queryKey: keys.admin('coupon-uses', id), queryFn: async () => (await get<{ uses: CouponUse[] }>(`/admin/coupons/${id}/uses`)).uses, enabled: Boolean(id) });
 export const useAdminReviews = (max: number | null) => useQuery({ queryKey: keys.admin('reviews', max), queryFn: async () => { const { summary, reviews } = await get<AdminReviews & { success: boolean }>(`/admin/reviews${max ? `?max=${max}` : ''}`); return { summary, reviews } as AdminReviews; } });

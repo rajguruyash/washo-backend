@@ -18,7 +18,7 @@ export function RescheduleSheet({ wash, endDate, onClose }: { wash: { id: string
   const [error, setError] = useState('');
   // Closed days (Admin -> Working Days) arrive with the crowd; they cannot be picked and the picker says when the next open day is.
   const earliest = addDays(todayIST(), 2);
-  const { data: crowd } = useCapacity(earliest, endDate && endDate > earliest && endDate <= addDays(earliest, 400) ? endDate : addDays(earliest, 44), Boolean(wash));
+  const { data: crowd } = useCapacity(earliest, endDate && endDate > earliest && endDate <= addDays(earliest, 400) ? endDate : addDays(earliest, 44), Boolean(wash), 'membership');
 
   useEffect(() => {
     setDate(null);

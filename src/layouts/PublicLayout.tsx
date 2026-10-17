@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { Logo } from '../components/brand/Logo';
 import { CampaignBanner } from '../components/CampaignBanner';
+import { OfferBanner } from '../components/OfferBanner';
 import { MaintenanceNotice } from '../components/MaintenanceNotice';
 import { ButtonLink } from '../components/ui/Button';
 import { useAuth } from '../state/auth';
@@ -56,6 +57,7 @@ export function PublicLayout() {
           </div>
         </div>
         <CampaignBanner />
+        <OfferBanner />
         <MaintenanceNotice className="mx-4 mb-2 mt-2 sm:mx-6 lg:mx-8" />
         <AnimatePresence>
           {open && (

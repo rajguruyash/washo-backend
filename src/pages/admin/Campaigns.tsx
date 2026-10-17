@@ -16,6 +16,7 @@ import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
 import type { AdminCampaign, AdminCampaignClaim } from '../../lib/types';
 import { BookingSheet } from './BookingSheet';
+import Offers from './Offers';
 import { ConfirmSheet, Loading, errText } from './shared';
 
 /** Where a campaign is right now, in words, for its badge. */
@@ -337,6 +338,7 @@ export default function Campaigns() {
       </div>
       {sheetEl}
       <DeleteCampaign campaign={deleting} onClose={() => setDeleting(null)} />
+      <div className="border-t border-white/[0.08] pt-6"><Offers /></div>
     </div>
   );
 }

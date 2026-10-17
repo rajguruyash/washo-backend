@@ -663,12 +663,20 @@ export interface WorkingDays {
   closed: { date: string; reason: string | null }[];
   next_open: string | null;
 }
-export interface AdminWorkingDays {
-  installed: boolean;
+/** What a booking page is for: the days are kept separately for single washes and for memberships. */
+export type DayKind = 'single' | 'membership';
+export interface WorkingDaysPart {
   weekdays: { weekday: number; open: boolean }[];
   dates: { day: string; open: boolean; reason: string | null; washes: number }[];
   booked_on_closed: { date: string; washes: number }[];
   next_open: string | null;
+}
+export interface AdminWorkingDays extends WorkingDaysPart {
+  installed: boolean;
+  /** True once the database keeps the two lists apart (migration 46); until then `single` is the one list for everything and `membership` is null. */
+  by_kind: boolean;
+  single: WorkingDaysPart;
+  membership: WorkingDaysPart | null;
 }
 export interface CapacityRule { day_kind: 'weekday' | 'weekend'; day_busy: number; day_full: number; slot_busy: number; slot_full: number }
 /** Where a membership plan would land, day by day (nothing is saved), and whether it fits at all. */
@@ -781,6 +789,20 @@ export interface AdminCoupon {
   last_used_at: string | null;
   status: 'live' | 'off' | 'expired' | 'used_up';
 }
+/** An offer an admin switched on (Admin -> Campaigns): shown in a strip under the site header and on the app's Home. */
+export type OfferKind = 'discount' | 'complimentary_wash';
+export interface LiveOffer { id: string; kind: OfferKind; headline: string; details: string | null; /** A coupon code, only while that coupon works. */ code: string | null }
+export interface AdminOffer extends LiveOffer {
+  is_active: boolean;
+  starts_on: string | null;
+  ends_on: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Is the coupon this offer shows still usable? (null: it shows none) */
+  code_works: boolean | null;
+  status: 'live' | 'off' | 'scheduled' | 'ended';
+}
+
 export interface CouponUse { id: string; kind: 'membership' | 'single'; at: string; customer_name: string | null; customer_phone: string | null; reference_code: string | null; discount_cents: number; membership_id: string; plan_cents: number }
 
 export type RenewalStep = 'week' | 'last' | 'ended';
