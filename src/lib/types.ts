@@ -330,6 +330,16 @@ export interface PoolWash {
   society_name: string | null;
   area_locality: string | null;
   city: string | null;
+  /** What the job is (migration 48). Never who the customer is: no name, number, flat, plate or notes until the wash is claimed. */
+  building_block?: string | null;
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  vehicle_color?: string | null;
+  parking_location?: string | null;
+  target_completion_time?: string | null;
+  wash_kind?: WashKind | null;
+  duration_minutes?: number | null;
+  service_includes?: string[] | null;
 }
 
 // ───────── admin ─────────

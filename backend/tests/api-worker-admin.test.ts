@@ -46,7 +46,8 @@ describe('worker queue', () => {
 
     const pool = expectOk(await other.c.get('/api/worker/pool')).body.pool;
     for (const row of pool) {
-      expect(Object.keys(row).sort()).toEqual(['area_locality', 'booking_id', 'booking_type', 'city', 'scheduled_date', 'service_name', 'society_name', 'time_slot', 'vehicle_type']);
+      expect(JSON.stringify(row)).not.toMatch(new RegExp(`Asha Kulkarni|B-702|Gate code|dog on site|${m.reg}|${m.phone}`));   // the job, never the customer
+      expect(Object.keys(row).sort()).toEqual(['area_locality', 'booking_id', 'booking_type', 'building_block', 'city', 'duration_minutes', 'parking_location', 'scheduled_date', 'service_includes', 'service_name', 'society_name', 'target_completion_time', 'time_slot', 'vehicle_color', 'vehicle_make', 'vehicle_model', 'vehicle_type', 'wash_kind']);
     }
     // direct customer-detail routes are closed to workers
     for (const p of ['/api/vehicles', '/api/addresses', '/api/memberships', '/api/membership-requests', `/api/memberships/${m.membershipId}`]) {

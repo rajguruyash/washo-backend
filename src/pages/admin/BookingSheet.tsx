@@ -23,7 +23,8 @@ export function BookingSheet({ id, onClose, startIn = 'details' }: { id: string 
   const workers = useAdminWorkers();
   const act = useAdminAction();
   // Days WASHO does not wash (Admin -> Working Days) are marked when moving a wash, but an admin may still move it onto one.
-  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 44), Boolean(id));
+  // The days WASHO is unavailable are kept separately for single washes and memberships (Admin -> Working Days), so ask about the kind of wash being moved.
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 44), Boolean(id), data?.booking.booking_type === 'membership' ? 'membership' : 'single');
   const toast = useToast();
   const [view, setView] = useState<'details' | 'move' | 'cancel' | 'edit'>('details');
   const [addrId, setAddrId] = useState('');

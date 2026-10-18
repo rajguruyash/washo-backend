@@ -18,7 +18,7 @@ export function AddWashSheet({ open, customerId, onClose, onCreated }: { open: b
   const toast = useToast();
   const act = useAdminAction();
   // Days WASHO does not wash (Admin -> Working Days) are marked, but an admin may still book one.
-  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 29));
+  const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 29), true, 'single');
   const catalog = useCatalog();
   const [picked, setPicked] = useState<string | null>(customerId ?? null);
   const [q, setQ] = useState('');

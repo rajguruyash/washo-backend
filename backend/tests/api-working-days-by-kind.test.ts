@@ -129,3 +129,22 @@ describe('booking follows the right list', () => {
     expectOk(await cust2.c.post('/api/payments/membership-checkout', { ...base, vehicle_id: cust2.vehicle.id, address_id: cust2.addr.id, monthly: { body: 4, deep: 0, weekdays: [1, 2, 3, 4] } }));
   });
 });
+
+describe('the admin moves a paid single wash while memberships are weekends only', () => {
+  it('the page is told single washes are open every day (no "closed" marks for a single wash), and the move onto a weekday works', async () => {
+    const admin = await staffClient('admin');
+    const cust = await customerWithVehicle('car');
+    expectOk(await weekends(admin, 'membership'));
+    const order = expectOk(await singleWash(cust, next(0, 6))).body.order;          // booked for a Sunday
+    const wash = expectOk(await cust.c.post('/api/payments/verify', fake.checkout(order.order_id))).body.result.booking_id as string;
+
+    const days = (kind?: string) => admin.c.get(`/api/capacity?from=${istDate(0)}&to=${istDate(13)}${kind ? `&kind=${kind}` : ''}`).then((r) => expectOk(r).body.days as { date: string; closed?: boolean }[]);
+    expect((await days('single')).some((d) => d.closed)).toBe(false);                              // what the picker asks for a single wash
+    expect((await days('membership')).filter((d) => d.closed).every((d) => ![0, 6].includes(dow(d.date)))).toBe(true);
+    expect((await days()).some((d) => d.closed)).toBe(true);                                        // "both" (what an older picker asked) marks weekdays closed
+
+    const monday = next(1, 8);
+    expectOk(await admin.c.post(`/api/admin/bookings/${wash}/reschedule`, { date: monday, time_slot: 'night', reason: 'Customer asked' }));
+    expect(expectOk(await admin.c.get(`/api/admin/bookings/${wash}`)).body.booking).toMatchObject({ scheduled_date: monday, time_slot: 'night', status: 'confirmed', payment_kind: 'paid' });
+  });
+});

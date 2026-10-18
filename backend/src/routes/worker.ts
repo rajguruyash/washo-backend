@@ -18,7 +18,8 @@ workerRouter.get(
   })
 );
 
-// Unclaimed, paid washes: date, slot, service, vehicle type and society only. No names, numbers or flats.
+// Unclaimed, paid washes: what the job is (date, window, service and what it includes, vehicle type, make, model and colour, society, building, parking spot, finish-by time). Never who the
+// customer is: no name, number, flat, number plate or notes until the wash is claimed.
 workerRouter.get(
   '/worker/pool',
   asyncHandler(async (req, res) => {

@@ -95,7 +95,7 @@ describe('worker_queue: who sees what', () => {
       await s.as('authenticated', w2.authId);
       const pool = await s.q('select * from public.worker_pool(14)');
       expect(pool.map((p: any) => p.booking_id)).toEqual([c.id]); // w1's claimed wash is not in the pool
-      expect(Object.keys(pool[0]).sort()).toEqual(['area_locality', 'booking_id', 'booking_type', 'city', 'scheduled_date', 'service_name', 'society_name', 'time_slot', 'vehicle_type']);
+      expect(Object.keys(pool[0]).sort()).toEqual(['area_locality', 'booking_id', 'booking_type', 'building_block', 'city', 'duration_minutes', 'parking_location', 'scheduled_date', 'service_includes', 'service_name', 'society_name', 'target_completion_time', 'time_slot', 'vehicle_color', 'vehicle_make', 'vehicle_model', 'vehicle_type', 'wash_kind']); // what the job is (migration 48); never who the customer is
     }));
 });
 

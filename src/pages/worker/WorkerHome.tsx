@@ -1,11 +1,13 @@
 import { ChevronRight, MapPin, RefreshCw } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState } from '../../components/EmptyState';
 import { Plate } from '../../components/brand/Plate';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { PoolWashCard } from '../../components/PoolWashCard';
 import { Segmented } from '../../components/ui/Segmented';
+import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { ALL_BUILDINGS, ALL_SOCIETIES, buildingOptions, inBuilding, inSociety, societyOptions } from '../../lib/buildings';
@@ -15,7 +17,8 @@ import { useWorkerPool, useWorkerQueue, useWorkerStep } from '../../lib/queries'
 import { slotLabel, slotWindow } from '../../lib/slots';
 import { useSticky } from '../../lib/sticky';
 import { staffStatus } from '../../lib/status';
-import type { WorkerBucket, WorkerWash } from '../../lib/types';
+import type { PoolWash, WorkerBucket, WorkerWash } from '../../lib/types';
+import { WorkerSearch } from './WorkerSearch';
 
 type Tab = WorkerBucket | 'available';
 
@@ -80,7 +83,11 @@ export default function WorkerHome() {
   // A remembered choice that does not apply (no such society in this list any more) means "all", but is kept for when it applies again.
   const soc = society === ALL_SOCIETIES || societies.some((x) => x.value === society) ? society : ALL_SOCIETIES;
   const inSoc = useMemo(() => all.filter((r) => inSociety(asRow(r), soc)), [all, soc]);
-  const buildings = useMemo(() => buildingOptions(inSoc.map(asRow)), [inSoc]);
+  // Unclaimed washes now say which building they are in (migration 48); a database without it has no building on them, so there is nothing to filter by.
+  const poolHasBuildings = poolRows.some((p) => p.building_block !== undefined);
+  const poolInSoc = useMemo(() => poolRows.filter((p) => inSociety(p, soc)), [poolRows, soc]);
+  const poolRow = (p: PoolWash) => ({ building_block: p.building_block ?? null });
+  const buildings = useMemo(() => (tab === 'available' ? (poolHasBuildings ? buildingOptions(poolInSoc.map(poolRow)) : []) : buildingOptions(inSoc.map(asRow))), [tab, poolHasBuildings, poolInSoc, inSoc]);
   const bld = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
   const rows = inSoc.filter((r) => inBuilding(asRow(r), bld));
   const by = (b: WorkerBucket) => rows.filter((r) => r.bucket === b);
@@ -89,17 +96,20 @@ export default function WorkerHome() {
   const inOpenTab = (l: WorkerWash[]) => (tab === 'changed' ? changedOf(l) : tab === 'available' ? [] : l.filter((r) => r.bucket === tab));
   const changed = changedOf(rows);
   const list: WorkerWash[] = tab === 'available' ? [] : tab === 'changed' ? changed : by(tab);
-  const poolShown = poolRows.filter((p) => inSociety(p, soc));
+  const poolShown = poolInSoc.filter((p) => !poolHasBuildings || inBuilding(poolRow(p), bld));
   // chip counts are for the tab that is open
   const societyCount = (value: string) => (tab === 'available' ? poolRows.filter((p) => inSociety(p, value)).length : inOpenTab(all.filter((r) => inSociety(asRow(r), value))).length);
-  const buildingCount = (value: string) => inOpenTab(inSoc.filter((r) => inBuilding(asRow(r), value))).length;
+  const buildingCount = (value: string) => (tab === 'available' ? poolInSoc.filter((p) => inBuilding(poolRow(p), value)).length : inOpenTab(inSoc.filter((r) => inBuilding(asRow(r), value))).length);
   const placeLabel = [buildings.find((b) => b.value === bld)?.label, societies.find((x) => x.value === soc)?.label].filter(Boolean).join(' · ');
   const filtered = soc !== ALL_SOCIETIES || bld !== ALL_BUILDINGS;
 
+  // An unclaimed wash opened from the search, with its details and a Claim button.
+  const [viewing, setViewing] = useState<PoolWash | null>(null);
   const claim = async (id: string) => {
     try {
       await step.mutateAsync({ id, step: 'claim' });
       toast.success('Added to your queue');
+      setViewing(null);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Could not claim this wash.');
     }
@@ -111,6 +121,7 @@ export default function WorkerHome() {
         <div><h1 className="text-3xl font-extrabold">Your washes</h1><p className="text-sm text-fog">Only washes assigned to you appear here.</p></div>
         <Button variant="glass" size="sm" icon={<RefreshCw className={`h-4 w-4 ${queue.isFetching ? 'animate-spin' : ''}`} />} onClick={() => { void queue.refetch(); void pool.refetch(); }} aria-label="Refresh" />
       </div>
+      <WorkerSearch all={all} pool={poolRows} onPool={setViewing} />
       <Segmented label="Queue" value={tab} onChange={setTab} options={[
         { value: 'today', label: 'Today', count: by('today').length },
         { value: 'in_progress', label: 'In progress', count: by('in_progress').length },
@@ -125,7 +136,7 @@ export default function WorkerHome() {
           <Segmented label="Society" value={soc} onChange={setSociety} options={[{ value: ALL_SOCIETIES, label: 'All societies' }, ...societies.map((x) => ({ value: x.value, label: x.label, count: societyCount(x.value) }))]} />
         </div>
       )}
-      {tab !== 'available' && buildings.length > 0 && (
+      {buildings.length > 0 && (
         <div className="mt-3">
           <Segmented label="Building" value={bld} onChange={setBuilding} options={[{ value: ALL_BUILDINGS, label: 'All buildings' }, ...buildings.map((b) => ({ value: b.value, label: b.label, count: buildingCount(b.value) }))]} />
         </div>
@@ -135,21 +146,18 @@ export default function WorkerHome() {
       <div className="mt-5 space-y-3">
         {queue.isError ? <ErrorState onRetry={() => void queue.refetch()} /> : queue.isLoading ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-32" />) : tab === 'available' ? (
           poolShown.length ? poolShown.map((p) => (
-            <div key={p.booking_id} className="glass flex items-center justify-between gap-3 p-4">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wider text-washo-300">{friendlyDay(p.scheduled_date)} · {slotLabel(p.time_slot)}</p>
-                <p className="mt-1 font-bold">{p.service_name}</p>
-                <p className="text-sm text-fog">{p.vehicle_type.toUpperCase()} · {[p.society_name, p.area_locality].filter(Boolean).join(', ')}</p>
-              </div>
-              <Button size="sm" loading={step.isPending && step.variables?.id === p.booking_id} onClick={() => void claim(p.booking_id)}>Claim</Button>
-            </div>
-          )) : soc !== ALL_SOCIETIES ? <EmptyState title={`No unassigned washes in ${placeLabel}`} text="Choose another society, or All societies." /> : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
+            <PoolWashCard key={p.booking_id} p={p} claiming={step.isPending && step.variables?.id === p.booking_id} onClaim={() => void claim(p.booking_id)} />
+          )) : filtered ? <EmptyState title={`No unassigned washes in ${placeLabel}`} text="Choose another building or society, or All." /> : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
         ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : filtered ? (
           <EmptyState title={`No washes in ${placeLabel} here`} text="Choose another building or society, or All." />
         ) : (
           <EmptyState title={{ today: 'Nothing due today', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
         )}
       </div>
+
+      <Sheet open={Boolean(viewing)} onClose={() => setViewing(null)} size="sm" title="Unclaimed wash" description="Take it and it moves to your queue, with the customer's details.">
+        {viewing && <PoolWashCard bare p={viewing} claiming={step.isPending && step.variables?.id === viewing.booking_id} onClaim={() => void claim(viewing.booking_id)} />}
+      </Sheet>
     </div>
   );
 }

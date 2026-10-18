@@ -318,3 +318,8 @@ Not applied to production by Claude: run 40 and 41 in the Supabase SQL Editor (t
 The booking pages grey a full window out in red with "Full" and a short red message; the Capacity page says the same.
 Not applied to production by Claude: run it in the Supabase SQL Editor (the last part of `bundles/safe-migrations.sql`).
 
+## What an unclaimed wash shows a specialist (migration 48)
+
+`20261004000048_worker_pool_details.sql`, re-runnable; no table or row is touched. `worker_pool()` (the Available tab) now returns what the job IS: what the service includes and how long it takes, the vehicle's type, make, model and colour, the society and BUILDING, the parking spot, and the time the customer wants it finished by. It still never returns who the customer is: no name, mobile number, flat number, number plate or notes until the specialist claims the wash (then `worker_queue` shows them, as before). The function returns more columns, which cannot be changed in place, so it is dropped and created again with the same name, argument and grant; the columns it always had keep their names and order, the new ones are added at the end.
+Not applied to production by Claude: run it in the Supabase SQL Editor (the last part of `bundles/safe-migrations.sql`). Until it is, the Available tab shows what it did before (and has no building filter).
+

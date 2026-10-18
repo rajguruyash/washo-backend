@@ -229,9 +229,9 @@ describe('cutover 03: workers see the pool, not customers', () => {
       await s.as('authenticated', x.w1.authId);
       const pool = await s.q('select * from public.worker_pool(14)');
       expect(pool).toHaveLength(1);
-      expect(Object.keys(pool[0]).sort()).toEqual(['booking_id', 'booking_type', 'city', 'area_locality', 'scheduled_date', 'service_name', 'society_name', 'time_slot', 'vehicle_type'].sort());
+      expect(Object.keys(pool[0]).sort()).toEqual(['area_locality', 'booking_id', 'booking_type', 'building_block', 'city', 'duration_minutes', 'parking_location', 'scheduled_date', 'service_includes', 'service_name', 'society_name', 'target_completion_time', 'time_slot', 'vehicle_color', 'vehicle_make', 'vehicle_model', 'vehicle_type', 'wash_kind']);
       expect(pool[0]).toMatchObject({ booking_id: x.bookingId, service_name: 'Car Body Wash', vehicle_type: 'car', society_name: 'Yashwin Orizzonte' });
-      expect(JSON.stringify(pool[0])).not.toMatch(/B-702|Basement|MH12/);
+      expect(JSON.stringify(pool[0])).not.toMatch(/B-702|MH12/);   // the flat and the number plate stay hidden until the wash is claimed
     }));
 
   it('after claiming, that worker (and only that worker) sees the full details', async () =>

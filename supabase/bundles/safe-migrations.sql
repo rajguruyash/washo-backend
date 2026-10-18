@@ -10241,4 +10241,984 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION app_private.reschedule_wash(uuid, date, public.time_slot, uuid, uuid, date, text) FROM PUBLIC, anon, authenticated;
 
+-- ═════════════ 20261004000043_admin_announcements.sql ═════════════
+-- 20261004000043_admin_announcements.sql
+-- SAFE / additive and re-runnable. ANNOUNCEMENTS FROM THE ADMIN PAGE. An admin (Super admin, Operations or Marketing: the roles that already manage Campaigns) writes a short
+-- message in Admin -> Notifications and it lands in every customer's Notifications in the app (all customers, or only those with a membership that is on). Customers read it
+-- through the notifications they already have; nothing about how they read or clear notifications changes.
+--
+--   notifications.category                    'announcement' is now an allowed category (the existing list is kept as it is)
+--   admin_announcements                       one row per message sent: who, what, to whom, how many. Nobody but the functions below can read or write it
+--   admin_send_announcement(title, body, audience)   validates, records it, and adds one notification per customer, all or nothing. Refuses the same words sent twice in two minutes
+--   admin_announcements_list()                the last 50 messages sent, with who sent them
+-- Nothing existing is touched: no customer, wash, payment or earlier notification row changes when this is applied. Archived customers are not sent anything.
+
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_category_check;
+ALTER TABLE public.notifications ADD CONSTRAINT notifications_category_check CHECK (category = ANY (ARRAY[
+  'upcoming_wash', 'booking_confirmed', 'worker_assigned', 'wash_started', 'wash_completed', 'payment_successful',
+  'membership_expiring', 'membership_approved', 'schedule_changed', 'customer_unavailable', 'announcement']));
+
+CREATE TABLE IF NOT EXISTS public.admin_announcements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 80),
+  body text NOT NULL CHECK (char_length(body) BETWEEN 1 AND 500),
+  audience text NOT NULL CHECK (audience IN ('all', 'members')),
+  recipients integer NOT NULL DEFAULT 0 CHECK (recipients >= 0),
+  sent_by uuid REFERENCES public.profiles(id),
+  sent_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_announcements_sent_idx ON public.admin_announcements (sent_at DESC);
+ALTER TABLE public.admin_announcements ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.admin_announcements FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_send_announcement(p_title text, p_body text, p_audience text DEFAULT 'all') RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_admin uuid := app_private.require_access('campaigns', 'manage');
+  v_title text := btrim(COALESCE(p_title, ''));
+  v_body text := btrim(COALESCE(p_body, ''));
+  v_audience text := COALESCE(NULLIF(btrim(p_audience), ''), 'all');
+  v_id uuid;
+  v_n integer;
+BEGIN
+  IF char_length(v_title) NOT BETWEEN 1 AND 80 THEN RAISE EXCEPTION 'Give the notification a title (up to 80 characters)'; END IF;
+  IF char_length(v_body) NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'Write the message (up to 500 characters)'; END IF;
+  IF v_audience NOT IN ('all', 'members') THEN RAISE EXCEPTION 'Choose who gets it: everyone, or members'; END IF;
+  -- a double tap or a retry must not message every customer twice
+  IF EXISTS (SELECT 1 FROM public.admin_announcements a WHERE a.sent_by = v_admin AND a.title = v_title AND a.body = v_body AND a.audience = v_audience AND a.sent_at > now() - interval '2 minutes') THEN
+    RAISE EXCEPTION 'This notification was just sent. Wait a couple of minutes before sending the same words again';
+  END IF;
+
+  INSERT INTO public.admin_announcements (title, body, audience, sent_by) VALUES (v_title, v_body, v_audience, v_admin) RETURNING id INTO v_id;
+  INSERT INTO public.notifications (profile_id, category, title, body, reference_id)
+  SELECT p.id, 'announcement', v_title, v_body, v_id
+    FROM public.profiles p
+   WHERE p.role = 'customer' AND p.archived_at IS NULL
+     AND (v_audience = 'all' OR EXISTS (SELECT 1 FROM public.memberships m WHERE m.customer_profile_id = p.id AND m.status = 'active'));
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  UPDATE public.admin_announcements SET recipients = v_n WHERE id = v_id;
+  PERFORM app_private.audit('announcement', v_id, 'announcement_sent', jsonb_build_object('title', v_title, 'audience', v_audience, 'recipients', v_n));
+  RETURN jsonb_build_object('id', v_id, 'recipients', v_n);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_send_announcement(text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_send_announcement(text, text, text) TO authenticated; -- the role check is inside
+
+CREATE OR REPLACE FUNCTION public.admin_announcements_list() RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM app_private.require_access('campaigns', 'view');
+  RETURN COALESCE((
+    SELECT jsonb_agg(jsonb_build_object('id', x.id, 'title', x.title, 'body', x.body, 'audience', x.audience, 'recipients', x.recipients,
+                                        'sent_at', x.sent_at, 'sent_by', (SELECT p.full_name FROM public.profiles p WHERE p.id = x.sent_by)) ORDER BY x.sent_at DESC)
+      FROM (SELECT * FROM public.admin_announcements ORDER BY sent_at DESC LIMIT 50) x
+  ), '[]'::jsonb);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_announcements_list() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_announcements_list() TO authenticated; -- the role check is inside
+
+-- ═════════════ 20261004000044_staff_phone_never_linked.sql ═════════════
+-- 20261004000044_staff_phone_never_linked.sql
+-- SAFE / re-runnable. A TEAM MEMBER'S PROFILE IS NEVER TAKEN OVER BY A PHONE SIGN-IN.
+--
+-- The bug: a profile carries its owner's mobile number, and a phone sign-in joins "the profile that already has this number" (link_profile_by_phone_internal, called
+-- by the sign-up trigger, the phone-confirmed trigger and ensure_my_profile). That was meant for customers (an old customer record picked up by the number). It did
+-- not look at the role, so an admin or specialist who asked for a phone code with THEIR OWN number had their profile moved over to that phone login. The website then
+-- refused the phone login ("admins sign in with email"), but the move had already happened: their EMAIL login was left with no profile, and the next email sign-in
+-- quietly made a new, empty customer profile for it. They signed in with the right password and landed in the customer app.
+--
+--   link_profile_by_phone_internal   (replaced) only ever joins a CUSTOMER profile. Admin and specialist profiles are never moved, merged or deleted by a phone login
+--   handle_new_customer_profile      (replaced) a new phone login whose number belongs to a team member does not copy that number onto its own new customer profile
+--   my_phone_is_staff()              (new) true when the signed-in login's confirmed number belongs to an admin or specialist; the website asks it right after a code is
+--                                    accepted, signs that login out again and says "use your email and password"
+-- Nothing existing is touched: no profile, role, wash or payment row changes when this is applied. To put right a profile that was ALREADY moved, run
+-- supabase/repairs/20261015_restore_admin_email_login.sql (once, by hand).
+
+CREATE OR REPLACE FUNCTION app_private.link_profile_by_phone_internal(p_auth_user_id uuid, p_phone text)
+RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_clean_phone text;
+  v_existing_profile_id uuid;
+  v_current_profile_id uuid;
+BEGIN
+  IF p_phone IS NULL OR p_phone = '' THEN RETURN NULL; END IF;
+  v_clean_phone := right(regexp_replace(p_phone, '\D', '', 'g'), 10);
+  IF length(v_clean_phone) < 10 THEN RETURN NULL; END IF;
+
+  SELECT id INTO v_current_profile_id FROM public.profiles WHERE auth_user_id = p_auth_user_id;
+
+  -- Only a CUSTOMER profile can be picked up by its number. A team member (admin, specialist) signs in with email and password; a phone code must never move their profile.
+  SELECT id INTO v_existing_profile_id
+    FROM public.profiles
+   WHERE right(regexp_replace(COALESCE(phone, ''), '\D', '', 'g'), 10) = v_clean_phone
+     AND role = 'customer'
+     AND (v_current_profile_id IS NULL OR id <> v_current_profile_id)
+   ORDER BY created_at ASC
+   LIMIT 1;
+
+  IF v_existing_profile_id IS NULL THEN RETURN v_current_profile_id; END IF;
+
+  PERFORM set_config('washo.allow_identity_change', 'on', true);
+  PERFORM set_config('washo.allow_profile_merge', 'on', true);
+
+  IF v_current_profile_id IS NOT NULL THEN
+    UPDATE public.vehicles SET customer_profile_id = v_existing_profile_id WHERE customer_profile_id = v_current_profile_id;
+    UPDATE public.customer_addresses SET customer_profile_id = v_existing_profile_id WHERE customer_profile_id = v_current_profile_id;
+    UPDATE public.bookings SET customer_profile_id = v_existing_profile_id WHERE customer_profile_id = v_current_profile_id;
+    UPDATE public.memberships SET customer_profile_id = v_existing_profile_id WHERE customer_profile_id = v_current_profile_id;
+    UPDATE public.notifications SET profile_id = v_existing_profile_id WHERE profile_id = v_current_profile_id;
+    DELETE FROM public.profiles WHERE id = v_current_profile_id;
+  END IF;
+
+  UPDATE public.profiles
+     SET auth_user_id = p_auth_user_id, phone = COALESCE(phone, p_phone), updated_at = now()
+   WHERE id = v_existing_profile_id;
+
+  PERFORM set_config('washo.allow_identity_change', 'off', true);
+  PERFORM set_config('washo.allow_profile_merge', 'off', true);
+
+  PERFORM app_private.audit('profile', v_existing_profile_id, 'profile_linked_by_phone',
+    jsonb_build_object('auth_user_id', p_auth_user_id, 'merged_profile_id', v_current_profile_id));
+  RETURN v_existing_profile_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_customer_profile() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_linked uuid;
+  v_phone text := COALESCE(NEW.phone, NEW.raw_user_meta_data ->> 'phone');
+BEGIN
+  -- Only a phone the auth provider has VERIFIED can link to an existing profile.
+  IF NEW.phone IS NOT NULL AND NEW.phone <> '' AND NEW.phone_confirmed_at IS NOT NULL THEN
+    v_linked := app_private.link_profile_by_phone_internal(NEW.id, NEW.phone);
+    IF v_linked IS NOT NULL THEN RETURN NEW; END IF;
+  END IF;
+
+  -- a number that belongs to a team member is not copied onto a new customer profile (a number is never shared between profiles)
+  IF v_phone IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.profiles p WHERE p.role IN ('admin', 'worker')
+       AND right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = right(regexp_replace(v_phone, '\D', '', 'g'), 10)
+  ) THEN
+    v_phone := NULL;
+  END IF;
+
+  INSERT INTO public.profiles (auth_user_id, role, full_name, phone)
+  VALUES (NEW.id, 'customer', NEW.raw_user_meta_data ->> 'full_name', v_phone)
+  ON CONFLICT (auth_user_id) DO UPDATE SET phone = COALESCE(EXCLUDED.phone, public.profiles.phone);
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.my_phone_is_staff() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1
+      FROM auth.users u
+      JOIN public.profiles p ON p.role IN ('admin', 'worker')
+       AND right(regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g'), 10) = right(regexp_replace(u.phone, '\D', '', 'g'), 10)
+     WHERE u.id = auth.uid() AND u.phone IS NOT NULL AND u.phone <> ''
+       AND p.auth_user_id <> u.id
+  )
+$$;
+REVOKE ALL ON FUNCTION public.my_phone_is_staff() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.my_phone_is_staff() TO authenticated;
+
+-- ═════════════ 20261004000045_home_offers.sql ═════════════
+-- 20261004000045_home_offers.sql
+-- SAFE / additive and re-runnable. THE OFFER ON THE HOME SCREEN. An admin (Super admin, Operations or Marketing: the roles that already manage Campaigns) writes a short offer in
+-- Admin -> Campaigns, chooses what kind it is (a Discount, or a Complimentary wash), and switches it on. While it is on, the website shows it in a strip under the header
+-- and the mobile app shows it at the top of Home, with nothing to deploy. Switching it off (or its last day passing) takes it away from both.
+--
+--   promo_offers                         one row per offer: kind, headline, an optional line of detail, an optional coupon code to show, an optional first and last day, on or off
+--   get_live_offers()                    what the website and the app show right now (open to everyone, signed in or not): the newest few offers that are on and inside their dates.
+--                                        A coupon code is only handed out while that coupon can really be used, so a banner never invites people to type a dead code
+--   admin_list_offers()                  every offer, newest first, with where it stands (live, switched off, starts later, ended) and whether its code still works
+--   admin_save_offer(...)                make an offer (p_id NULL) or change one
+--   admin_set_offer_active(id, on/off)   the switch
+--   admin_delete_offer(id)               remove an offer (it is only a notice, not a record of money; the change is written to the audit log)
+-- It never changes a price. A discount's real percentage lives in Discounts (coupons and automatic discounts); a complimentary wash is the Campaign's claim flow. The offer
+-- only tells people about them. Nothing existing is touched: no customer, wash, payment, coupon or campaign row changes when this is applied.
+
+CREATE TABLE IF NOT EXISTS public.promo_offers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind text NOT NULL CHECK (kind IN ('discount', 'complimentary_wash')),
+  headline text NOT NULL CHECK (char_length(headline) BETWEEN 3 AND 60),
+  details text CHECK (details IS NULL OR char_length(details) <= 140),
+  code text CHECK (code IS NULL OR code ~ '^[A-Z0-9]{3,20}$'),
+  is_active boolean NOT NULL DEFAULT false,
+  starts_on date,
+  ends_on date,
+  created_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT promo_offers_dates_check CHECK (starts_on IS NULL OR ends_on IS NULL OR ends_on >= starts_on),
+  CONSTRAINT promo_offers_code_kind_check CHECK (code IS NULL OR kind = 'discount')
+);
+CREATE INDEX IF NOT EXISTS promo_offers_live_idx ON public.promo_offers (is_active, created_at DESC);
+ALTER TABLE public.promo_offers ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.promo_offers FROM PUBLIC, anon, authenticated;
+
+-- Can this coupon be used today? (on, not past its last day, not used up)
+CREATE OR REPLACE FUNCTION app_private.coupon_is_live(p_code text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.membership_coupons c
+     WHERE c.code = p_code AND c.is_active
+       AND (c.expires_on IS NULL OR c.expires_on >= (now() AT TIME ZONE 'Asia/Kolkata')::date)
+       AND (c.max_uses IS NULL OR (SELECT count(*) FROM public.membership_coupon_redemptions r WHERE r.coupon_id = c.id) < c.max_uses))
+$$;
+REVOKE ALL ON FUNCTION app_private.coupon_is_live(text) FROM PUBLIC, anon, authenticated;
+
+-- One offer as the Admin page shows it.
+CREATE OR REPLACE FUNCTION app_private.offer_json(p_id uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT jsonb_build_object(
+           'id', o.id, 'kind', o.kind, 'headline', o.headline, 'details', o.details, 'code', o.code, 'is_active', o.is_active,
+           'starts_on', o.starts_on, 'ends_on', o.ends_on, 'created_at', o.created_at, 'updated_at', o.updated_at,
+           'code_works', CASE WHEN o.code IS NULL THEN NULL ELSE app_private.coupon_is_live(o.code) END,
+           'status', CASE WHEN NOT o.is_active THEN 'off'
+                          WHEN o.ends_on IS NOT NULL AND o.ends_on < (now() AT TIME ZONE 'Asia/Kolkata')::date THEN 'ended'
+                          WHEN o.starts_on IS NOT NULL AND o.starts_on > (now() AT TIME ZONE 'Asia/Kolkata')::date THEN 'scheduled'
+                          ELSE 'live' END)
+    FROM public.promo_offers o WHERE o.id = p_id
+$$;
+REVOKE ALL ON FUNCTION app_private.offer_json(uuid) FROM PUBLIC, anon, authenticated;
+
+-- What everyone sees right now.
+CREATE OR REPLACE FUNCTION public.get_live_offers() RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+           'id', x.id, 'kind', x.kind, 'headline', x.headline, 'details', x.details,
+           'code', CASE WHEN x.code IS NOT NULL AND app_private.coupon_is_live(x.code) THEN x.code END) ORDER BY x.created_at DESC), '[]'::jsonb)
+    FROM (
+      SELECT o.* FROM public.promo_offers o
+       WHERE o.is_active
+         AND (o.starts_on IS NULL OR o.starts_on <= (now() AT TIME ZONE 'Asia/Kolkata')::date)
+         AND (o.ends_on IS NULL OR o.ends_on >= (now() AT TIME ZONE 'Asia/Kolkata')::date)
+       ORDER BY o.created_at DESC LIMIT 3
+    ) x
+$$;
+REVOKE ALL ON FUNCTION public.get_live_offers() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_live_offers() TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_list_offers() RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM app_private.require_access('campaigns', 'view');
+  RETURN COALESCE((SELECT jsonb_agg(app_private.offer_json(o.id) ORDER BY o.is_active DESC, o.created_at DESC) FROM public.promo_offers o), '[]'::jsonb);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_list_offers() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_list_offers() TO authenticated; -- the role check is inside
+
+-- Make an offer (p_id NULL) or change one.
+CREATE OR REPLACE FUNCTION public.admin_save_offer(
+  p_id uuid, p_kind text, p_headline text, p_details text, p_code text, p_starts_on date, p_ends_on date, p_active boolean DEFAULT false
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_access('campaigns', 'manage');
+  v_kind text := btrim(COALESCE(p_kind, ''));
+  v_headline text := btrim(COALESCE(p_headline, ''));
+  v_details text := NULLIF(btrim(COALESCE(p_details, '')), '');
+  v_code text := NULLIF(upper(btrim(COALESCE(p_code, ''))), '');
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_active boolean := COALESCE(p_active, false);
+  v_id uuid;
+BEGIN
+  IF v_kind NOT IN ('discount', 'complimentary_wash') THEN RAISE EXCEPTION 'Choose what kind of offer this is: a discount or a complimentary wash'; END IF;
+  IF char_length(v_headline) NOT BETWEEN 3 AND 60 THEN RAISE EXCEPTION 'Write the offer in 3 to 60 characters'; END IF;
+  IF v_details IS NOT NULL AND char_length(v_details) > 140 THEN RAISE EXCEPTION 'Keep the extra line to 140 characters'; END IF;
+  IF v_code IS NOT NULL THEN
+    IF v_kind <> 'discount' THEN RAISE EXCEPTION 'Only a discount can show a coupon code'; END IF;
+    IF v_code !~ '^[A-Z0-9]{3,20}$' THEN RAISE EXCEPTION 'A coupon code is 3 to 20 letters and numbers, with no spaces'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.membership_coupons WHERE code = v_code) THEN
+      RAISE EXCEPTION 'There is no coupon with the code %. Make it under Discounts first, or leave the code empty', v_code;
+    END IF;
+  END IF;
+  IF p_starts_on IS NOT NULL AND p_ends_on IS NOT NULL AND p_ends_on < p_starts_on THEN RAISE EXCEPTION 'The last day cannot be before the first day'; END IF;
+  IF v_active AND p_ends_on IS NOT NULL AND p_ends_on < v_today THEN RAISE EXCEPTION 'The last day cannot be in the past'; END IF;
+
+  IF p_id IS NULL THEN
+    INSERT INTO public.promo_offers (kind, headline, details, code, is_active, starts_on, ends_on, created_by)
+    VALUES (v_kind, v_headline, v_details, v_code, v_active, p_starts_on, p_ends_on, v_me) RETURNING id INTO v_id;
+    PERFORM app_private.audit('offer', v_id, 'offer_created', jsonb_build_object('kind', v_kind, 'headline', v_headline, 'switched_on', v_active));
+  ELSE
+    UPDATE public.promo_offers
+       SET kind = v_kind, headline = v_headline, details = v_details, code = v_code, starts_on = p_starts_on, ends_on = p_ends_on, is_active = v_active, updated_at = now()
+     WHERE id = p_id RETURNING id INTO v_id;
+    IF v_id IS NULL THEN RAISE EXCEPTION 'That offer no longer exists'; END IF;
+    PERFORM app_private.audit('offer', v_id, 'offer_changed', jsonb_build_object('kind', v_kind, 'headline', v_headline, 'switched_on', v_active));
+  END IF;
+  RETURN app_private.offer_json(v_id);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_save_offer(uuid, text, text, text, text, date, date, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_save_offer(uuid, text, text, text, text, date, date, boolean) TO authenticated; -- the role check is inside
+
+CREATE OR REPLACE FUNCTION public.admin_set_offer_active(p_id uuid, p_active boolean) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_access('campaigns', 'manage');
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  o public.promo_offers%ROWTYPE;
+BEGIN
+  IF p_active IS NULL THEN RAISE EXCEPTION 'Say whether the offer is on or off'; END IF;
+  SELECT * INTO o FROM public.promo_offers WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'That offer no longer exists'; END IF;
+  IF p_active AND o.ends_on IS NOT NULL AND o.ends_on < v_today THEN RAISE EXCEPTION 'This offer''s last day has passed. Change the dates to switch it on again'; END IF;
+  IF o.is_active IS DISTINCT FROM p_active THEN
+    UPDATE public.promo_offers SET is_active = p_active, updated_at = now() WHERE id = p_id;
+    PERFORM app_private.audit('offer', p_id, CASE WHEN p_active THEN 'offer_switched_on' ELSE 'offer_switched_off' END, jsonb_build_object('headline', o.headline));
+  END IF;
+  RETURN app_private.offer_json(p_id);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_set_offer_active(uuid, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_set_offer_active(uuid, boolean) TO authenticated; -- the role check is inside
+
+CREATE OR REPLACE FUNCTION public.admin_delete_offer(p_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := app_private.require_access('campaigns', 'manage');
+  o public.promo_offers%ROWTYPE;
+BEGIN
+  DELETE FROM public.promo_offers WHERE id = p_id RETURNING * INTO o;
+  IF NOT FOUND THEN RAISE EXCEPTION 'That offer no longer exists'; END IF;
+  PERFORM app_private.audit('offer', p_id, 'offer_deleted', jsonb_build_object('kind', o.kind, 'headline', o.headline));
+  RETURN jsonb_build_object('id', p_id);
+END $$;
+REVOKE ALL ON FUNCTION public.admin_delete_offer(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_delete_offer(uuid) TO authenticated; -- the role check is inside
+
+-- ═════════════ 20261004000046_working_days_by_kind.sql ═════════════
+-- 20261004000046_working_days_by_kind.sql
+-- SAFE / re-runnable. WORKING DAYS, SEPARATELY FOR MEMBERSHIPS AND SINGLE WASHES. Until now one list of days (migration 39) applied to everything. Now Admin -> Working Days keeps two:
+--
+--   single washes   a single wash booked on its own, and a free wash claimed from a campaign (WASHO picks the earliest open day)
+--   memberships     the weekdays a customer picks for a membership, the automatic spread of its washes, exact dates, and moving a membership wash
+--
+-- So memberships can be weekends only while single washes stay open every day (or the other way round). Each kind has its own days of the week and its own specific dates (a festival
+-- can close single washes and leave memberships alone). Nothing changes when this is applied: every existing setting is copied to both kinds, so both behave exactly as before until an
+-- admin changes one. No wash, membership or payment row is touched; a wash already booked on a day that is closed for its kind stays booked until WASHO moves it.
+--
+--   working_weekdays / working_dates     each row now has a kind ('single' or 'membership'); the primary keys include it
+--   app_private.is_working_day(date, kind) / next_working_day / closed_day_message / require_working_day / require_capacity     take the kind ('single' by default; 'both' = open only if
+--                                        open for both kinds, which is what an older page that does not say which kind it is booking is told, so it is never offered a day that would be refused)
+--   the membership rules (weekdays picked, the automatic spread, exact dates, moving a membership wash) now ask for 'membership'; single-wash checkout and the free-wash claim ask for 'single'
+--   get_working_days(from, to, kind)     what the booking pages ask (kind omitted = 'both')
+--   admin_working_days()                 now has 'single' and 'membership' parts (the old top-level fields are the single-wash ones, so an older Admin page keeps working)
+--   admin_set_working_weekdays(days, kind) / admin_set_working_dates(from, to, open, reason, kind) / admin_clear_working_date(day, kind)     kind omitted = both kinds, as before
+
+-- ───────────────────────── tables: a kind on every row ─────────────────────────
+ALTER TABLE public.working_weekdays ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'single';
+ALTER TABLE public.working_dates ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'single';
+ALTER TABLE public.working_weekdays DROP CONSTRAINT IF EXISTS working_weekdays_kind_check;
+ALTER TABLE public.working_weekdays ADD CONSTRAINT working_weekdays_kind_check CHECK (kind IN ('single', 'membership'));
+ALTER TABLE public.working_dates DROP CONSTRAINT IF EXISTS working_dates_kind_check;
+ALTER TABLE public.working_dates ADD CONSTRAINT working_dates_kind_check CHECK (kind IN ('single', 'membership'));
+
+DO $$
+DECLARE v_name text;
+BEGIN
+  SELECT conname INTO v_name FROM pg_constraint WHERE conrelid = 'public.working_weekdays'::regclass AND contype = 'p' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (weekday)';
+  IF v_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.working_weekdays DROP CONSTRAINT %I', v_name);
+    ALTER TABLE public.working_weekdays ADD PRIMARY KEY (kind, weekday);
+  END IF;
+  SELECT conname INTO v_name FROM pg_constraint WHERE conrelid = 'public.working_dates'::regclass AND contype = 'p' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (day)';
+  IF v_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.working_dates DROP CONSTRAINT %I', v_name);
+    ALTER TABLE public.working_dates ADD PRIMARY KEY (kind, day);
+  END IF;
+END $$;
+
+-- What is set today becomes the setting for both kinds (the old rows were 'single' by default), so nothing changes until an admin changes one.
+INSERT INTO public.working_weekdays (kind, weekday, is_open, updated_at, updated_by)
+SELECT 'membership', weekday, is_open, updated_at, updated_by FROM public.working_weekdays WHERE kind = 'single'
+ON CONFLICT (kind, weekday) DO NOTHING;
+INSERT INTO public.working_dates (kind, day, is_open, reason, created_at, updated_at, updated_by)
+SELECT 'membership', day, is_open, reason, created_at, updated_at, updated_by FROM public.working_dates WHERE kind = 'single'
+ON CONFLICT (kind, day) DO NOTHING;
+
+-- ───────────────────────── the rule, by kind ─────────────────────────
+DROP FUNCTION IF EXISTS app_private.is_working_day(date);
+DROP FUNCTION IF EXISTS app_private.next_working_day(date);
+DROP FUNCTION IF EXISTS app_private.closed_day_message(date);
+DROP FUNCTION IF EXISTS app_private.require_working_day(date);
+DROP FUNCTION IF EXISTS app_private.require_capacity(date, public.time_slot);
+
+-- A date's own row wins; otherwise its weekday; otherwise (nothing set) it is a working day. 'both' = open for single washes AND for memberships.
+CREATE OR REPLACE FUNCTION app_private.is_working_day(p_date date, p_kind text DEFAULT 'single') RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF p_kind = 'both' THEN RETURN app_private.is_working_day(p_date, 'single') AND app_private.is_working_day(p_date, 'membership'); END IF;
+  IF p_kind IS NULL OR p_kind NOT IN ('single', 'membership') THEN RAISE EXCEPTION 'Unknown kind of booking: %', p_kind; END IF;
+  RETURN COALESCE(
+    (SELECT d.is_open FROM public.working_dates d WHERE d.day = p_date AND d.kind = p_kind),
+    (SELECT w.is_open FROM public.working_weekdays w WHERE w.weekday = extract(dow FROM p_date)::smallint AND w.kind = p_kind),
+    true);
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.next_working_day(p_from date, p_kind text DEFAULT 'single') RETURNS date
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE d date := p_from;
+BEGIN
+  IF p_from IS NULL THEN RETURN NULL; END IF;
+  FOR i IN 0 .. 400 LOOP
+    IF app_private.is_working_day(d, p_kind) THEN RETURN d; END IF;
+    d := d + 1;
+  END LOOP;
+  RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.closed_day_message(p_date date, p_kind text DEFAULT 'single') RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_reason text;
+  v_next date;
+BEGIN
+  SELECT d.reason INTO v_reason FROM public.working_dates d
+   WHERE d.day = p_date AND NOT d.is_open AND (p_kind = 'both' OR d.kind = p_kind) AND d.reason IS NOT NULL
+   ORDER BY (d.kind = 'single') DESC LIMIT 1;
+  v_next := app_private.next_working_day(GREATEST(p_date, v_today) + 1, p_kind);
+  RETURN 'WASHO is currently unavailable on ' || to_char(p_date, 'FMDay, FMDD Mon') || CASE WHEN v_reason IS NOT NULL THEN ' (' || v_reason || ')' ELSE '' END || '. '
+      || CASE WHEN v_next IS NULL THEN 'We are not taking bookings right now.' ELSE 'The next day you can book is ' || to_char(v_next, 'FMDay, FMDD Mon') || '.' END;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.require_working_day(p_date date, p_kind text DEFAULT 'single') RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF p_date IS NOT NULL AND NOT app_private.is_working_day(p_date, p_kind) THEN RAISE EXCEPTION '%', app_private.closed_day_message(p_date, p_kind); END IF;
+END $$;
+
+-- Single-wash checkout and the free-wash claim ask for 'single' (the default); moving a membership wash asks for 'membership'. A closed day first, then a full window.
+CREATE OR REPLACE FUNCTION app_private.require_capacity(p_date date, p_slot public.time_slot, p_kind text DEFAULT 'single') RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM app_private.require_working_day(p_date, p_kind);
+  PERFORM app_private.require_slot_room(p_date, p_slot);
+END $$;
+
+REVOKE ALL ON FUNCTION app_private.is_working_day(date, text), app_private.next_working_day(date, text), app_private.closed_day_message(date, text), app_private.require_working_day(date, text),
+  app_private.require_capacity(date, public.time_slot, text) FROM PUBLIC, anon, authenticated;
+
+-- ───────────────────────── memberships ask for the membership days ─────────────────────────
+-- The functions below are the ones in force (migrations 39, 40 and 42), word for word, with one change each: the working-day question is asked for 'membership'.
+
+CREATE OR REPLACE FUNCTION app_private.require_open_weekdays(p_days smallint[], p_start date, p_end date) RETURNS void
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_bad smallint[]; v_open smallint[];
+BEGIN
+  IF p_days IS NULL OR cardinality(p_days) = 0 THEN RETURN; END IF;
+  SELECT array_agg(d::smallint ORDER BY d) INTO v_bad FROM unnest(p_days) d
+   WHERE NOT EXISTS (SELECT 1 FROM generate_series(p_start::timestamp, p_end::timestamp, interval '1 day') g
+                      WHERE extract(dow FROM g)::integer = d AND app_private.is_working_day(g::date, 'membership'));
+  IF v_bad IS NULL THEN RETURN; END IF;
+  SELECT array_agg(d::smallint ORDER BY d) INTO v_open FROM generate_series(0, 6) d
+   WHERE EXISTS (SELECT 1 FROM generate_series(p_start::timestamp, p_end::timestamp, interval '1 day') g
+                  WHERE extract(dow FROM g)::integer = d AND app_private.is_working_day(g::date, 'membership'));
+  RAISE EXCEPTION '%', 'WASHO is currently unavailable on ' || app_private.weekday_words(v_bad) || '. '
+    || CASE WHEN v_open IS NULL THEN 'We are not taking memberships right now.' ELSE 'Choose from ' || app_private.weekday_words(v_open) || '.' END;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.plan_membership_washes(
+  p_vehicle_id uuid, p_start date, p_end date, p_pattern jsonb, p_total integer, p_slot public.time_slot, p_respect_capacity boolean
+) RETURNS TABLE (wash_date date, kind text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE d date := p_start; n integer := 0; k text;
+BEGIN
+  WHILE n < p_total AND d <= p_end LOOP
+    SELECT e->>'kind' INTO k FROM jsonb_array_elements(p_pattern) e WHERE (e->>'weekday')::integer = extract(dow FROM d)::integer;
+    IF k IS NOT NULL
+       AND NOT app_private.vehicle_has_live_booking(p_vehicle_id, d)
+       AND (NOT p_respect_capacity OR app_private.is_working_day(d, 'membership')) THEN
+      wash_date := d; kind := k; n := n + 1;
+      RETURN NEXT;
+    END IF;
+    d := d + 1;
+  END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.plan_monthly_washes(
+  p_vehicle_id uuid, p_start date, p_months integer, p_body integer, p_deep integer, p_weekdays smallint[]
+) RETURNS TABLE (wash_date date, kind text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  n integer := p_body + p_deep;
+  m integer; w_start date; w_end date; cand date[]; loads numeric[]; c integer; i integer; k integer; k0 integer; best integer; lo integer; hi integer;
+BEGIN
+  FOR m IN 0 .. p_months - 1 LOOP
+    w_start := CASE WHEN m = 0 THEN p_start ELSE app_private.membership_term_end(p_start, m) + 1 END;
+    w_end := app_private.membership_term_end(p_start, m + 1);
+    SELECT COALESCE(array_agg(g::date ORDER BY g), ARRAY[]::date[]) INTO cand
+      FROM generate_series(w_start::timestamp, w_end::timestamp, interval '1 day') g
+     WHERE (cardinality(COALESCE(p_weekdays, ARRAY[]::smallint[])) = 0 OR extract(dow FROM g)::integer = ANY (p_weekdays::integer[]))
+       AND NOT app_private.vehicle_has_live_booking(p_vehicle_id, g::date)
+       AND app_private.is_working_day(g::date, 'membership');
+    IF cardinality(cand) < n AND cardinality(COALESCE(p_weekdays, ARRAY[]::smallint[])) = 0 THEN
+      SELECT COALESCE(array_agg(g::date ORDER BY g), ARRAY[]::date[]) INTO cand
+        FROM generate_series(w_start::timestamp, w_end::timestamp, interval '1 day') g
+       WHERE NOT app_private.vehicle_has_live_booking(p_vehicle_id, g::date);
+    END IF;
+    c := cardinality(cand);
+    IF c >= n THEN
+      SELECT COALESCE(array_agg(app_private.day_load(d) ORDER BY ord), ARRAY[]::numeric[]) INTO loads FROM unnest(cand) WITH ORDINALITY AS u(d, ord);
+      FOR i IN 0 .. n - 1 LOOP
+        -- all whole-number arithmetic: k0 = floor((i + 0.5) * c / n); part i holds the days k with i * c / n <= k + 0.5 < (i + 1) * c / n, and the parts tile 0 .. c - 1
+        k0 := ((2 * i + 1) * c) / (2 * n);                          -- 0-based index of the day this wash always got
+        lo := (2 * i * c + n - 1) / (2 * n);
+        hi := (2 * (i + 1) * c + n - 1) / (2 * n) - 1;
+        best := k0;
+        FOR k IN lo .. hi LOOP
+          IF loads[1 + k] < loads[1 + best] OR (loads[1 + k] = loads[1 + best] AND abs(k - k0) < abs(best - k0)) THEN best := k; END IF;
+        END LOOP;
+        wash_date := cand[1 + best];
+        kind := CASE WHEN floor((i + 1) * p_deep::numeric / n) > floor(i * p_deep::numeric / n) THEN 'deep' ELSE 'body' END;
+        RETURN NEXT;
+      END LOOP;
+    ELSE
+      FOR i IN 1 .. c LOOP
+        wash_date := cand[i];
+        kind := 'body';
+        RETURN NEXT;
+      END LOOP;
+    END IF;
+  END LOOP;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.check_custom_dates(
+  p_vehicle_id uuid, p_start date, p_end date, p_pattern jsonb, p_total integer, p_slot public.time_slot, p_dates jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_min date := GREATEST(p_start, (now() AT TIME ZONE 'Asia/Kolkata')::date + app_private.setting('membership_min_lead_days'));
+  v_per_week integer := jsonb_array_length(p_pattern);
+  v_terms integer := p_total / jsonb_array_length(p_pattern);   -- how many weeks' worth of washes the term holds
+  v_norm jsonb; v_n integer; v_body integer; v_deep integer; v_want_body integer; v_want_deep integer;
+  r record;
+BEGIN
+  IF jsonb_typeof(p_dates) <> 'array' THEN RAISE EXCEPTION 'Choose the date of each wash'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_dates) e
+              WHERE jsonb_typeof(e) <> 'object' OR (e->>'date') IS NULL OR (e->>'date') !~ '^\d{4}-\d{2}-\d{2}$' OR (e->>'kind') IS NULL OR (e->>'kind') NOT IN ('body', 'deep')) THEN
+    RAISE EXCEPTION 'Each wash needs a date and a kind (body or deep)';
+  END IF;
+  SELECT jsonb_agg(jsonb_build_object('date', (e->>'date')::date, 'kind', e->>'kind') ORDER BY (e->>'date')::date), count(*),
+         count(*) FILTER (WHERE e->>'kind' = 'body'), count(*) FILTER (WHERE e->>'kind' = 'deep')
+    INTO v_norm, v_n, v_body, v_deep FROM jsonb_array_elements(p_dates) e;
+  SELECT count(*) FILTER (WHERE x->>'kind' = 'body') * v_terms, count(*) FILTER (WHERE x->>'kind' = 'deep') * v_terms INTO v_want_body, v_want_deep FROM jsonb_array_elements(p_pattern) x;
+
+  IF v_body <> v_want_body OR v_deep <> v_want_deep THEN
+    RAISE EXCEPTION 'Choose exactly % Body wash% and % Deep clean% for this plan (you have % and %)', v_want_body, CASE WHEN v_want_body = 1 THEN '' ELSE 'es' END, v_want_deep, CASE WHEN v_want_deep = 1 THEN '' ELSE 's' END, v_body, v_deep;
+  END IF;
+  IF (SELECT count(DISTINCT e->>'date') FROM jsonb_array_elements(v_norm) e) < v_n THEN RAISE EXCEPTION 'Two washes are on the same day: a vehicle is washed once a day'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_norm) e WHERE (e->>'date')::date < v_min OR (e->>'date')::date > p_end) THEN
+    RAISE EXCEPTION 'Every wash must be between % and % (not today or tomorrow)', to_char(v_min, 'FMDy, FMDD Mon YYYY'), to_char(p_end, 'FMDy, FMDD Mon YYYY');
+  END IF;
+  FOR r IN SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e ORDER BY 1 LOOP
+    PERFORM app_private.require_working_day(r.d, 'membership');
+  END LOOP;
+  FOR r IN SELECT date_trunc('week', (e->>'date')::date)::date AS wk, count(*)::integer AS n FROM jsonb_array_elements(v_norm) e GROUP BY 1 HAVING count(*) > v_per_week ORDER BY 1 LIMIT 1 LOOP
+    RAISE EXCEPTION 'No more than % wash% in one week: the week of % has %', v_per_week, CASE WHEN v_per_week = 1 THEN '' ELSE 'es' END, to_char(r.wk, 'FMDD Mon'), r.n;
+  END LOOP;
+  FOR r IN SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e ORDER BY 1 LOOP
+    IF app_private.vehicle_has_live_booking(p_vehicle_id, r.d) THEN RAISE EXCEPTION 'This vehicle already has a wash on %', to_char(r.d, 'FMDy, FMDD Mon'); END IF;
+  END LOOP;
+  RETURN v_norm;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.check_custom_dates_counts(
+  p_vehicle_id uuid, p_start date, p_end date, p_want_body integer, p_want_deep integer, p_per_week integer, p_dates jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_min date := GREATEST(p_start, (now() AT TIME ZONE 'Asia/Kolkata')::date + app_private.setting('membership_min_lead_days'));
+  v_norm jsonb; v_n integer; v_body integer; v_deep integer;
+  r record;
+BEGIN
+  IF jsonb_typeof(p_dates) <> 'array' THEN RAISE EXCEPTION 'Choose the date of each wash'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_dates) e
+              WHERE jsonb_typeof(e) <> 'object' OR (e->>'date') IS NULL OR (e->>'date') !~ '^\d{4}-\d{2}-\d{2}$' OR (e->>'kind') IS NULL OR (e->>'kind') NOT IN ('body', 'deep')) THEN
+    RAISE EXCEPTION 'Each wash needs a date and a kind (body or deep)';
+  END IF;
+  SELECT jsonb_agg(jsonb_build_object('date', (e->>'date')::date, 'kind', e->>'kind') ORDER BY (e->>'date')::date), count(*),
+         count(*) FILTER (WHERE e->>'kind' = 'body'), count(*) FILTER (WHERE e->>'kind' = 'deep')
+    INTO v_norm, v_n, v_body, v_deep FROM jsonb_array_elements(p_dates) e;
+  IF v_body <> p_want_body OR v_deep <> p_want_deep THEN
+    RAISE EXCEPTION 'Choose exactly % Body wash% and % Deep clean% for this plan (you have % and %)', p_want_body, CASE WHEN p_want_body = 1 THEN '' ELSE 'es' END, p_want_deep, CASE WHEN p_want_deep = 1 THEN '' ELSE 's' END, v_body, v_deep;
+  END IF;
+  IF (SELECT count(DISTINCT e->>'date') FROM jsonb_array_elements(v_norm) e) < v_n THEN RAISE EXCEPTION 'Two washes are on the same day: a vehicle is washed once a day'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_norm) e WHERE (e->>'date')::date < v_min OR (e->>'date')::date > p_end) THEN
+    RAISE EXCEPTION 'Every wash must be between % and % (not today or tomorrow)', to_char(v_min, 'FMDy, FMDD Mon YYYY'), to_char(p_end, 'FMDy, FMDD Mon YYYY');
+  END IF;
+  FOR r IN SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e ORDER BY 1 LOOP
+    PERFORM app_private.require_working_day(r.d, 'membership');
+  END LOOP;
+  FOR r IN SELECT (e->>'date')::date AS d FROM jsonb_array_elements(v_norm) e ORDER BY 1 LOOP
+    IF app_private.vehicle_has_live_booking(p_vehicle_id, r.d) THEN RAISE EXCEPTION 'This vehicle already has a wash on %', to_char(r.d, 'FMDy, FMDD Mon'); END IF;
+  END LOOP;
+  RETURN v_norm;
+END $$;
+
+CREATE OR REPLACE FUNCTION app_private.reschedule_wash(
+  p_occurrence_id uuid, p_new_date date, p_new_slot public.time_slot,
+  p_actor uuid,            -- profile making the change
+  p_customer uuid,         -- non-null: the caller must own the membership (customer path); null: staff path
+  p_min_date date,         -- earliest date allowed for this caller
+  p_reason text DEFAULT NULL
+) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  o public.membership_schedule_occurrences%ROWTYPE;
+  v_membership public.memberships%ROWTYPE;
+  v_booking public.bookings%ROWTYPE;
+  v_worker uuid;
+BEGIN
+  SELECT * INTO o FROM public.membership_schedule_occurrences WHERE id = p_occurrence_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wash not found'; END IF;
+
+  SELECT m.* INTO v_membership
+    FROM public.membership_schedules ms JOIN public.memberships m ON m.id = ms.membership_id
+   WHERE ms.id = o.membership_schedule_id;
+  IF p_customer IS NOT NULL AND v_membership.customer_profile_id <> p_customer THEN RAISE EXCEPTION 'Wash not found'; END IF;
+  IF v_membership.status <> 'active' THEN RAISE EXCEPTION 'This membership is not active'; END IF;
+
+  SELECT * INTO v_booking FROM public.bookings WHERE membership_schedule_occurrence_id = p_occurrence_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wash not found'; END IF;
+  IF v_booking.status NOT IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'rescheduled') THEN
+    RAISE EXCEPTION 'This wash is % and cannot be rescheduled', v_booking.status;
+  END IF;
+
+  IF p_new_date IS NULL OR p_new_date < p_min_date THEN
+    RAISE EXCEPTION 'Washes need at least 1 day of preparation. The earliest date is %', p_min_date;
+  END IF;
+  IF p_new_date < o.original_date THEN
+    RAISE EXCEPTION 'A wash cannot be moved earlier than its original date (%)', o.original_date;
+  END IF;
+  IF p_new_date > (v_membership.end_at AT TIME ZONE 'Asia/Kolkata')::date THEN
+    RAISE EXCEPTION 'Please choose a date within your membership, which ends on %', (v_membership.end_at AT TIME ZONE 'Asia/Kolkata')::date;
+  END IF;
+  IF p_new_date = o."current_date" AND p_new_slot = o.time_slot THEN
+    RAISE EXCEPTION 'That is already the date and time of this wash';
+  END IF;
+  IF NOT public.is_admin() THEN PERFORM app_private.require_capacity(p_new_date, p_new_slot, 'membership'); END IF;   -- a working day, and room in that time window
+  IF EXISTS (SELECT 1 FROM public.bookings
+              WHERE vehicle_id = v_booking.vehicle_id AND scheduled_date = p_new_date AND id <> v_booking.id
+                AND status IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'in_progress')) THEN
+    RAISE EXCEPTION 'This vehicle already has a wash on that date';
+  END IF;
+
+  -- The two validation triggers require booking and occurrence to agree at every step, so move them in an
+  -- order where they always do: (1) the date (the occurrence trigger carries the booking along), then
+  -- (2) the slot on the occurrence, then (3) the same slot on the booking.
+  IF p_new_date <> o."current_date" THEN
+    UPDATE public.membership_schedule_occurrences
+       SET "current_date" = p_new_date, status = 'rescheduled', updated_at = now() WHERE id = p_occurrence_id;
+  END IF;
+  IF p_new_slot <> o.time_slot THEN
+    UPDATE public.membership_schedule_occurrences
+       SET time_slot = p_new_slot, status = 'rescheduled', updated_at = now() WHERE id = p_occurrence_id;
+  END IF;
+
+  UPDATE public.bookings
+     SET time_slot = p_new_slot, status = 'confirmed', customer_confirmed_at = NULL, updated_at = now(),
+         notes = COALESCE(notes, '') || E'\nRescheduled from ' || v_booking.scheduled_date::text || ' to ' || p_new_date::text
+   WHERE id = v_booking.id;
+
+  -- Whoever held the old date no longer does.
+  UPDATE public.worker_assignments SET is_active = false, unassigned_at = now() WHERE booking_id = v_booking.id AND is_active;
+
+  -- A membership with a regular specialist keeps that specialist on its washes.
+  SELECT p.id INTO v_worker FROM public.profiles p WHERE p.id = v_membership.assigned_worker_profile_id AND p.role = 'worker';
+  IF v_worker IS NOT NULL THEN
+    INSERT INTO public.worker_assignments (booking_id, worker_profile_id, is_active, assigned_at) VALUES (v_booking.id, v_worker, true, now());
+    UPDATE public.bookings SET status = 'worker_assigned' WHERE id = v_booking.id;
+  END IF;
+
+  INSERT INTO public.booking_events (booking_id, event_type, actor_profile_id, event_metadata)
+  VALUES (v_booking.id, 'rescheduled', p_actor,
+          jsonb_build_object('old_date', v_booking.scheduled_date, 'old_slot', v_booking.time_slot,
+                             'new_date', p_new_date, 'new_slot', p_new_slot,
+                             'by', CASE WHEN p_customer IS NOT NULL THEN 'customer'
+                                        WHEN EXISTS (SELECT 1 FROM public.profiles a WHERE a.id = p_actor AND a.role = 'worker') THEN 'worker'
+                                        ELSE 'admin' END,
+                             'reason', NULLIF(trim(p_reason), ''),
+                             'worker_profile_id', v_worker));
+  RETURN true;
+END $$;
+
+REVOKE ALL ON FUNCTION app_private.require_open_weekdays(smallint[], date, date), app_private.plan_membership_washes(uuid, date, date, jsonb, integer, public.time_slot, boolean),
+  app_private.plan_monthly_washes(uuid, date, integer, integer, integer, smallint[]), app_private.check_custom_dates(uuid, date, date, jsonb, integer, public.time_slot, jsonb),
+  app_private.check_custom_dates_counts(uuid, date, date, integer, integer, integer, jsonb),
+  app_private.reschedule_wash(uuid, date, public.time_slot, uuid, uuid, date, text) FROM PUBLIC, anon, authenticated;
+
+-- ───────────────────────── what the booking pages ask ─────────────────────────
+-- Public information: which weekdays are open, the closed days in a range (with the reason when one was given), and the next open day from today, for one kind. A page that does not say
+-- which kind (an older one) gets the days open for BOTH, so it never offers a day the server would refuse.
+DROP FUNCTION IF EXISTS public.get_working_days(date, date);
+CREATE OR REPLACE FUNCTION public.get_working_days(p_from date, p_to date, p_kind text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_kind text := COALESCE(NULLIF(btrim(p_kind), ''), 'both');
+BEGIN
+  IF p_from IS NULL OR p_to IS NULL OR p_to < p_from OR p_to - p_from > 400 THEN RAISE EXCEPTION 'Ask for 1 to 401 days at a time'; END IF;
+  IF v_kind NOT IN ('single', 'membership', 'both') THEN RAISE EXCEPTION 'Ask for single, membership or both'; END IF;
+  RETURN jsonb_build_object(
+    'kind', v_kind,
+    'weekdays', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('weekday', g.d, 'open', CASE WHEN v_kind = 'both' THEN
+                COALESCE((SELECT w.is_open FROM public.working_weekdays w WHERE w.weekday = g.d AND w.kind = 'single'), true) AND COALESCE((SELECT w.is_open FROM public.working_weekdays w WHERE w.weekday = g.d AND w.kind = 'membership'), true)
+              ELSE COALESCE((SELECT w.is_open FROM public.working_weekdays w WHERE w.weekday = g.d AND w.kind = v_kind), true) END) ORDER BY g.d)
+        FROM generate_series(0, 6) AS g(d)), '[]'::jsonb),
+    'closed', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('date', g::date, 'reason', (SELECT d.reason FROM public.working_dates d WHERE d.day = g::date AND NOT d.is_open AND (v_kind = 'both' OR d.kind = v_kind) AND d.reason IS NOT NULL ORDER BY (d.kind = 'single') DESC LIMIT 1)) ORDER BY g)
+        FROM generate_series(p_from::timestamp, p_to::timestamp, interval '1 day') g WHERE NOT app_private.is_working_day(g::date, v_kind)), '[]'::jsonb),
+    'next_open', app_private.next_working_day((now() AT TIME ZONE 'Asia/Kolkata')::date, v_kind));
+END $$;
+REVOKE ALL ON FUNCTION public.get_working_days(date, date, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_working_days(date, date, text) TO anon, authenticated, service_role;
+
+-- ───────────────────────── admin ─────────────────────────
+-- One kind's part of the Working Days page: its weekdays, the dates turned off or on from today (each with how many washes of that kind are booked that day), and the washes of that
+-- kind already booked on days closed for it in the next 120 days (they stay booked until WASHO moves them).
+CREATE OR REPLACE FUNCTION app_private.working_days_json(p_kind text) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+BEGIN
+  RETURN jsonb_build_object(
+    'weekdays', COALESCE((SELECT jsonb_agg(jsonb_build_object('weekday', w.weekday, 'open', w.is_open) ORDER BY w.weekday) FROM public.working_weekdays w WHERE w.kind = p_kind), '[]'::jsonb),
+    'dates', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('day', d.day, 'open', d.is_open, 'reason', d.reason,
+               'washes', (SELECT count(*)::integer FROM public.bookings b WHERE b.scheduled_date = d.day
+                           AND (b.membership_schedule_occurrence_id IS NOT NULL) = (p_kind = 'membership')
+                           AND b.status IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'in_progress'))) ORDER BY d.day)
+        FROM public.working_dates d WHERE d.day >= v_today AND d.kind = p_kind), '[]'::jsonb),
+    'booked_on_closed', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('date', x.d, 'washes', x.n) ORDER BY x.d)
+        FROM (SELECT b.scheduled_date AS d, count(*)::integer AS n FROM public.bookings b
+               WHERE b.scheduled_date BETWEEN v_today AND v_today + 120
+                 AND (b.membership_schedule_occurrence_id IS NOT NULL) = (p_kind = 'membership')
+                 AND b.status IN ('pending', 'confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up', 'in_progress')
+                 AND NOT app_private.is_working_day(b.scheduled_date, p_kind)
+               GROUP BY b.scheduled_date) x), '[]'::jsonb),
+    'next_open', app_private.next_working_day(v_today, p_kind));
+END $$;
+REVOKE ALL ON FUNCTION app_private.working_days_json(text) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_working_days() RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_single jsonb;
+BEGIN
+  PERFORM app_private.require_admin();
+  v_single := app_private.working_days_json('single');
+  -- the top-level fields are the single-wash ones (what an older Admin page reads); the page now reads 'single' and 'membership'
+  RETURN v_single || jsonb_build_object('single', v_single, 'membership', app_private.working_days_json('membership'));
+END $$;
+
+-- 'single', 'membership' or 'both' (the default) -> the kinds to change.
+CREATE OR REPLACE FUNCTION app_private.working_kinds(p_kind text) RETURNS text[]
+LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+  IF p_kind IS NULL OR btrim(p_kind) = '' OR p_kind = 'both' THEN RETURN ARRAY['single', 'membership']; END IF;
+  IF p_kind NOT IN ('single', 'membership') THEN RAISE EXCEPTION 'Choose single washes, memberships or both'; END IF;
+  RETURN ARRAY[p_kind];
+END $$;
+REVOKE ALL ON FUNCTION app_private.working_kinds(text) FROM PUBLIC, anon, authenticated;
+
+-- Which weekdays WASHO works for a kind, all at once (0 = Sunday ... 6 = Saturday). An empty list closes every weekday. Without a kind it sets both, as before.
+DROP FUNCTION IF EXISTS public.admin_set_working_weekdays(integer[]);
+CREATE OR REPLACE FUNCTION public.admin_set_working_weekdays(p_open_days integer[], p_kind text DEFAULT 'both') RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_admin uuid := app_private.require_admin(); v_kinds text[] := app_private.working_kinds(p_kind);
+BEGIN
+  IF p_open_days IS NULL OR EXISTS (SELECT 1 FROM unnest(p_open_days) d WHERE d IS NULL OR d NOT BETWEEN 0 AND 6) THEN
+    RAISE EXCEPTION 'Each day must be a weekday (0 to 6)';
+  END IF;
+  UPDATE public.working_weekdays SET is_open = (weekday::integer = ANY (p_open_days)), updated_at = now(), updated_by = v_admin WHERE kind = ANY (v_kinds);
+  PERFORM app_private.audit('working_days', NULL, 'working_weekdays_changed', jsonb_build_object('kinds', to_jsonb(v_kinds), 'open_days', (SELECT COALESCE(jsonb_agg(w.weekday ORDER BY w.weekday), '[]'::jsonb) FROM public.working_weekdays w WHERE w.is_open AND w.kind = v_kinds[1])));
+  RETURN true;
+END $$;
+
+-- Turn a date, or a run of dates, off (closed) or on (a working day even if its weekday is off), for a kind. Returns how many dates were set.
+DROP FUNCTION IF EXISTS public.admin_set_working_dates(date, date, boolean, text);
+CREATE OR REPLACE FUNCTION public.admin_set_working_dates(p_from date, p_to date, p_open boolean, p_reason text DEFAULT NULL, p_kind text DEFAULT 'both') RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_admin uuid := app_private.require_admin();
+  v_today date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_reason text := NULLIF(btrim(COALESCE(p_reason, '')), '');
+  v_kinds text[] := app_private.working_kinds(p_kind);
+  n integer;
+BEGIN
+  IF p_from IS NULL OR p_to IS NULL OR p_open IS NULL THEN RAISE EXCEPTION 'Choose the date and whether WASHO works that day'; END IF;
+  IF p_from < v_today THEN RAISE EXCEPTION 'Choose today or a later date'; END IF;
+  IF p_to < p_from THEN RAISE EXCEPTION 'The last date cannot be before the first'; END IF;
+  IF p_to - p_from > 91 THEN RAISE EXCEPTION 'Set up to 92 days at a time'; END IF;
+  IF v_reason IS NOT NULL AND char_length(v_reason) > 120 THEN RAISE EXCEPTION 'Please keep the reason under 120 characters'; END IF;
+  INSERT INTO public.working_dates (kind, day, is_open, reason, updated_by)
+  SELECT k, g::date, p_open, v_reason, v_admin FROM unnest(v_kinds) AS k, generate_series(p_from::timestamp, p_to::timestamp, interval '1 day') g
+  ON CONFLICT (kind, day) DO UPDATE SET is_open = EXCLUDED.is_open, reason = EXCLUDED.reason, updated_at = now(), updated_by = EXCLUDED.updated_by;
+  n := p_to - p_from + 1;
+  PERFORM app_private.audit('working_days', NULL, 'working_dates_set', jsonb_build_object('kinds', to_jsonb(v_kinds), 'from', p_from, 'to', p_to, 'open', p_open, 'reason', v_reason, 'days', n));
+  RETURN n;
+END $$;
+
+-- Take a date's own setting away for a kind: its weekday decides again.
+DROP FUNCTION IF EXISTS public.admin_clear_working_date(date);
+CREATE OR REPLACE FUNCTION public.admin_clear_working_date(p_day date, p_kind text DEFAULT 'both') RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_kinds text[] := app_private.working_kinds(p_kind); v_was boolean; n integer;
+BEGIN
+  PERFORM app_private.require_admin();
+  WITH gone AS (DELETE FROM public.working_dates WHERE day = p_day AND kind = ANY (v_kinds) RETURNING is_open)
+  SELECT count(*)::integer, bool_or(is_open) INTO n, v_was FROM gone;
+  IF n = 0 THEN RAISE EXCEPTION 'That date has no setting to remove'; END IF;
+  PERFORM app_private.audit('working_days', NULL, 'working_date_cleared', jsonb_build_object('kinds', to_jsonb(v_kinds), 'day', p_day, 'was_open', v_was));
+  RETURN true;
+END $$;
+
+REVOKE ALL ON FUNCTION public.admin_working_days(), public.admin_set_working_weekdays(integer[], text), public.admin_set_working_dates(date, date, boolean, text, text), public.admin_clear_working_date(date, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_working_days(), public.admin_set_working_weekdays(integer[], text), public.admin_set_working_dates(date, date, boolean, text, text), public.admin_clear_working_date(date, text) TO authenticated;  -- require_admin() inside
+
+-- ═════════════ 20261004000047_device_push_tokens.sql ═════════════
+-- 20261004000047_device_push_tokens.sql
+-- SAFE / additive and re-runnable. PUSH TO A CLOSED APP (Firebase Cloud Messaging). The mobile app asks Android for its Firebase "device token" and hands it to WASHO after sign-in; when an
+-- admin sends a notification (Admin -> Notifications, migration 43) the server also pushes it to the phones of the customers who got it, so it arrives at once even when the app is closed.
+--
+--   device_tokens                              one row per phone: the token, whose it is, when it was last seen. Nobody but the functions below can read or write it
+--   register_device_token(token, platform, app_version)   the signed-in person's phone: saved, or moved to this person if the phone changed hands. A person keeps their 5 newest phones
+--   unregister_device_token(token)             on sign-out: this phone stops getting that person's messages
+--   admin_announcement_push_targets(id)        for the server, as the admin who just sent it: the title, the message and the tokens of the customers who received it (Campaigns access)
+--   admin_forget_device_tokens(tokens)         for the server: tokens Firebase says no longer exist (app uninstalled) are removed
+-- Nothing existing is touched: no customer, wash, payment or notification row changes when this is applied. Without a Firebase key on the server nothing is pushed and everything works as before.
+
+CREATE TABLE IF NOT EXISTS public.device_tokens (
+  token text PRIMARY KEY CHECK (char_length(token) BETWEEN 20 AND 4096),
+  profile_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  platform text NOT NULL DEFAULT 'android' CHECK (platform IN ('android', 'ios')),
+  app_version text CHECK (app_version IS NULL OR char_length(app_version) <= 40),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS device_tokens_profile_idx ON public.device_tokens (profile_id, last_seen_at DESC);
+ALTER TABLE public.device_tokens ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.device_tokens FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.register_device_token(p_token text, p_platform text DEFAULT 'android', p_app_version text DEFAULT NULL) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_me uuid := public.current_profile_id();
+  v_token text := btrim(COALESCE(p_token, ''));
+  v_platform text := COALESCE(NULLIF(btrim(p_platform), ''), 'android');
+  v_version text := NULLIF(btrim(COALESCE(p_app_version, '')), '');
+BEGIN
+  IF v_me IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_me AND archived_at IS NULL) THEN
+    RAISE EXCEPTION 'Unauthorized: sign in first' USING ERRCODE = '42501';
+  END IF;
+  IF char_length(v_token) NOT BETWEEN 20 AND 4096 OR v_token ~ '\s' THEN RAISE EXCEPTION 'That is not a valid device token'; END IF;
+  IF v_platform NOT IN ('android', 'ios') THEN RAISE EXCEPTION 'Platform must be android or ios'; END IF;
+  IF v_version IS NOT NULL AND char_length(v_version) > 40 THEN v_version := left(v_version, 40); END IF;
+
+  -- the same phone signed in as someone else now belongs to that person, so the last person's messages stop arriving on it
+  INSERT INTO public.device_tokens (token, profile_id, platform, app_version) VALUES (v_token, v_me, v_platform, v_version)
+  ON CONFLICT (token) DO UPDATE SET profile_id = EXCLUDED.profile_id, platform = EXCLUDED.platform, app_version = EXCLUDED.app_version, last_seen_at = now();
+
+  -- a person keeps their 5 newest phones
+  DELETE FROM public.device_tokens d
+   WHERE d.profile_id = v_me
+     AND d.token IN (SELECT t.token FROM public.device_tokens t WHERE t.profile_id = v_me ORDER BY t.last_seen_at DESC, t.token OFFSET 5);
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.register_device_token(text, text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.register_device_token(text, text, text) TO authenticated; -- the caller's own profile is read inside
+
+CREATE OR REPLACE FUNCTION public.unregister_device_token(p_token text) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_me uuid := public.current_profile_id();
+BEGIN
+  IF v_me IS NULL THEN RAISE EXCEPTION 'Unauthorized: sign in first' USING ERRCODE = '42501'; END IF;
+  DELETE FROM public.device_tokens WHERE token = btrim(COALESCE(p_token, '')) AND profile_id = v_me;   -- only your own phone
+  RETURN FOUND;
+END $$;
+REVOKE ALL ON FUNCTION public.unregister_device_token(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.unregister_device_token(text) TO authenticated; -- the caller's own profile is read inside
+
+CREATE OR REPLACE FUNCTION public.admin_announcement_push_targets(p_announcement_id uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE a public.admin_announcements%ROWTYPE;
+BEGIN
+  PERFORM app_private.require_access('campaigns', 'manage');
+  SELECT * INTO a FROM public.admin_announcements WHERE id = p_announcement_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'That notification no longer exists'; END IF;
+  RETURN jsonb_build_object(
+    'title', a.title,
+    'body', a.body,
+    'devices', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('token', d.token, 'notification_id', n.id))
+        FROM public.notifications n
+        JOIN public.device_tokens d ON d.profile_id = n.profile_id
+        JOIN public.profiles p ON p.id = n.profile_id
+       WHERE n.reference_id = a.id AND n.category = 'announcement' AND p.archived_at IS NULL), '[]'::jsonb));
+END $$;
+REVOKE ALL ON FUNCTION public.admin_announcement_push_targets(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_announcement_push_targets(uuid) TO authenticated; -- the role check is inside
+
+CREATE OR REPLACE FUNCTION public.admin_forget_device_tokens(p_tokens text[]) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE n integer;
+BEGIN
+  PERFORM app_private.require_access('campaigns', 'manage');
+  IF p_tokens IS NULL OR cardinality(p_tokens) = 0 THEN RETURN 0; END IF;
+  IF cardinality(p_tokens) > 5000 THEN RAISE EXCEPTION 'Too many tokens at once'; END IF;
+  DELETE FROM public.device_tokens WHERE token = ANY (p_tokens);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;
+REVOKE ALL ON FUNCTION public.admin_forget_device_tokens(text[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.admin_forget_device_tokens(text[]) TO authenticated; -- the role check is inside
+
+-- ═════════════ 20261004000048_worker_pool_details.sql ═════════════
+-- 20261004000048_worker_pool_details.sql
+-- SAFE / re-runnable. A specialist looking at an UNCLAIMED wash (the Available tab) now sees what the job is before deciding to claim it: what the service includes and how long it takes,
+-- the vehicle (type, make, model, colour), the society and BUILDING, the parking spot, and the time the customer wants it finished by. Until now the pool showed only the date, window,
+-- service name, vehicle type, society, area and city.
+--
+-- Still NOT shown until the specialist claims the wash (the privacy rule for the pool is otherwise unchanged): the customer's name, mobile number, flat number, the vehicle's number plate,
+-- and the customer's notes. Those appear in the specialist's own queue once the wash is theirs (worker_queue), exactly as before.
+--
+-- worker_pool() returns more columns, and a function cannot change its result columns in place, so it is dropped and created again with the same name, argument and grant. The columns it
+-- always had keep their names, order and meaning, so a caller that reads those still works; the new ones are added at the end. No table, no row and no other function is touched.
+
+DROP FUNCTION IF EXISTS public.worker_pool(integer);
+
+CREATE FUNCTION public.worker_pool(p_days integer DEFAULT 14)
+RETURNS TABLE (
+  booking_id uuid, scheduled_date date, time_slot public.time_slot, booking_type public.booking_type,
+  service_name text, vehicle_type public.vehicle_type, society_name text, area_locality text, city text,
+  building_block text, vehicle_make text, vehicle_model text, vehicle_color text, parking_location text, target_completion_time text,
+  wash_kind text, duration_minutes integer, service_includes jsonb
+) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.is_worker() AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Only workers can view the pool' USING ERRCODE = '42501';
+  END IF;
+  RETURN QUERY
+  SELECT b.id, b.scheduled_date, b.time_slot, b.booking_type, s.name, v.vehicle_type,
+         COALESCE(a.society_name, va.society_name), COALESCE(a.area_locality, va.area_locality), COALESCE(a.city, va.city),
+         COALESCE(a.building_block, va.building_block), v.make, v.model, v.color,
+         COALESCE(NULLIF(btrim(b.parking_location), ''), NULLIF(btrim(v.parking_location), ''), NULLIF(btrim(a.parking_location), ''), NULLIF(btrim(va.parking_location), '')),
+         NULLIF(btrim(b.target_completion_time::text), ''),
+         s.wash_kind::text, s.duration_minutes, s.includes
+    FROM public.bookings b
+    JOIN public.services s ON s.id = b.service_id
+    JOIN public.vehicles v ON v.id = b.vehicle_id
+    LEFT JOIN public.customer_addresses a ON a.id = b.address_id
+    LEFT JOIN public.customer_addresses va ON va.id = v.address_id
+   WHERE b.status = 'confirmed'
+     AND b.scheduled_date BETWEEN (now() AT TIME ZONE 'Asia/Kolkata')::date AND (now() AT TIME ZONE 'Asia/Kolkata')::date + GREATEST(p_days, 1)
+     AND NOT EXISTS (SELECT 1 FROM public.worker_assignments wa WHERE wa.booking_id = b.id AND wa.is_active)
+   ORDER BY b.scheduled_date, b.time_slot;
+END $$;
+REVOKE ALL ON FUNCTION public.worker_pool(integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.worker_pool(integer) TO authenticated;
+
 COMMIT;
