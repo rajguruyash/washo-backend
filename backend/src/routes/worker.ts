@@ -50,7 +50,17 @@ const STEPS: Record<string, { sql: Step; schema?: z.ZodType }> = {
     }),
     sql: (c, id, b) => c.query('SELECT public.worker_reschedule_wash($1, $2::date, $3::public.time_slot, $4)', [id, b.date, b.time_slot ?? null, b.reason || null]),
   },
-  start: { sql: (c, id) => c.query('SELECT public.worker_start_wash($1)', [id]) },
+  // Starting a wash needs at least one photo of the vehicle (taken just before, while the wash is still open). A wash that is already started, or that cannot be started at all,
+  // goes straight to the database, which says what is wrong. The rule lives here, in the website's own server, so it covers every client of this API.
+  start: {
+    sql: async (c, id) => {
+      const row = (await c.query('SELECT status, photos_before FROM public.worker_queue(400) WHERE booking_id = $1', [id])).rows[0] as { status: string; photos_before: number } | undefined;
+      if (row && ['confirmed', 'worker_assigned', 'worker_called', 'call_not_picked_up'].includes(row.status) && Number(row.photos_before) < 1) {
+        throw new HttpError(422, 'photo_required', 'Take at least one photo of the vehicle before you start the wash.');
+      }
+      return c.query('SELECT public.worker_start_wash($1)', [id]);
+    },
+  },
   complete: { sql: (c, id) => c.query('SELECT public.worker_complete_wash($1)', [id]) },
   issue: {
     schema: z.object({
@@ -66,7 +76,7 @@ const STEPS: Record<string, { sql: Step; schema?: z.ZodType }> = {
 };
 
 // Every step is one database function. The database decides whether this worker may take it (they must hold the wash,
-// it must be in the right state; photos are optional) and writes the booking event.
+// it must be in the right state; starting needs one photo, completing needs none) and writes the booking event.
 workerRouter.post(
   '/worker/washes/:id/:step',
   asyncHandler(async (req, res) => {

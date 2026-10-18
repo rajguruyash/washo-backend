@@ -11,7 +11,8 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { ALL_BUILDINGS, ALL_SOCIETIES, buildingOptions, inBuilding, inSociety, societyOptions } from '../../lib/buildings';
-import { friendlyDay } from '../../lib/format';
+import { DONE_LABEL, DONE_WORDS, inRange, type DoneRange } from '../../lib/doneRange';
+import { friendlyDay, todayIST } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useWorkerPool, useWorkerQueue, useWorkerStep } from '../../lib/queries';
 import { slotLabel, slotWindow } from '../../lib/slots';
@@ -76,6 +77,8 @@ export default function WorkerHome() {
   const [tab, setTab] = useSticky<Tab>('worker.tab', 'today');
   const [society, setSociety] = useSticky('worker.society', ALL_SOCIETIES);
   const [building, setBuilding] = useSticky('worker.building', ALL_BUILDINGS);
+  // The Completed tab can be narrowed to the day a wash was finished (it used to list every wash ever completed).
+  const [done, setDone] = useSticky<DoneRange>('worker.done', 'today');
   const all = useMemo(() => queue.data ?? [], [queue.data]);
   const poolRows = useMemo(() => pool.data ?? [], [pool.data]);
   // Society first (only when the specialist works in more than one), then the buildings of that society. Available (unclaimed washes) can be narrowed by society only.
@@ -95,7 +98,11 @@ export default function WorkerHome() {
   const changedOf = (l: WorkerWash[]) => [...l.filter((r) => r.bucket === 'changed'), ...l.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled')];
   const inOpenTab = (l: WorkerWash[]) => (tab === 'changed' ? changedOf(l) : tab === 'available' ? [] : l.filter((r) => r.bucket === tab));
   const changed = changedOf(rows);
-  const list: WorkerWash[] = tab === 'available' ? [] : tab === 'changed' ? changed : by(tab);
+  const today = todayIST();
+  const completedAll = by('completed');
+  const doneCount = (r: DoneRange) => completedAll.filter((w) => inRange(w, r, today)).length;
+  const completedShown = completedAll.filter((w) => inRange(w, done, today)).sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
+  const list: WorkerWash[] = tab === 'available' ? [] : tab === 'changed' ? changed : tab === 'completed' ? completedShown : by(tab);
   const poolShown = poolInSoc.filter((p) => !poolHasBuildings || inBuilding(poolRow(p), bld));
   // chip counts are for the tab that is open
   const societyCount = (value: string) => (tab === 'available' ? poolRows.filter((p) => inSociety(p, value)).length : inOpenTab(all.filter((r) => inSociety(asRow(r), value))).length);
@@ -126,10 +133,16 @@ export default function WorkerHome() {
         { value: 'today', label: 'Today', count: by('today').length },
         { value: 'in_progress', label: 'In progress', count: by('in_progress').length },
         { value: 'upcoming', label: 'Upcoming', count: by('upcoming').length },
-        { value: 'completed', label: 'Completed' },
+        { value: 'completed', label: 'Completed', count: doneCount('today') },
         { value: 'changed', label: 'Cancelled / moved', count: changed.length },
         { value: 'available', label: 'Available', count: poolShown.length },
       ]} />
+
+      {tab === 'completed' && (
+        <div className="mt-3">
+          <Segmented label="Finished" value={done} onChange={setDone} options={(Object.keys(DONE_LABEL) as DoneRange[]).map((r) => ({ value: r, label: DONE_LABEL[r], count: doneCount(r) }))} />
+        </div>
+      )}
 
       {societies.length > 1 && (
         <div className="mt-3">
@@ -148,8 +161,10 @@ export default function WorkerHome() {
           poolShown.length ? poolShown.map((p) => (
             <PoolWashCard key={p.booking_id} p={p} claiming={step.isPending && step.variables?.id === p.booking_id} onClaim={() => void claim(p.booking_id)} />
           )) : filtered ? <EmptyState title={`No unassigned washes in ${placeLabel}`} text="Choose another building or society, or All." /> : <EmptyState title="No unassigned washes" text="Paid washes nobody holds yet will appear here." />
-        ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : filtered ? (
+        ) : list.length ? list.map((w) => <WashCard key={w.booking_id} w={w} />) : filtered && tab !== 'completed' ? (
           <EmptyState title={`No washes in ${placeLabel} here`} text="Choose another building or society, or All." />
+        ) : tab === 'completed' ? (
+          <EmptyState title={`No washes completed ${DONE_WORDS[done]}`} text={done === 'all' ? 'Finished washes show up here.' : 'Choose another day above, or All, to see earlier washes.'} />
         ) : (
           <EmptyState title={{ today: 'Nothing due today', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
         )}

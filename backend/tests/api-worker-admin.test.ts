@@ -13,6 +13,8 @@ beforeAll(async () => {
 const upload = (c: Client, id: string, phase: string, type: string, bytes = JPEG, contentType = 'image/jpeg') =>
   c.req('POST', `/api/bookings/${id}/photos?phase=${phase}&type=${type}`, undefined, { raw: bytes, contentType });
 const step = (c: Client, id: string, s: string, body: unknown = {}) => c.post(`/api/worker/washes/${id}/${s}`, body);
+/** Start a wash the way the page does: one photo of the vehicle first (compulsory), then Start. */
+const begin = async (c: Client, id: string) => { expectOk(await upload(c, id, 'before', 'front')); return step(c, id, 'start'); };
 
 async function membershipWithWorker() {
   const w = await staffClient('worker', { name: 'Ravi Patil', phone: '9876500001' });
@@ -66,15 +68,38 @@ describe('worker queue', () => {
 });
 
 describe('the wash, step by step', () => {
-  it('a wash can be completed with NO photos at all: the customer sees it as completed', async () => {
+  it('starting a wash needs at least one photo of the vehicle: refused without one (and nothing changes), allowed with one', async () => {
     const { w, m, washes } = await membershipWithWorker();
     const id = washes[0].id;
+    const refused = await step(w.c, id, 'start');
+    expect(refused.status).toBe(422);
+    expect(refused.body.message).toBe('Take at least one photo of the vehicle before you start the wash.');
+    expect(expectOk(await m.c.get(`/api/bookings/${id}`)).body.booking.status).toBe('worker_assigned');   // not started
+    // a customer's photo cannot be used, and one by the specialist is enough
+    expectOk(await upload(w.c, id, 'before', 'front'));
+    expect(expectOk(await step(w.c, id, 'start')).body.wash).toMatchObject({ status: 'in_progress', photos_before: 1 });
+  });
+
+  it('an "after" photo alone does not start a wash; and pressing start again on a wash that is already started is not asked for a photo', async () => {
+    const { w, washes } = await membershipWithWorker();
+    const id = washes[0].id;
+    expectOk(await upload(w.c, id, 'after', 'front'));
+    expect((await step(w.c, id, 'start')).status).toBe(422);
+    expectOk(await upload(w.c, id, 'before', 'rear'));
     expectOk(await step(w.c, id, 'start'));
+    const again = await step(w.c, id, 'start');
+    expect(again.body.code).not.toBe('photo_required');
+  });
+
+  it('a wash is completed with no AFTER photos (only the one that started it): the customer sees it as completed', async () => {
+    const { w, m, washes } = await membershipWithWorker();
+    const id = washes[0].id;
+    expectOk(await begin(w.c, id));
     const done = expectOk(await step(w.c, id, 'complete')).body.wash;
-    expect(done).toMatchObject({ status: 'completed', bucket: 'completed', photos_before: 0, photos_after: 0 });
+    expect(done).toMatchObject({ status: 'completed', bucket: 'completed', photos_before: 1, photos_after: 0 });   // only the photo that started it
     expect(done.completed_at).toBeTruthy();
     expect(expectOk(await m.c.get(`/api/bookings/${id}`)).body.booking.status).toBe('completed');
-    expect(expectOk(await w.c.get(`/api/bookings/${id}/photos`)).body.photos).toHaveLength(0);
+    expect((expectOk(await w.c.get(`/api/bookings/${id}/photos`)).body.photos as any[]).map((p) => p.phase)).toEqual(['before']);   // just the one that started it
   });
 
   it('call -> customer confirmed -> start -> before photos -> after photos -> complete; then the next wash is already queued', async () => {
@@ -82,7 +107,7 @@ describe('the wash, step by step', () => {
     // make this wash "today" for the queue by claiming the earliest one; it is upcoming but actionable
     const id = washes[0].id;
 
-    expect((await step(w.c, id, 'start')).body.wash.status).toBe('in_progress'); // start works straight from assigned (call is optional in the DB)
+    expect((await begin(w.c, id)).body.wash.status).toBe('in_progress'); // start works straight from assigned (call is optional in the DB)
     // but the normal path first:
     const { w: w2, washes: washes2 } = await membershipWithWorker();
     const id2 = washes2[0].id;
@@ -90,11 +115,9 @@ describe('the wash, step by step', () => {
     expect(called).toMatchObject({ status: 'worker_called', calls_made: 1, customer_confirmed_at: null });
     const confirmed = expectOk(await step(w2.c, id2, 'confirm')).body.wash;
     expect(confirmed.customer_confirmed_at).toBeTruthy();
-    expect(expectOk(await step(w2.c, id2, 'start')).body.wash).toMatchObject({ status: 'in_progress', bucket: 'in_progress' });
+    expect(expectOk(await begin(w2.c, id2)).body.wash).toMatchObject({ status: 'in_progress', bucket: 'in_progress' });
 
-    // photos are optional: they are stored and counted when taken
-    const b1 = expectOk(await upload(w2.c, id2, 'before', 'front'));
-    expect(b1.status).toBe(201);
+    // the photo that started it is the first before photo; more can follow, and after photos are optional
     expectOk(await upload(w2.c, id2, 'before', 'rear', PNG, 'image/png'));
     expectOk(await upload(w2.c, id2, 'after', 'front'));
     const queueRow = expectOk(await w2.c.get('/api/worker/queue?days=60')).body.queue.find((q: any) => q.booking_id === id2);
@@ -122,8 +145,7 @@ describe('the wash, step by step', () => {
   it('the customer sees photos on their own completed wash; a stranger cannot', async () => {
     const { w, m, washes } = await membershipWithWorker();
     const id = washes[0].id;
-    expectOk(await step(w.c, id, 'start'));
-    expectOk(await upload(w.c, id, 'before', 'front'));
+    expectOk(await begin(w.c, id));   // its photo is the 'before' one
     expectOk(await upload(w.c, id, 'after', 'front'));
     expectOk(await step(w.c, id, 'complete'));
     const photos = expectOk(await m.c.get(`/api/bookings/${id}/photos`)).body.photos;
@@ -157,7 +179,7 @@ describe('the wash, step by step', () => {
     expect((await step(w.c, id, 'issue', { kind: 'other' })).body.message).toMatch(/describe the problem/);
     expect((await step(w.c, id, 'issue', { kind: 'bogus', notes: 'xx yy' })).status).toBe(400);
     expect((await step(w.c, id, 'note', { note: '' })).status).toBe(400);
-    expectOk(await step(w.c, id, 'start'));
+    expectOk(await begin(w.c, id));
     expectOk(await step(w.c, id, 'issue', { kind: 'no_water_or_power', notes: 'Society water is off until 11' }));
     expectOk(await step(w.c, id, 'note', { note: 'Scratch on rear bumper, already there' }));
     const detail = expectOk(await admin.get(`/api/admin/bookings/${id}`)).body;
@@ -173,7 +195,7 @@ describe('the wash, step by step', () => {
     const { w, washes } = await membershipWithWorker();
     const id = washes[0].id;
     // the database accepts photos while a wash is open (the app makes the worker start first); finished washes are closed
-    expectOk(await step(w.c, id, 'start'));
+    expectOk(await begin(w.c, id));
     expect((await upload(w.c, id, 'before', 'front', Buffer.from('<?php echo 1; ?>' + 'x'.repeat(40)), 'image/jpeg')).status).toBe(415); // not an image
     expect((await upload(w.c, id, 'sideways', 'front')).status).toBe(400);
     expect((await upload(w.c, id, 'before', 'top')).status).toBe(400);

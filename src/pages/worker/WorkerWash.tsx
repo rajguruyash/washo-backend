@@ -143,13 +143,16 @@ export default function WorkerWash() {
         <div className="glass p-5">
           <h2 className="text-lg font-bold">3 · Start the wash</h2>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ok"><ShieldCheck className="h-4 w-4" /> Customer confirmed</p>
-          <Button size="lg" full className="mt-4" loading={busy} icon={<PlayCircle className="h-5 w-5" />} onClick={() => void run('start', undefined, 'Wash started')}>Start wash</Button>
+          <p className="mb-3 mt-4 text-sm text-fog">Take at least <strong className="text-white">one photo of the vehicle</strong> before you start. It is saved as a before photo.</p>
+          <PhotoUploader bookingId={w.booking_id} phase="before" />
+          <Button size="lg" full className="mt-4" disabled={w.photos_before < 1} loading={busy} icon={<PlayCircle className="h-5 w-5" />} onClick={() => void run('start', undefined, 'Wash started')}>Start wash</Button>
+          {w.photos_before < 1 && <p className="mt-2 text-center text-xs font-semibold text-warn">Add a photo to start the wash.</p>}
         </div>
       )}
 
       {phase === 'work' && (
         <div className="space-y-5">
-          <div className="glass p-5"><h2 className="text-lg font-bold">4 · Before photos</h2><p className="mb-4 mt-1 text-sm text-fog">Photograph the vehicle before you begin. Optional.</p><PhotoUploader bookingId={w.booking_id} phase="before" /></div>
+          <div className="glass p-5"><h2 className="text-lg font-bold">4 · Before photos</h2><p className="mb-4 mt-1 text-sm text-fog">Add more angles of the vehicle if you like.</p><PhotoUploader bookingId={w.booking_id} phase="before" /></div>
           <div className="glass p-5"><h2 className="text-lg font-bold">5 · After photos</h2><p className="mb-4 mt-1 text-sm text-fog">When the wash is done, photograph the result. Optional.</p><PhotoUploader bookingId={w.booking_id} phase="after" /></div>
           <div className="glass p-5">
             <h2 className="text-lg font-bold">6 · Complete</h2>
