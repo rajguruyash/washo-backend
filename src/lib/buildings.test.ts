@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { clusterSocieties } from './societyCluster';
 import { ALL_BUILDINGS, ALL_SOCIETIES, NO_BUILDING, buildingKey, buildingOptions, inBuilding, inSociety, societyKey, societyOptions } from './buildings';
 
 const row = (building_block: string | null, hidden = false) => ({ building_block, hidden });
@@ -63,5 +64,25 @@ describe('society filter', () => {
     expect(inSociety(row(null), ALL_SOCIETIES)).toBe(true);
     expect(inSociety(row('Amar Residency', true), 'amar residency')).toBe(false);
     expect(inSociety(row('Amar Residency', true), ALL_SOCIETIES)).toBe(true);
+  });
+
+  it('with clusters, every way of writing one society is one entry and one filter', () => {
+    const rows = [row('Purva Silversands'), row('Purva Sliversands'), row('Purva Sliversands mundhva'), row('Purva Silversands Keshavnagar'), row('Amar Residency'), row('Zen Heights', true), row(null)];
+    const clusters = clusterSocieties(rows.map((r) => r.society_name));
+    const options = societyOptions(rows, clusters);
+    expect(options.map((o) => o.label)).toEqual(['Amar Residency', 'Purva Silversands']);
+    const purva = options[1].value;
+    expect(rows.filter((r) => inSociety(r, purva, clusters)).map((r) => r.society_name)).toEqual(['Purva Silversands', 'Purva Sliversands', 'Purva Sliversands mundhva', 'Purva Silversands Keshavnagar']);
+    expect(inSociety(row('Amar Residency'), purva, clusters)).toBe(false);
+    expect(inSociety(row('Purva Silversands', true), purva, clusters)).toBe(false);   // hidden details still only under All
+    expect(inSociety(row('Purva Silversands', true), ALL_SOCIETIES, clusters)).toBe(true);
+  });
+
+  it('a remembered choice finds its group again through any name in it', () => {
+    const before = clusterSocieties(['Purva Silversands', 'Purva Silversands']);
+    const remembered = before.groups[0].key;
+    const after = clusterSocieties(['Purva Silversands', 'Purva Sliversands Mundhwa', 'Purva Sliversands Mundhwa', 'Purva Sliversands Mundhwa']);   // another way of writing it is now the most typed
+    expect(after.groups).toHaveLength(1);
+    expect(after.keyOf(remembered)).toBe(after.groups[0].key);
   });
 });

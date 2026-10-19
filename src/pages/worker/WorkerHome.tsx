@@ -11,6 +11,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { ALL_BUILDINGS, ALL_SOCIETIES, buildingOptions, inBuilding, inSociety, societyOptions } from '../../lib/buildings';
+import { clusterSocieties } from '../../lib/societyCluster';
 import { DONE_LABEL, DONE_WORDS, inRange, type DoneRange } from '../../lib/doneRange';
 import { friendlyDay, todayIST } from '../../lib/format';
 import { ApiError } from '../../lib/http';
@@ -82,13 +83,16 @@ export default function WorkerHome() {
   const all = useMemo(() => queue.data ?? [], [queue.data]);
   const poolRows = useMemo(() => pool.data ?? [], [pool.data]);
   // Society first (only when the specialist works in more than one), then the buildings of that society. Available (unclaimed washes) can be narrowed by society only.
-  const societies = useMemo(() => societyOptions<{ society_name: string | null; hidden?: boolean }>(tab === 'available' ? poolRows : all.map(asRow)), [tab, poolRows, all]);
-  // A remembered choice that does not apply (no such society in this list any more) means "all", but is kept for when it applies again.
-  const soc = society === ALL_SOCIETIES || societies.some((x) => x.value === society) ? society : ALL_SOCIETIES;
-  const inSoc = useMemo(() => all.filter((r) => inSociety(asRow(r), soc)), [all, soc]);
+  // One society written several ways ("Purva Silversands", "Purva Sliversands Mundhwa") is one society. Grouped across the queue AND the unclaimed washes, so the groups are the same on every tab.
+  const clusters = useMemo(() => clusterSocieties([...all.filter((r) => r.bucket !== 'changed').map((r) => r.society_name), ...poolRows.map((p) => p.society_name)]), [all, poolRows]);
+  const societies = useMemo(() => societyOptions<{ society_name: string | null; hidden?: boolean }>(tab === 'available' ? poolRows : all.map(asRow), clusters), [tab, poolRows, all, clusters]);
+  // A remembered choice that does not apply (no such society in this list any more) means "all", but is kept for when it applies again. The group may have been renamed since, so it is found by any name in it.
+  const remembered = society === ALL_SOCIETIES ? society : clusters.keyOf(society) || society;
+  const soc = remembered === ALL_SOCIETIES || societies.some((x) => x.value === remembered) ? remembered : ALL_SOCIETIES;
+  const inSoc = useMemo(() => all.filter((r) => inSociety(asRow(r), soc, clusters)), [all, soc, clusters]);
   // Unclaimed washes now say which building they are in (migration 48); a database without it has no building on them, so there is nothing to filter by.
   const poolHasBuildings = poolRows.some((p) => p.building_block !== undefined);
-  const poolInSoc = useMemo(() => poolRows.filter((p) => inSociety(p, soc)), [poolRows, soc]);
+  const poolInSoc = useMemo(() => poolRows.filter((p) => inSociety(p, soc, clusters)), [poolRows, soc, clusters]);
   const poolRow = (p: PoolWash) => ({ building_block: p.building_block ?? null });
   const buildings = useMemo(() => (tab === 'available' ? (poolHasBuildings ? buildingOptions(poolInSoc.map(poolRow)) : []) : buildingOptions(inSoc.map(asRow))), [tab, poolHasBuildings, poolInSoc, inSoc]);
   const bld = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
@@ -105,7 +109,7 @@ export default function WorkerHome() {
   const list: WorkerWash[] = tab === 'available' ? [] : tab === 'changed' ? changed : tab === 'completed' ? completedShown : by(tab);
   const poolShown = poolInSoc.filter((p) => !poolHasBuildings || inBuilding(poolRow(p), bld));
   // chip counts are for the tab that is open
-  const societyCount = (value: string) => (tab === 'available' ? poolRows.filter((p) => inSociety(p, value)).length : inOpenTab(all.filter((r) => inSociety(asRow(r), value))).length);
+  const societyCount = (value: string) => (tab === 'available' ? poolRows.filter((p) => inSociety(p, value, clusters)).length : inOpenTab(all.filter((r) => inSociety(asRow(r), value, clusters))).length);
   const buildingCount = (value: string) => (tab === 'available' ? poolInSoc.filter((p) => inBuilding(poolRow(p), value)).length : inOpenTab(inSoc.filter((r) => inBuilding(asRow(r), value))).length);
   const placeLabel = [buildings.find((b) => b.value === bld)?.label, societies.find((x) => x.value === soc)?.label].filter(Boolean).join(' · ');
   const filtered = soc !== ALL_SOCIETIES || bld !== ALL_BUILDINGS;

@@ -666,11 +666,14 @@ export interface CapacityDay {
   /** A day WASHO does not wash (Admin -> Working Days), and why when a reason was given. */
   closed?: boolean;
   closed_reason?: string | null;
+  /** Time windows WASHO has turned off on this day (Admin -> Working Days), and why when a reason was given. A whole closed day has `closed` instead. */
+  closed_slots?: { slot: SlotId; reason: string | null }[];
 }
 /** Which weekdays WASHO works (0 = Sunday ... 6 = Saturday), the closed days ahead and the next open day. Nothing closed when the database has no Working Days yet. */
 export interface WorkingDays {
   weekdays: { weekday: number; open: boolean }[];
   closed: { date: string; reason: string | null }[];
+  closed_slots?: { date: string; slot: SlotId; reason: string | null }[];
   next_open: string | null;
 }
 /** What a booking page is for: the days are kept separately for single washes and for memberships. */
@@ -679,10 +682,16 @@ export interface WorkingDaysPart {
   weekdays: { weekday: number; open: boolean }[];
   dates: { day: string; open: boolean; reason: string | null; washes: number }[];
   booked_on_closed: { date: string; washes: number }[];
+  /** Time windows (migration 49): each window's switch for each day of the week, the windows set for a date, and the washes booked in a window that is off on an open day. Absent until 49 is applied. */
+  slot_weekdays?: { slot: SlotId; weekday: number; open: boolean }[];
+  slot_dates?: { day: string; slot: SlotId; open: boolean; reason: string | null; washes: number }[];
+  booked_in_closed_slots?: { date: string; slot: SlotId; washes: number }[];
   next_open: string | null;
 }
 export interface AdminWorkingDays extends WorkingDaysPart {
   installed: boolean;
+  /** True once the database can turn time windows on and off (migration 49). */
+  slots_installed: boolean;
   /** True once the database keeps the two lists apart (migration 46); until then `single` is the one list for everything and `membership` is null. */
   by_kind: boolean;
   single: WorkingDaysPart;

@@ -21,8 +21,9 @@ const limits = z.object({
 
 const missingFunction = (err: unknown) => (err as { code?: string }).code === '42883';
 
-/** The closed days in a range (migration 39, by kind from 46), or null on a database that does not have Working Days yet: then every day is open. */
-type WorkingDays = { weekdays: { weekday: number; open: boolean }[]; closed: { date: string; reason: string | null }[]; next_open: string | null };
+/** The closed days in a range (migration 39, by kind from 46) and the time windows turned off on the other days (49), or null on a database that does not have Working Days yet: then every day is open. */
+type ClosedSlot = { date: string; slot: 'morning' | 'afternoon' | 'night'; reason: string | null };
+type WorkingDays = { weekdays: { weekday: number; open: boolean }[]; closed: { date: string; reason: string | null }[]; closed_slots?: ClosedSlot[]; next_open: string | null };
 async function workingDays(db: (fn: (c: any) => Promise<any>) => Promise<any>, from: string, to: string, kind?: 'single' | 'membership'): Promise<WorkingDays | null> {
   const ask = (withKind: boolean) =>
     db(async (c) => (await c.query(withKind ? 'SELECT public.get_working_days($1::date, $2::date, $3) AS r' : 'SELECT public.get_working_days($1::date, $2::date) AS r', withKind ? [from, to, kind] : [from, to])).rows[0].r) as Promise<WorkingDays>;
@@ -59,7 +60,12 @@ capacityRouter.get(
     const wd = await workingDays(req.db, q.from, q.to, q.kind);
     if (wd) {
       const closed = new Map(wd.closed.map((c) => [c.date, c.reason]));
-      days = days.map((d) => (closed.has(d.date) ? { ...d, closed: true, closed_reason: closed.get(d.date) ?? null } : d));
+      const shut = new Map<string, { slot: string; reason: string | null }[]>();
+      for (const c of wd.closed_slots ?? []) shut.set(c.date, [...(shut.get(c.date) ?? []), { slot: c.slot, reason: c.reason }]);
+      days = days.map((d) => {
+        const withSlots = shut.has(d.date) ? { ...d, closed_slots: shut.get(d.date) } : d;
+        return closed.has(d.date) ? { ...withSlots, closed: true, closed_reason: closed.get(d.date) ?? null } : withSlots;
+      });
     }
     res.set('Cache-Control', 'no-store');
     res.json({ success: true, days });
@@ -76,7 +82,7 @@ capacityRouter.get(
     const plus = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
     const wd = await workingDays(req.db, q.from ?? today, q.to ?? plus(400), q.kind);
     res.set('Cache-Control', 'no-store');
-    res.json({ success: true, weekdays: wd?.weekdays ?? [], closed: wd?.closed ?? [], next_open: wd?.next_open ?? null });
+    res.json({ success: true, weekdays: wd?.weekdays ?? [], closed: wd?.closed ?? [], closed_slots: wd?.closed_slots ?? [], next_open: wd?.next_open ?? null });
   })
 );
 
@@ -141,7 +147,9 @@ capacityRouter.put(
 // A database with Working Days but without the by-kind update (migration 46) still answers with one list: it is shown as the single-wash list and `by_kind` is false.
 const byKindMissing = new HttpError(409, 'working_days_by_kind_not_installed', 'Separate days for single washes and memberships need the database update 46 first (supabase/migrations/20261004000046_working_days_by_kind.sql). Until then one list applies to both.');
 const changeKind = z.enum(['single', 'membership', 'both']).optional();
-type Part = { weekdays: unknown[]; dates: unknown[]; booked_on_closed: unknown[]; next_open: string | null };
+type Part = { weekdays: unknown[]; dates: unknown[]; booked_on_closed: unknown[]; next_open: string | null; slot_weekdays?: unknown[]; slot_dates?: unknown[]; booked_in_closed_slots?: unknown[] };
+const slotsMissing = new HttpError(409, 'working_slots_not_installed', 'Turning time windows on and off needs the database update 49 first (supabase/migrations/20261004000049_working_slots.sql).');
+const slotName = z.enum(['morning', 'afternoon', 'night']);
 capacityRouter.get(
   '/admin/working-days',
   requireSession,
@@ -151,11 +159,11 @@ capacityRouter.get(
       const r = await req.db(async (c) => (await c.query('SELECT public.admin_working_days() AS r')).rows[0].r);
       const single: Part = r.single ?? { weekdays: r.weekdays, dates: r.dates, booked_on_closed: r.booked_on_closed, next_open: r.next_open };
       res.set('Cache-Control', 'no-store');
-      res.json({ success: true, installed: true, by_kind: Boolean(r.single && r.membership), ...r, single, membership: r.membership ?? null });
+      res.json({ success: true, installed: true, by_kind: Boolean(r.single && r.membership), slots_installed: Array.isArray(single.slot_weekdays), ...r, single, membership: r.membership ?? null });
     } catch (err) {
       if (!campaignsNotInstalled(err)) throw err;
       const none: Part = { weekdays: [], dates: [], booked_on_closed: [], next_open: null };
-      res.json({ success: true, installed: false, by_kind: false, ...none, single: none, membership: null });
+      res.json({ success: true, installed: false, by_kind: false, slots_installed: false, ...none, single: none, membership: null });
     }
   })
 );
@@ -204,6 +212,48 @@ capacityRouter.delete(
     await req
       .db((c) => (byKind ? c.query('SELECT public.admin_clear_working_date($1::date, $2)', [d, kind]) : c.query('SELECT public.admin_clear_working_date($1::date)', [d])))
       .catch((err) => { throw (byKind && missingFunction(err) ? byKindMissing : notSwitchedOn(err)) ?? err; });
+    res.json({ success: true });
+  })
+);
+
+// Admin: time windows (migration 49). A window (Morning, Afternoon, Night) on or off for each day of the week, and for single dates, separately for single washes and memberships.
+capacityRouter.put(
+  '/admin/working-days/slots/weekdays',
+  requireSession,
+  requireRole('admin'),
+  asyncHandler(async (req, res) => {
+    const b = parse(z.object({ slot: slotName, open_days: z.array(z.number().int().min(0).max(6)).max(7), kind: changeKind }), req.body);
+    const days = [...new Set(b.open_days)];
+    await req
+      .db((c) => c.query('SELECT public.admin_set_working_slot_weekdays($1::public.time_slot, $2::integer[], $3)', [b.slot, days, b.kind ?? 'both']))
+      .catch((err) => { throw (missingFunction(err) ? slotsMissing : null) ?? err; });
+    res.json({ success: true });
+  })
+);
+
+capacityRouter.post(
+  '/admin/working-days/slots/dates',
+  requireSession,
+  requireRole('admin'),
+  asyncHandler(async (req, res) => {
+    const b = parse(z.object({ slot: slotName, from: day, to: day.optional(), open: z.boolean(), reason: z.string().trim().max(120, 'Keep the reason under 120 characters.').optional(), kind: changeKind }), req.body);
+    const n = await req
+      .db(async (c) => (await c.query('SELECT public.admin_set_working_slot_dates($1::date, $2::date, $3::public.time_slot, $4, $5, $6) AS n', [b.from, b.to ?? b.from, b.slot, b.open, b.reason || null, b.kind ?? 'both'])).rows[0].n as number)
+      .catch((err) => { throw (missingFunction(err) ? slotsMissing : null) ?? err; });
+    res.json({ success: true, days: n });
+  })
+);
+
+capacityRouter.delete(
+  '/admin/working-days/slots/dates/:day',
+  requireSession,
+  requireRole('admin'),
+  asyncHandler(async (req, res) => {
+    const d = parse(day, req.params.day);
+    const q = parse(z.object({ slot: slotName, kind: changeKind }), req.query);
+    await req
+      .db((c) => c.query('SELECT public.admin_clear_working_slot_date($1::date, $2::public.time_slot, $3)', [d, q.slot, q.kind ?? 'both']))
+      .catch((err) => { throw (missingFunction(err) ? slotsMissing : null) ?? err; });
     res.json({ success: true });
   })
 );

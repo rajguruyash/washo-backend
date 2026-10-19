@@ -34,6 +34,7 @@ export function DateSlotPicker({
   /**
    * Days WASHO is unavailable (Admin -> Working Days; they arrive in `crowd`). 'block' (customers, specialists): they cannot be picked and the page says when the next day
    * is. 'warn' (admins, who may always make an exception): they can be picked, with a note. 'ignore' (a membership's start day, which need not be a working day).
+   * The same goes for a time window WASHO has turned off for a day (it arrives in `crowd` too, as `closed_slots`).
    */
   closedMode?: 'block' | 'warn' | 'ignore';
   /** A full day or time window (red in Admin -> Capacity). 'block' (customers, specialists): it cannot be picked and a short red message says so. 'warn' (admins): it can be picked, with a note. 'ignore': shown as busy (a membership's start day). */
@@ -54,12 +55,17 @@ export function DateSlotPicker({
   // crowd: a full window (red) cannot be picked (customers) or only warns (admins); amber (busy) is only a warning
   const slotIds = SLOTS.map((x) => x.id);
   const isFullSlot = (d: string, sl: SlotId) => fullMode === 'block' && crowd?.[d]?.slots[sl]?.state === 'full';
+  // a time window WASHO has turned off on this day (Admin -> Working Days): greyed out and "Closed" for customers and specialists, a note for admins
+  const shutSlotsOf = (d: string) => (closedMode === 'ignore' ? [] : crowd?.[d]?.closed_slots ?? []);
+  const isShutSlot = (d: string, sl: SlotId) => closedMode === 'block' && shutSlotsOf(d).some((x) => x.slot === sl);
   const fullDay = (d: string) => (showSlot ? slotIds.every((sl) => isFullSlot(d, sl)) : fullMode === 'block' && crowd?.[d]?.state === 'full');
-  // a day with no window left to pick: every window is full, or too soon, or one of each
-  const fullOrSoon = (d: string) => !dayGone(d) && showSlot && slotIds.every((sl) => tooSoon(d, sl) || isFullSlot(d, sl));
+  // a day with no window left to pick: every window is full, too soon or turned off (a day whose windows are only too soon or turned off is shown as closed instead)
+  const fullOrSoon = (d: string) => !dayGone(d) && showSlot && !windowsOff(d) && slotIds.every((sl) => tooSoon(d, sl) || isFullSlot(d, sl) || isShutSlot(d, sl));
   const dayFull = (d: string) => fullDay(d) || fullOrSoon(d);
   const closedOn = (d: string) => (closedMode !== 'ignore' && crowd?.[d]?.closed ? { reason: crowd[d].closed_reason ?? null } : null);
-  const closedBlocked = (d: string) => closedMode === 'block' && closedOn(d) !== null;
+  // every window still to come that day is one WASHO has turned off (the rest have started): the day cannot be booked, and is shown as closed
+  const windowsOff = (d: string) => showSlot && closedMode === 'block' && slotIds.some((sl) => isShutSlot(d, sl)) && slotIds.every((sl) => tooSoon(d, sl) || isShutSlot(d, sl));
+  const closedBlocked = (d: string) => closedMode === 'block' && (closedOn(d) !== null || windowsOff(d));
   const noneLeft = dates.length > 0 && dates.every((d) => dayGone(d) || closedBlocked(d) || dayFull(d) || (disabledDates?.includes(d) ?? false));
   // the first day in this strip that can be picked, said to the customer when some days are closed
   const nextBookable = dates.find((d) => !dayGone(d) && !closedBlocked(d) && !dayFull(d) && !(disabledDates?.includes(d) ?? false));
@@ -69,10 +75,14 @@ export function DateSlotPicker({
   // the windows of the chosen day that are full (only said to people who cannot pick them; an admin gets a note instead)
   const fullHere = date && showSlot ? SLOTS.filter((x) => crowd?.[date]?.slots[x.id]?.state === 'full') : [];
   const fullNote = fullMode === 'warn' && fullHere.length > 0;
+  // the windows of the chosen day WASHO has turned off (and are not already too soon)
+  const shutHere = date && showSlot ? SLOTS.filter((x) => shutSlotsOf(date).some((c) => c.slot === x.id) && !tooSoon(date, x.id)) : [];
+  const shutNames = shutHere.map((x) => x.label).join(' and ');
+  const shutWhy = [...new Set(shutHere.map((x) => (date ? shutSlotsOf(date).find((c) => c.slot === x.id)?.reason : null)).filter(Boolean))].join(', ');
 
   // A window chosen for one day may be too soon or full on another: drop it rather than let the booking be refused at the end.
   useEffect(() => {
-    if (date && slot && onSlot && (tooSoon(date, slot) || isFullSlot(date, slot))) onSlot(null);
+    if (date && slot && onSlot && (tooSoon(date, slot) || isFullSlot(date, slot) || isShutSlot(date, slot))) onSlot(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, slot, leadHours, crowd]);
 
@@ -139,7 +149,9 @@ export function DateSlotPicker({
               const raw = date ? crowd?.[date]?.slots[s.id]?.state : undefined;
               const cs = raw === 'full' && fullMode === 'ignore' ? 'busy' : raw;
               const isFull = isFullSlot(date ?? '', s.id);
-              const closed = soon || isFull;
+              const isShut = date ? shutSlotsOf(date).some((c) => c.slot === s.id) : false;
+              const shut = isShut && closedMode === 'block';
+              const closed = soon || isFull || shut;
               const active = s.id === slot && !closed;
               return (
                 <button
@@ -153,7 +165,9 @@ export function DateSlotPicker({
                   className={cn(
                     'flex items-center gap-3 rounded-2xl border p-3.5 text-left transition-all',
                     soon ? 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] opacity-45'
+                      : shut ? 'cursor-not-allowed border-warn/30 bg-warn/[0.05] opacity-70'
                       : isFull ? 'cursor-not-allowed border-bad/40 bg-bad/10 opacity-80'
+                      : isShut ? (active ? 'border-warn bg-warn/20' : 'border-dashed border-warn/50 bg-warn/[0.07] hover:border-warn')
                       : cs === 'full' ? (active ? 'border-bad bg-bad/20' : 'border-bad/50 bg-bad/10 hover:border-bad/80')
                       : active ? 'border-washo-400/70 bg-washo-500/15' : cs === 'busy' ? 'border-warn/50 bg-warn/10 hover:border-warn/80' : 'border-white/[0.09] bg-white/[0.03] hover:border-white/20'
                   )}
@@ -161,7 +175,7 @@ export function DateSlotPicker({
                   <span className={cn('grid h-10 w-10 place-items-center rounded-xl', active ? 'bg-washo-500 text-white' : 'bg-white/[0.07] text-washo-300')}><Icon className="h-5 w-5" /></span>
                   <span>
                     <span className="block text-sm font-bold">{s.label}</span>
-                    <span className={cn('block text-xs', cs === 'full' && !soon ? 'font-semibold text-bad' : cs === 'busy' && !soon ? 'font-semibold text-warn' : 'text-fog')}>{soon ? 'Too soon' : cs === 'full' ? 'Full' : cs === 'busy' ? `Busy · ${s.window}` : s.window}</span>
+                    <span className={cn('block text-xs', isShut && !soon ? 'font-semibold text-warn' : cs === 'full' && !soon ? 'font-semibold text-bad' : cs === 'busy' && !soon ? 'font-semibold text-warn' : 'text-fog')}>{soon ? 'Too soon' : isShut ? 'Closed' : cs === 'full' ? 'Full' : cs === 'busy' ? `Busy · ${s.window}` : s.window}</span>
                   </span>
                 </button>
               );
@@ -169,6 +183,8 @@ export function DateSlotPicker({
           </div>
         </div>
       )}
+      {closedMode === 'block' && shutHere.length > 0 && <p role="note" className="text-sm text-warn">WASHO is currently unavailable in the {shutNames} window{shutHere.length === 1 ? '' : 's'} that day{shutWhy ? ` (${shutWhy})` : ''}. Please choose another time{shutHere.length >= SLOTS.length ? ' or day' : ''}.</p>}
+      {closedMode === 'warn' && shutHere.length > 0 && <p role="note" className="text-sm text-warn">{shutNames} {shutHere.length === 1 ? 'is' : 'are'} turned off that day{shutWhy ? ` (${shutWhy})` : ''}. You can still book it as an admin.</p>}
       {fullMode === 'block' && fullHere.length > 0 && !fullHere.every((x) => tooSoon(date!, x.id)) && (
         <p role="alert" className="flex items-start gap-2 text-sm font-semibold text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {fullHere.map((x) => x.label).join(' and ')} {fullHere.length === 1 ? 'is' : 'are'} full. Please choose another time{fullHere.length === 3 ? ' or day' : ''}.</p>
       )}

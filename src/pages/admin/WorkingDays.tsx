@@ -1,4 +1,4 @@
-import { CalendarOff, CalendarPlus, Trash2 } from 'lucide-react';
+import { CalendarOff, CalendarPlus, Moon, Sun, Sunrise, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ErrorState } from '../../components/EmptyState';
 import { Badge } from '../../components/ui/Badge';
@@ -9,7 +9,8 @@ import { useToast } from '../../components/ui/Toast';
 import { cn } from '../../lib/cn';
 import { WEEKDAYS, fullDate, prettyDate, todayIST } from '../../lib/format';
 import { useAdminAction, useAdminWorkingDays } from '../../lib/queries';
-import type { DayKind } from '../../lib/types';
+import { SLOTS, slotLabel } from '../../lib/slots';
+import type { DayKind, SlotId, WorkingDaysPart } from '../../lib/types';
 import { ConfirmSheet, Loading, errText } from './shared';
 
 /** Monday first, like the calendars the customers see. */
@@ -29,11 +30,22 @@ const summary = (weekdays: { weekday: number; open: boolean }[]) => {
   return on.length === 7 ? 'every day' : on.length === 0 ? 'no day' : plural(on);
 };
 
+const WINDOW_ICON = { sunrise: Sunrise, sun: Sun, moon: Moon };
+/** Is this time window on for this day of the week? (Nothing recorded = on.) */
+const windowOn = (part: WorkingDaysPart, slot: SlotId, weekday: number) => part.slot_weekdays?.find((w) => w.slot === slot && w.weekday === weekday)?.open ?? true;
+const windowDays = (part: WorkingDaysPart, slot: SlotId): number[] => WEEK.filter((d) => windowOn(part, slot, d));
+/** "Night off on Sundays; Morning off every day", or nothing when every window is on. */
+const windowsSummary = (part: WorkingDaysPart) => {
+  const off = SLOTS.map((x) => ({ x, days: WEEK.filter((d) => !windowOn(part, x.id, d)) })).filter((w) => w.days.length > 0);
+  return off.length === 0 ? 'all time windows on' : off.map((w) => `${w.x.label} off ${w.days.length === 7 ? 'every day' : `on ${plural(w.days)}`}`).join('; ');
+};
+
 /**
  * The days WASHO washes, kept separately for single washes (a wash booked on its own, and a free wash from a campaign) and for memberships (the weekdays a customer picks, the spread of
  * its washes, exact dates, and moving a membership wash). So memberships can be weekends only while single washes stay open every day. Days of the week are on or off; single dates can be
  * turned off (a holiday, bad weather) or on (a weekday WASHO will work after all). A closed day stops customers booking that kind on it, and the booking page tells them the next day they
  * can book. An admin can still book or move a wash onto a closed day. A wash already booked on a closed day stays booked until WASHO moves it: they are listed here.
+ * Each time window (Morning, Afternoon, Night) can be turned off too, for a day of the week or for one date (migration 49), the same way and for the same kind.
  */
 export default function WorkingDays({ canManage }: { canManage: boolean }) {
   const { data, isLoading, isError, error, refetch } = useAdminWorkingDays();
@@ -47,6 +59,8 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState('');
   const [confirmNone, setConfirmNone] = useState(false);
+  // what the specific-dates form changes: the whole day, or one time window of it
+  const [applyTo, setApplyTo] = useState<'day' | SlotId>('day');
 
   if (isError) return <ErrorState message={(error as Error)?.message} onRetry={() => void refetch()} />;
   if (isLoading || !data) return <Loading />;
@@ -83,8 +97,8 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
     if (from < today) return setFormError('Choose today or a later date.');
     if (to && to < from) return setFormError('The last date cannot be before the first.');
     try {
-      const r = await act.mutateAsync({ path: 'working-days/dates', body: { from, to: to || from, open: open === 'open', reason: reason.trim() || undefined, ...scope } });
-      toast.success(`${r.days} day${r.days === 1 ? '' : 's'} set as ${open === 'open' ? 'working' : 'closed'}.`);
+      const r = await act.mutateAsync({ path: applyTo === 'day' ? 'working-days/dates' : 'working-days/slots/dates', body: { from, to: to || from, open: open === 'open', reason: reason.trim() || undefined, ...(applyTo === 'day' ? {} : { slot: applyTo }), ...scope } });
+      toast.success(`${r.days} day${r.days === 1 ? '' : 's'}${applyTo === 'day' ? '' : `: ${slotLabel(applyTo)}`} set as ${open === 'open' ? 'working' : 'closed'}.`);
       setFrom(''); setTo(''); setReason('');
     } catch (err) { setFormError(errText(err)); }
   };
@@ -92,6 +106,23 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
     try { await act.mutateAsync({ method: 'DELETE', path: `working-days/dates/${day}${split ? `?kind=${kind}` : ''}` }); toast.success('That date follows its day of the week again.'); }
     catch (err) { toast.error(errText(err)); }
   };
+
+  const slotsOn = data.slots_installed;
+  const saveWindow = async (slot: SlotId, next: number[]) => {
+    try {
+      await act.mutateAsync({ method: 'PUT', path: 'working-days/slots/weekdays', body: { slot, open_days: next, ...scope } });
+      toast.success(`${slotLabel(slot)}${split ? ` (${KIND_NAME[kind].toLowerCase()})` : ''}: ${next.length === 7 ? 'on every day' : next.length === 0 ? 'off every day' : `on only ${plural(WEEK.filter((d) => next.includes(d)))}`}.`);
+    } catch (err) { toast.error(errText(err)); }
+  };
+  const toggleWindow = (slot: SlotId, id: number) => { const on = windowDays(part, slot); void saveWindow(slot, on.includes(id) ? on.filter((d) => d !== id) : [...on, id]); };
+  const clearWindowDate = async (day: string, slot: SlotId) => {
+    try { await act.mutateAsync({ method: 'DELETE', path: `working-days/slots/dates/${day}?slot=${slot}${split ? `&kind=${kind}` : ''}` }); toast.success(`${slotLabel(slot)} on that date follows its day of the week again.`); }
+    catch (err) { toast.error(errText(err)); }
+  };
+  const slotDates = part.slot_dates ?? [];
+  const bookedInClosedWindows = part.booked_in_closed_slots ?? [];
+  // days of the week where every window is off: those days are closed
+  const noWindowDays = WEEK.filter((d) => SLOTS.every((x) => !windowOn(part, x.id, d)));
 
   return (
     <div className="space-y-6">
@@ -107,6 +138,7 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
               <li key={k} className={cn('panel px-4 py-3', k === kind && 'border-washo-400/50')}>
                 <p className="text-xs font-semibold uppercase tracking-wide text-fog">{KIND_NAME[k]}</p>
                 <p className="mt-0.5 font-semibold text-white">{summary((k === 'single' ? data.single : data.membership!).weekdays)}</p>
+                {slotsOn && <p className="mt-0.5 text-xs text-fog">{windowsSummary(k === 'single' ? data.single : data.membership!)}</p>}
               </li>
             ))}
           </ul>
@@ -168,11 +200,89 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
         </div>
       </section>
 
+      {slotsOn ? (
+        <section className="glass space-y-5 p-5">
+          <div>
+            <h2 className="text-lg font-bold">Time windows{split ? `: ${KIND_NAME[kind].toLowerCase()}` : ''}</h2>
+            <p className="mt-1 max-w-3xl text-sm text-fog">
+              Turn a window <strong className="text-white">off</strong> on a day of the week and customers cannot book {split ? (kind === 'single' ? 'a single wash (or claim a free wash)' : 'a membership wash, choose that window for a membership, or move a membership wash') : 'a wash'} in it that day. The day stays open for the other windows, and customers are told which are left. If every window of a day is off, the day counts as closed.
+            </p>
+          </div>
+          <div className="space-y-3">
+            {SLOTS.map((win) => {
+              const Icon = WINDOW_ICON[win.icon];
+              const on = windowDays(part, win.id);
+              const off = WEEK.filter((d) => !on.includes(d));
+              return (
+                <div key={win.id} className="panel space-y-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/[0.07] text-washo-300"><Icon className="h-5 w-5" /></span>
+                      <div>
+                        <p className="font-semibold">{win.label} <span className="font-normal text-fog">· {win.window}</span></p>
+                        <p className={cn('text-xs', off.length === 0 ? 'text-fog' : on.length === 0 ? 'font-semibold text-bad' : 'text-warn')}>
+                          {off.length === 0 ? 'On every day' : on.length === 0 ? 'Off every day' : `Off on ${plural(off)}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="glass" disabled={!canManage || act.isPending || on.length === 7} onClick={() => void saveWindow(win.id, [...WEEK])}>On every day</Button>
+                      <Button size="sm" variant="ghost" disabled={!canManage || act.isPending || on.length === 0} onClick={() => void saveWindow(win.id, [])}>Off every day</Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1.5" role="group" aria-label={`${win.label} on each day of the week`}>
+                    {WEEK.map((id) => {
+                      const winOn = on.includes(id);
+                      const dayShut = !openDays.includes(id);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="switch"
+                          aria-checked={winOn}
+                          aria-label={`${win.label} on ${WEEKDAYS[id].long}: ${dayShut ? 'the whole day is off' : winOn ? 'on' : 'off'}`}
+                          title={dayShut ? `${WEEKDAYS[id].long} is off for the whole day (see Days of the week)` : undefined}
+                          disabled={!canManage || act.isPending}
+                          onClick={() => toggleWindow(win.id, id)}
+                          className={cn(
+                            'flex h-14 flex-col items-center justify-center gap-0.5 rounded-xl border text-xs font-bold transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                            dayShut ? 'border-dashed border-white/10 bg-white/[0.01] text-white/30'
+                              : winOn ? 'border-ok/60 bg-ok/15 text-white' : 'border-dashed border-white/15 bg-white/[0.02] text-white/45 hover:border-white/30'
+                          )}
+                        >
+                          {WEEKDAYS[id].short}
+                          <span className={cn('text-[9px] font-semibold uppercase', dayShut ? 'text-fog' : winOn ? 'text-ok' : 'text-fog')}>{dayShut ? 'Day off' : winOn ? 'On' : 'Off'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {noWindowDays.length > 0 && <p role="note" className="text-sm text-warn">Every window is off on {plural(noWindowDays)}, so those days are closed.</p>}
+          {split && (() => {
+            const other = kind === 'single' ? data.membership! : data.single;
+            const same = SLOTS.every((x) => sameSet(windowDays(part, x.id), windowDays(other, x.id)));
+            return (
+              <div>
+                <Button size="sm" variant="ghost" disabled={!canManage || act.isPending || same} onClick={async () => { for (const x of SLOTS) await saveWindow(x.id, windowDays(other, x.id)); }}>Same windows as {KIND_NAME[OTHER[kind]].toLowerCase()}</Button>
+              </div>
+            );
+          })()}
+        </section>
+      ) : (
+        <section className="glass space-y-2 border-warn/30 p-5">
+          <h2 className="text-lg font-bold">Time windows are not switched on yet</h2>
+          <p className="max-w-3xl text-sm text-fog">To turn Morning, Afternoon or Night off, the database needs the update <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">supabase/migrations/20261004000049_working_slots.sql</code> (paste it into the Supabase SQL Editor and run it). Until then every window is on.</p>
+        </section>
+      )}
+
       <section className="glass space-y-5 p-5">
         <div>
           <h2 className="text-lg font-bold">Specific dates{split ? `: ${KIND_NAME[kind].toLowerCase()}` : ''}</h2>
           <p className="mt-1 max-w-3xl text-sm text-fog">
-            Close a date or a run of dates (a festival, heavy rain), or open a date on a day that is normally off. A date's own setting beats its day of the week.{split ? ` It applies to ${label} only.` : ''}
+            Close a date or a run of dates (a festival, heavy rain), or open a date on a day that is normally off{slotsOn ? '; choose "Applies to" to close only one time window of it' : ''}. A date's own setting beats its day of the week.{split ? ` It applies to ${label} only.` : ''}
             Washes already booked on a date you close stay booked until you move them.
           </p>
         </div>
@@ -180,14 +290,15 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
           <Input label="From" type="date" min={today} value={from} onChange={(e) => setFrom(e.target.value)} disabled={!canManage} />
           <Input label="To" optional type="date" min={from || today} value={to} onChange={(e) => setTo(e.target.value)} disabled={!canManage} hint="Leave empty for one day" />
           <Segmented label="What this date is" value={open} onChange={setOpen} options={[{ value: 'closed', label: 'Closed' }, { value: 'open', label: 'Open' }]} />
+          {slotsOn && <div className="md:col-span-3"><Segmented label="Applies to" value={applyTo} onChange={setApplyTo} options={[{ value: 'day', label: 'Whole day' }, ...SLOTS.map((x) => ({ value: x.id, label: x.label }))]} /></div>}
           <Input className="md:col-span-2" label="Reason" optional value={reason} onChange={(e) => setReason(e.target.value)} maxLength={120} disabled={!canManage} placeholder="Diwali, heavy rain, team event" hint="Customers see it when they try to book that day" />
-          <Button type="submit" loading={act.isPending} disabled={!canManage || !from} icon={open === 'closed' ? <CalendarOff className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}>{open === 'closed' ? 'Close' : 'Open'} {to && to !== from ? 'these dates' : 'this date'}</Button>
+          <Button type="submit" loading={act.isPending} disabled={!canManage || !from} icon={open === 'closed' ? <CalendarOff className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}>{open === 'closed' ? 'Close' : 'Open'} {applyTo === 'day' ? '' : `${slotLabel(applyTo)} on `}{to && to !== from ? 'these dates' : 'this date'}</Button>
         </form>
         {formError && <p role="alert" className="text-sm text-bad">{formError}</p>}
 
-        {part.dates.length === 0 ? (
+        {part.dates.length === 0 && slotDates.length === 0 ? (
           <p className="text-sm text-fog">No specific dates are set.</p>
-        ) : (
+        ) : part.dates.length === 0 ? null : (
           <ul className="panel divide-y divide-white/[0.07] overflow-hidden" aria-label="Dates that are set">
             {part.dates.map((d) => (
               <li key={d.day} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
@@ -200,7 +311,42 @@ export default function WorkingDays({ canManage }: { canManage: boolean }) {
             ))}
           </ul>
         )}
+
+        {slotDates.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-bold">Time windows set for specific dates</h3>
+            <ul className="panel divide-y divide-white/[0.07] overflow-hidden" aria-label="Time windows that are set for dates">
+              {slotDates.map((d) => (
+                <li key={`${d.day}-${d.slot}`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+                  <div className="w-40 shrink-0"><p className="font-semibold">{prettyDate(d.day)}</p><p className="text-xs text-fog">{fullDate(d.day)}</p></div>
+                  <Badge tone="blue">{slotLabel(d.slot)}</Badge>
+                  <Badge tone={d.open ? 'green' : 'red'}>{d.open ? 'Open' : 'Closed'}</Badge>
+                  <p className="min-w-0 flex-1 truncate text-mist">{d.reason ?? <span className="text-fog">No reason given</span>}</p>
+                  {!d.open && d.washes > 0 && <Badge tone="amber">{d.washes} wash{d.washes === 1 ? '' : 'es'} booked</Badge>}
+                  {canManage && <Button size="sm" variant="glass" icon={<Trash2 className="h-4 w-4" />} disabled={act.isPending} onClick={() => void clearWindowDate(d.day, d.slot)} aria-label={`Remove the ${slotLabel(d.slot)} setting for ${fullDate(d.day)}`}>Remove</Button>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
+
+      {bookedInClosedWindows.length > 0 && (
+        <section className="glass space-y-3 border-warn/30 p-5">
+          <div>
+            <h2 className="text-lg font-bold">Washes booked in a window that is off{split ? `: ${KIND_NAME[kind].toLowerCase()}` : ''}</h2>
+            <p className="mt-1 max-w-3xl text-sm text-fog">These are still booked, in a window you have since turned off. Move each one from the Washes tab (open the wash, Reschedule), or from the Paid tab, to a window that is on.</p>
+          </div>
+          <ul className="panel divide-y divide-white/[0.07] overflow-hidden" aria-label="Washes booked in a window that is off">
+            {bookedInClosedWindows.map((b) => (
+              <li key={`${b.date}-${b.slot}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                <span className="font-semibold">{prettyDate(b.date)} <span className="font-normal text-fog">· {fullDate(b.date)} · {slotLabel(b.slot)}</span></span>
+                <Badge tone="amber">{b.washes} wash{b.washes === 1 ? '' : 'es'}</Badge>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {part.booked_on_closed.length > 0 && (
         <section className="glass space-y-3 border-warn/30 p-5">

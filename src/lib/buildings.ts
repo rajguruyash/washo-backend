@@ -1,3 +1,5 @@
+import type { SocietyClusters } from './societyCluster';
+
 /** Filtering a specialist's washes by building ("B2", "B3", "B5"...). Pure helpers; the worker page uses them on every section. */
 
 /** Choose "All buildings". */
@@ -43,20 +45,27 @@ export const ALL_SOCIETIES = 'all';
 /** One society written any way ("Yashwin  Orizzonte", "yashwin orizzonte") is the same society. */
 export const societyKey = (s: string | null | undefined): string => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+/**
+ * `clusters` (societyCluster.ts) also joins the names customers spell differently or add a locality to ("Purva Silversands", "Purva Sliversands Mundhwa") into one society, so the
+ * filter lists it once. Without it, only names that differ in case or spacing are the same.
+ */
+const keyFor = (name: string | null | undefined, clusters?: SocietyClusters) => (clusters ? clusters.keyOf(name) : societyKey(name));
+
 /** The societies in `rows`, A to Z. Rows without details (hidden) or without a society are ignored. */
-export function societyOptions<T extends { society_name: string | null; hidden?: boolean }>(rows: T[]): BuildingOption[] {
+export function societyOptions<T extends { society_name: string | null; hidden?: boolean }>(rows: T[], clusters?: SocietyClusters): BuildingOption[] {
   const seen = new Map<string, string>();
   for (const r of rows) {
     if (r.hidden) continue;
-    const key = societyKey(r.society_name);
-    if (key && !seen.has(key)) seen.set(key, (r.society_name ?? '').trim().replace(/\s+/g, ' '));
+    const key = keyFor(r.society_name, clusters);
+    if (!key || seen.has(key)) continue;
+    seen.set(key, clusters ? (clusters.groups.find((g) => g.key === key)?.label ?? (r.society_name ?? '').trim()) : (r.society_name ?? '').trim().replace(/\s+/g, ' '));
   }
   return [...seen].sort((a, b) => a[1].localeCompare(b[1], 'en', { numeric: true })).map(([value, label]) => ({ value, label }));
 }
 
 /** Does this wash belong to the chosen society? Hidden rows (details not shown) only match "All societies". */
-export function inSociety(r: { society_name: string | null; hidden?: boolean }, choice: string): boolean {
+export function inSociety(r: { society_name: string | null; hidden?: boolean }, choice: string, clusters?: SocietyClusters): boolean {
   if (choice === ALL_SOCIETIES) return true;
   if (r.hidden) return false;
-  return societyKey(r.society_name) === choice;
+  return keyFor(r.society_name, clusters) === choice;
 }

@@ -49,7 +49,7 @@ export const useCapacity = (from: string, to: string, enabled = true, kind?: Day
 
 /** Which weekdays WASHO works and the days it is closed (Admin -> Working Days), for single washes or for memberships. The booking pages grey out closed days and say when the next open day is. */
 export const useWorkingDays = (enabled = true, kind?: DayKind) =>
-  useQuery({ queryKey: ['working-days', kind ?? 'both'], queryFn: async () => { const r = await get<WorkingDays & { success: boolean }>(`/working-days${kind ? `?kind=${kind}` : ''}`); return { weekdays: r.weekdays, closed: r.closed, next_open: r.next_open } as WorkingDays; }, staleTime: 30_000, enabled, retry: false });
+  useQuery({ queryKey: ['working-days', kind ?? 'both'], queryFn: async () => { const r = await get<WorkingDays & { success: boolean }>(`/working-days${kind ? `?kind=${kind}` : ''}`); return { weekdays: r.weekdays, closed: r.closed, closed_slots: r.closed_slots ?? [], next_open: r.next_open } as WorkingDays; }, staleTime: 30_000, enabled, retry: false });
 
 /** The washes in a month (4 to 28, any mix) and the weekdays the customer likes. */
 export interface MonthlyPlan { body: number; deep: number; weekdays?: number[] }

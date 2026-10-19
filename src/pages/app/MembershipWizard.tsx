@@ -7,6 +7,7 @@ import { Plate } from '../../components/brand/Plate';
 import { WizardStepper } from '../../components/WizardStepper';
 import { stepMotion, useStepDirection } from '../../lib/stepMotion';
 import { DateSlotPicker } from '../../components/DateSlotPicker';
+import { weekdaysWithoutWindow, windowsThatFit } from '../../lib/closedWindows';
 import { ExactDatesCalendar } from '../../components/ExactDatesCalendar';
 import { QuoteBreakdownView } from '../../components/Quote';
 import { VehiclePicker } from '../../components/VehiclePicker';
@@ -165,6 +166,10 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const termEnd = preview.data?.end_date;
   const { data: crowd } = useCapacity(earliest, termEnd && termEnd > addDays(earliest, 60) ? termEnd : addDays(earliest, 60), step >= 4, 'membership');
   const customProblem = customActive && termEnd && start ? exactDatesProblem({ value: customActive, need: { body: counts.body * (months ?? 1), deep: counts.deep * (months ?? 1) }, minDate: [start, earliest].sort().at(-1)!, end: termEnd }) : null;
+  // The window chosen for the plan must be on for the weekdays picked (Admin -> Working Days can turn a window off); with exact dates the server checks each date instead.
+  const termClosures = useMemo(() => (termEnd && start ? { weekdays: days, from: [start, earliest].sort().at(-1)!, to: termEnd, closed: working?.closed ?? [], closedSlots: working?.closed_slots ?? [] } : null), [termEnd, start, earliest, days, working]);
+  const windowOffDays = !customActive && slot && termClosures ? weekdaysWithoutWindow(slot, termClosures) : [];
+  const windowsLeft = termClosures && windowOffDays.length > 0 ? windowsThatFit(termClosures) : [];
   const chosenEstimate = useEstimate(vtype && planReady && months ? { vehicle_type: vtype, monthly: { body: counts.body, deep: counts.deep }, duration_months: months, ...(coupon ? { coupon } : {}) } : null);
   // A coupon that stopped working after it was applied (it ran out, or the plan changed to one it cannot go with): say so and let it be removed.
   const couponStopped = coupon && chosenEstimate.isError ? (chosenEstimate.error instanceof ApiError ? chosenEstimate.error.message : 'That coupon cannot be used now.') : '';
@@ -201,7 +206,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
     true, // pressing Continue with fewer than 4 washes shows the error instead of moving on
     true, // ... and so does choosing too few days
     Boolean(months),
-    Boolean(slot && start) && (customActive ? !customProblem : preview.data?.fits !== false),
+    Boolean(slot && start) && (customActive ? !customProblem : preview.data?.fits !== false && windowOffDays.length === 0),
     Boolean(addressId),
   ][step];
   const goNext = () => {
@@ -388,6 +393,9 @@ function Wizard({ renewing }: { renewing?: Membership }) {
 
             {start && slot && (
               <div className="mt-8 space-y-4">
+                {windowOffDays.length > 0 && (
+                  <p role="alert" className="flex items-start gap-2 rounded-2xl border border-warn/30 bg-warn/10 p-4 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> WASHO is currently unavailable in the {slotLabel(slot)} window on {washNames(windowOffDays)}. {windowsLeft.length > 0 ? `Choose the ${windowsLeft.map((x) => slotLabel(x)).join(' or ')} window, or go back and change your days.` : 'Go back and change your days.'}</p>
+                )}
                 {preview.isError && <p role="alert" className="flex items-start gap-2 text-sm text-warn"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {(preview.error as Error).message}</p>}
                 {preview.data && !customActive && !preview.data.fits && (
                   <p role="alert" className="flex items-start gap-2 rounded-2xl border border-bad/30 bg-bad/10 p-4 text-sm text-bad"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> Your {perMonth} washes a month do not all fit on those days, because this vehicle already has a wash on some of them. Choose more days or a later start, or pick exact dates below.</p>
