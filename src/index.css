@@ -38,6 +38,9 @@
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   --animate-shake: shake 0.4s ease-in-out;
   --animate-orbit: orbit 28s ease-in-out infinite alternate;
+  /* the Woshi chat: only transform and opacity, so the phone's graphics layer runs them by itself even while the page is busy */
+  --animate-chat-in: chat-in 220ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  --animate-chat-dim: chat-dim 180ms ease-out both;
   /* React Bits StarBorder */
   --animate-star-movement-bottom: star-movement-bottom 6s linear infinite alternate;
   --animate-star-movement-top: star-movement-top 6s linear infinite alternate;
@@ -64,6 +67,14 @@
   @keyframes star-movement-top {
     0% { transform: translate(0%, 0%); opacity: 1; }
     100% { transform: translate(100%, 0%); opacity: 0; }
+  }
+  @keyframes chat-in {
+    from { transform: translate3d(0, 36px, 0); opacity: 0; }
+    to { transform: translate3d(0, 0, 0); opacity: 1; }
+  }
+  @keyframes chat-dim {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   @keyframes orbit {
     0% { transform: translate3d(0, 0, 0) scale(1); }

@@ -1,14 +1,16 @@
 import { Component, lazy, Suspense, type ReactNode } from 'react';
+import { useBackgroundHeld } from '../../lib/holdBackground';
 
 // ogl (WebGL) is a sizeable chunk: it loads after the page is already usable, and the static glow below shows in the meantime.
 const MicroSlats = lazy(() => import('../reactbits/MicroSlats'));
 
 /** The calm glow: used while the slats load, and if the browser cannot do WebGL. */
-function Glow() {
+function Glow({ still }: { still: boolean }) {
+  const hold = still ? ' [animation-play-state:paused]' : '';
   return (
     <>
-      <div className="absolute -left-40 -top-40 h-[34rem] w-[34rem] animate-orbit rounded-full bg-washo-700/30 blur-[120px]" />
-      <div className="absolute -right-40 top-1/3 h-[30rem] w-[30rem] animate-orbit rounded-full bg-washo-500/15 blur-[120px] [animation-delay:-12s] [animation-direction:alternate-reverse]" />
+      <div className={`absolute -left-40 -top-40 h-[34rem] w-[34rem] animate-orbit rounded-full bg-washo-700/30 blur-[120px]${hold}`} />
+      <div className={`absolute -right-40 top-1/3 h-[30rem] w-[30rem] animate-orbit rounded-full bg-washo-500/15 blur-[120px] [animation-delay:-12s] [animation-direction:alternate-reverse]${hold}`} />
     </>
   );
 }
@@ -32,13 +34,14 @@ const fine = () => typeof window !== 'undefined' && !!window.matchMedia?.('(hove
 /**
  * Fixed backdrop behind every page: a wall of tiny slats that rolls like a sea (React Bits Micro Slats), tinted WASHO blue and
  * dimmed so text stays easy to read. Mounted once, at the root. The cursor stirs it on desktop; touch screens skip that part to
- * save battery. It pauses itself when the tab is hidden, and holds still for people who ask for reduced motion.
+ * save battery. It pauses itself when the tab is hidden, and holds still for people who ask for reduced motion, and while a screen that opened over the page (the Woshi chat) holds it still.
  */
 export function Atmosphere() {
+  const still = useBackgroundHeld();
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-ink-950">
-      <Safe fallback={<Glow />}>
-        <Glow />
+      <Safe fallback={<Glow still={still} />}>
+        <Glow still={still} />
         <Suspense fallback={null}>
           <div className="absolute inset-0 opacity-60">
             <MicroSlats
@@ -51,6 +54,7 @@ export function Atmosphere() {
               gap={3}
               interactive={fine()}
               intro
+              paused={still}
             />
           </div>
         </Suspense>
