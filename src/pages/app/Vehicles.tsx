@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Palette, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Plate } from '../../components/brand/Plate';
 import { EmptyState, ErrorState, PageHeader } from '../../components/EmptyState';
@@ -8,6 +8,7 @@ import { Sheet } from '../../components/ui/Sheet';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { VehicleSheet, vehicleIcon } from '../../components/VehicleSheet';
+import { missingColour } from '../../lib/colours';
 import { vehicleLabel } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useDeleteVehicle, useVehicles } from '../../lib/queries';
@@ -19,6 +20,7 @@ export default function Vehicles() {
   const del = useDeleteVehicle();
   const toast = useToast();
   const [editing, setEditing] = useState<Vehicle | null>(null);
+  const [colourOnly, setColourOnly] = useState(false);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Vehicle | null>(null);
 
@@ -54,9 +56,17 @@ export default function Vehicles() {
                 </div>
               </div>
               <Plate reg={v.registration_number} className="self-start scale-110 origin-left" />
+              {missingColour(v) ? (
+                // The reminder lives here and nowhere else: not on the home page, not in the booking pages.
+                <div role="alert" className="flex items-center gap-3 rounded-2xl border border-bad/40 bg-bad/10 p-3 text-sm text-bad">
+                  <Palette className="h-4 w-4 shrink-0" aria-hidden />
+                  <p className="min-w-0 flex-1 font-medium">Add the colour of this vehicle. It helps our specialist find it.</p>
+                  <Button size="sm" variant="glass" onClick={() => { setColourOnly(true); setEditing(v); }}>Add colour</Button>
+                </div>
+              ) : null}
               <div className="flex gap-2 border-t border-white/[0.07] pt-4">
                 <ButtonLink to={`/app/membership/new?vehicle=${v.id}`} size="sm" className="flex-1">Start a membership</ButtonLink>
-                <Button variant="glass" size="sm" aria-label={`Edit ${v.model}`} onClick={() => setEditing(v)}><Pencil className="h-4 w-4" /></Button>
+                <Button variant="glass" size="sm" aria-label={`Edit ${v.model}`} onClick={() => { setColourOnly(false); setEditing(v); }}><Pencil className="h-4 w-4" /></Button>
                 <Button variant="glass" size="sm" aria-label={`Remove ${v.model}`} onClick={() => setRemoving(v)}><Trash2 className="h-4 w-4" /></Button>
               </div>
             </motion.div>
@@ -67,7 +77,7 @@ export default function Vehicles() {
       )}
 
       <VehicleSheet open={adding} onClose={() => setAdding(false)} />
-      <VehicleSheet open={Boolean(editing)} vehicle={editing} onClose={() => setEditing(null)} />
+      <VehicleSheet open={Boolean(editing)} vehicle={editing} focusColour={colourOnly} onClose={() => setEditing(null)} />
       <Sheet
         open={Boolean(removing)}
         onClose={() => setRemoving(null)}

@@ -11,6 +11,26 @@ function required(name: string, devFallback?: string): string {
 }
 
 /**
+ * The language-model services set up in the environment, in the order they are tried (see the `agent` block below). A service may list several models (GEMINI_MODEL=a,b): they are tried in
+ * that order, and Gemini sets its free limits per model, so the second one should still answer when the first has used up its own.
+ */
+export function agentProviders(env: NodeJS.ProcessEnv = process.env): { name: string; baseUrl: string; apiKey: string; model: string; reasoning?: string }[] {
+  const models = (list: string | undefined, fallback: string) => (list || fallback).split(',').map((m) => m.trim()).filter(Boolean);
+  const presets: Record<string, { baseUrl: string; key: string; models: string[]; reasoning: string }> = {
+    // Google retired gemini-2.5-flash for new projects. 3.5 Flash-Lite is the fast, cheap one (first); 3.8 Flash is the larger one (second). Check the list your key can use: see docs/AGENT.md.
+    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', key: env.GEMINI_API_KEY || '', models: models(env.GEMINI_MODEL, 'gemini-3.5-flash-lite,gemini-3.8-flash'), reasoning: env.GEMINI_REASONING || 'minimal' },
+    groq: { baseUrl: 'https://api.groq.com/openai/v1', key: env.GROQ_API_KEY || '', models: models(env.GROQ_MODEL, 'openai/gpt-oss-120b'), reasoning: env.GROQ_REASONING || 'low' },
+    openrouter: { baseUrl: 'https://openrouter.ai/api/v1', key: env.OPENROUTER_API_KEY || '', models: models(env.OPENROUTER_MODEL, 'openrouter/free'), reasoning: env.OPENROUTER_REASONING || 'off' },
+  };
+  const all = [
+    ...(env.AGENT_BASE_URL && env.AGENT_MODEL ? models(env.AGENT_MODEL, '').map((model) => ({ name: 'custom', baseUrl: env.AGENT_BASE_URL!.trim(), apiKey: (env.AGENT_API_KEY || '').trim(), model, reasoning: env.AGENT_REASONING || 'off' })) : []),
+    ...Object.entries(presets).filter(([, p]) => p.key.trim()).flatMap(([name, p]) => p.models.map((model) => ({ name, baseUrl: p.baseUrl, apiKey: p.key.trim(), model, reasoning: p.reasoning }))),
+  ];
+  const wanted = (env.AGENT_PROVIDERS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return wanted.length ? wanted.flatMap((n) => all.filter((p) => p.name === n)) : all;
+}
+
+/**
  * Everything here points at SUPABASE, the one backend WASHO runs on. This server holds no business data
  * and no business rules of its own: it signs people in through Supabase Auth, calls the database's
  * functions as the signed-in person, and relays the Razorpay edge functions.
@@ -91,6 +111,34 @@ export const config = {
     serviceAccountJson: (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim(),
     serviceAccountFile: (process.env.FIREBASE_SERVICE_ACCOUNT_FILE || '').trim(),
     fcmBase: (process.env.FCM_API_BASE || 'https://fcm.googleapis.com').replace(/\/+$/, ''),
+  },
+
+  // Woshi, the booking assistant. It talks to any free (or paid) language-model service that speaks the common chat API; put the key of one or more in Render and it is switched on.
+  // Several can be set: when the first is out of its free allowance, the next answers. In the order tried (or choose with AGENT_PROVIDERS="gemini,groq"):
+  //   AGENT_BASE_URL (+ AGENT_API_KEY, AGENT_MODEL)  your own: a model on your computer (Ollama: http://localhost:11434/v1) or any compatible service
+  //   GEMINI_API_KEY      Google Gemini free tier (aistudio.google.com/apikey)        GEMINI_MODEL, default gemini-2.5-flash
+  //   GROQ_API_KEY        Groq free plan (console.groq.com/keys)                       GROQ_MODEL, default openai/gpt-oss-120b
+  //   OPENROUTER_API_KEY  OpenRouter free models (openrouter.ai/keys)                  OPENROUTER_MODEL, default openrouter/free
+  // AGENT_ENABLED=false switches the assistant off without removing a key. The limits protect free allowances (and any bill).
+  agent: {
+    providers: agentProviders(),
+    enabled: process.env.AGENT_ENABLED !== 'false',
+    // AGENT_MODE=rules never calls a model (fixed questions and answers only). Otherwise the model is used, and simple mode takes over only while no model can be reached.
+    // Buttons (Book a single wash, Prices...) are answered by the fixed rules without calling a model: instant, and it spares a small free allowance. AGENT_RULES_FIRST=false sends them to the model too.
+    rulesFirst: process.env.AGENT_RULES_FIRST !== 'false',
+    mode: process.env.AGENT_MODE === 'rules' ? ('rules' as 'rules' | 'auto') : ('auto' as 'rules' | 'auto'),
+    // After simple mode began, and between booking flows, the model is tried again after this long.
+    retryModelMs: Number(process.env.AGENT_RETRY_MODEL_MS ?? 180_000),
+    // A free model can be answering, but too slowly for a chat. When one message takes longer than this (0 turns the check off), simple mode answers for the next few minutes, then the model is tried again.
+    slowTurnMs: Number(process.env.AGENT_SLOW_TURN_MS ?? 20_000),
+    slowRestMs: Number(process.env.AGENT_SLOW_REST_MS ?? 300_000),
+    messagesPer5Min: Number(process.env.AGENT_MESSAGES_PER_5_MIN || 15),
+    messagesPerDay: Number(process.env.AGENT_MESSAGES_PER_DAY || 60),
+    // Messages answered by the fixed rules cost nothing but a few database reads, so they have their own, much larger allowance.
+    rulesPer5Min: Number(process.env.AGENT_RULES_PER_5_MIN || 100),
+    rulesPerDay: Number(process.env.AGENT_RULES_PER_DAY || 1500),
+    tokensPerDay: Number(process.env.AGENT_TOKENS_PER_USER_DAY || 150_000),
+    callsPerDay: Number(process.env.AGENT_CALLS_PER_DAY || 800),
   },
 
   // Optional. When set, an outside scheduler (Render Cron Job, cron-job.org, GitHub Actions) can call POST /api/cron/reminders with

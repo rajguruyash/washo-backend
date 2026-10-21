@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, Check, Gift, Info, Plus } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Gift, Info } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AddressSheet, addressLine } from '../../components/AddressSheet';
+import { PayAddress } from '../../components/PayAddress';
 import { Plate } from '../../components/brand/Plate';
 import { WizardStepper } from '../../components/WizardStepper';
 import { stepMotion, useStepDirection } from '../../lib/stepMotion';
@@ -18,7 +18,6 @@ import { Input } from '../../components/ui/Field';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { claimView, dayOf } from '../../lib/campaign';
-import { cn } from '../../lib/cn';
 import { prettyDate, rupees } from '../../lib/format';
 import { ApiError } from '../../lib/http';
 import { useAddresses, useCampaign, useCatalog, useClaimFreeWash, usePublicSettings, useSaveProfile, useVehicles } from '../../lib/queries';
@@ -46,7 +45,7 @@ export default function ClaimWizard() {
   const { user } = useAuth();
   const { data: status, isLoading, isError, refetch } = useCampaign();
   const { data: vehicles } = useVehicles();
-  const { data: addresses } = useAddresses();
+  const { data: addresses, isSuccess: addressesLoaded } = useAddresses();
   const { data: catalog } = useCatalog();
   const claim = useClaimFreeWash();
   const toast = useToast();
@@ -59,7 +58,6 @@ export default function ClaimWizard() {
   const paused = usePublicSettings().data;
   const [picked, setVehicle] = useState<Vehicle | null>(null);
   const [addressId, setAddressId] = useState<string | null>(null);
-  const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
   // While the claim goes through, the offer's own status flips to "booked"; that must not swap the slider away mid-animation.
   const [claiming, setClaiming] = useState(false);
@@ -154,20 +152,7 @@ export default function ClaimWizard() {
                 <span className="text-fog">Price</span>
                 <span className="flex items-baseline gap-2">{worth ? <s className="text-fog">{rupees(worth)}</s> : null}<span className="font-display text-2xl font-extrabold text-offer">FREE</span></span>
               </div>
-              <div id="pay-address" className="p-5">
-                <p className="eyebrow">Where</p>
-                {addresses?.length ? (
-                  <div className="mt-2 space-y-2">
-                    {addresses.map((a) => (
-                      <button key={a.id} type="button" onClick={() => setAddressId(a.id)} aria-pressed={a.id === address?.id} className={cn('flex w-full items-start gap-3 rounded-2xl border p-3 text-left text-sm transition-colors', a.id === address?.id ? 'border-washo-400/60 bg-washo-500/10' : 'border-white/10 hover:border-white/20')}>
-                        <span className={cn('mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border', a.id === address?.id ? 'border-washo-400 bg-washo-500' : 'border-white/30')}>{a.id === address?.id && <Check className="h-3 w-3" strokeWidth={3} />}</span>
-                        <span><span className="block font-semibold">{a.label} · {addressLine(a)}</span><span className="text-xs text-fog">Parking: {a.parking_location}</span></span>
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="mt-2 text-sm text-warn">Add an address so our specialist knows where to come.</p>}
-                <Button variant="glass" size="sm" className="mt-3" icon={<Plus className="h-4 w-4" />} onClick={() => setAddrOpen(true)}>Add an address</Button>
-              </div>
+              <PayAddress addresses={addresses} loaded={addressesLoaded} selectedId={address?.id ?? null} onSelect={setAddressId} active={step === STEPS.length - 1} />
             </div>
             {!user?.email && <div className="mt-5"><Input label="Email" type="email" optional value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" hint="We will email your booking confirmation. You can leave this empty." /></div>}
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-offer/25 bg-offer/10 p-4 text-sm text-mist">
@@ -190,7 +175,6 @@ export default function ClaimWizard() {
           )}
         </div>
       </div>
-      <AddressSheet open={addrOpen} onClose={() => setAddrOpen(false)} onSaved={(a) => setAddressId(a.id)} />
     </div>
   );
 }

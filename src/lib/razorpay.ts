@@ -41,6 +41,12 @@ export async function payWithRazorpay(o: {
   /** Called when Razorpay reports a failed attempt. The modal stays open so the customer can retry or pick another method. */
   onFailed?: (reason: string) => void;
 }): Promise<VerifyResult> {
+  // Local testing only: on the vite dev server, with the dev stack's pretend Razorpay key, there is no real order for Checkout to open. Ask the dev stack for the signed result Checkout
+  // would have sent and verify it the usual way. (import.meta.env.DEV is false in every built site, so this can never run for a customer.)
+  if (import.meta.env.DEV && o.order.key_id === 'rzp_test_KEYID') {
+    const resp = await fetch(`/__dev/checkout?order=${encodeURIComponent(o.order.order_id)}`).then((r) => r.json());
+    return (await post<{ result: VerifyResult }>('/payments/verify', resp)).result;
+  }
   await loadCheckoutScript();
   return new Promise<VerifyResult>((resolve, reject) => {
     const rzp = new window.Razorpay!({

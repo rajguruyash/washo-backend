@@ -7,6 +7,7 @@ import { config } from './config';
 import { HttpError } from './errors';
 import { apiLimiter, errorHandler, sameOriginWrites } from './middleware/http';
 import { accountRouter } from './routes/account';
+import { agentRouter } from './routes/agent';
 import { adminRouter } from './routes/admin';
 import { adminCampaignsRouter } from './routes/adminCampaigns';
 import { adminAnnouncementsRouter } from './routes/adminAnnouncements';
@@ -85,7 +86,7 @@ export function createApp() {
     next();
   });
   app.get('/api/health', (_req, res) => res.json({ success: true }));
-  app.use('/api', catalogRouter, settingsRouter, authRouter, accountRouter, supportRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminOpsRouter, adminSearchRouter, adminCampaignsRouter, adminAnnouncementsRouter, offersRouter, devicesRouter, couponsRouter, remindersRouter, webhookRouter);
+  app.use('/api', catalogRouter, settingsRouter, authRouter, accountRouter, supportRouter, membershipsRouter, bookingsRouter, campaignRouter, capacityRouter, geoRouter, workerRouter, adminRouter, adminManageRouter, adminOpsRouter, adminSearchRouter, adminCampaignsRouter, adminAnnouncementsRouter, offersRouter, devicesRouter, agentRouter, couponsRouter, remindersRouter, webhookRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'not_found', 'Not found')));
 
   // Serve the built React app (same origin as the API, which keeps cookie auth simple).

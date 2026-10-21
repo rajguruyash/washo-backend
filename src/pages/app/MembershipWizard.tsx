@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, Info, Minus, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AddressSheet, addressLine } from '../../components/AddressSheet';
+import { PayAddress } from '../../components/PayAddress';
 import { Plate } from '../../components/brand/Plate';
 import { WizardStepper } from '../../components/WizardStepper';
 import { stepMotion, useStepDirection } from '../../lib/stepMotion';
@@ -83,7 +83,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const [params] = useSearchParams();
   const { data: catalog } = useCatalog();
   const { data: vehicles } = useVehicles();
-  const { data: addresses } = useAddresses();
+  const { data: addresses, isSuccess: addressesLoaded } = useAddresses();
   const checkout = useStartMembershipPayment();
   const { pay, paying } = usePay();
 
@@ -123,7 +123,6 @@ function Wizard({ renewing }: { renewing?: Membership }) {
   const [start, setStart] = useState<string | null>(() => (renewing ? [addDays(istDay(renewing.end_at), 1), addDays(todayIST(), 2)].sort().at(-1)! : null));
   const [addressId, setAddressId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
-  const [addrOpen, setAddrOpen] = useState(false);
   const [error, setError] = useState('');
   // A coupon the customer typed on the last step: checked by the server (it says if the code cannot be used), then part of the price.
   const [coupon, setCoupon] = useState<string | null>(null);
@@ -471,20 +470,7 @@ function Wizard({ renewing }: { renewing?: Membership }) {
                   <p className="mt-1 font-semibold">{[discount('frequency', freqKey) ? `${percent(discount('frequency', freqKey))} ${offerApplies(freqKey) ? 'welcome offer' : 'frequency'}` : '', discount('duration', months) ? `${percent(discount('duration', months))} length` : '', chosenEstimate.data?.coupon ? `${percent(chosenEstimate.data.coupon.bp)} coupon` : ''].filter(Boolean).join(' + ') || 'None for this plan'}</p>
                 </div>
               </div>
-              <div id="pay-address" className="p-5">
-                <p className="eyebrow">Where</p>
-                {addresses?.length ? (
-                  <div className="mt-2 space-y-2">
-                    {addresses.map((a) => (
-                      <button key={a.id} type="button" onClick={() => setAddressId(a.id)} aria-pressed={a.id === addressId} className={cn('flex w-full items-start gap-3 rounded-2xl border p-3 text-left text-sm transition-colors', a.id === addressId ? 'border-washo-400/60 bg-washo-500/10' : 'border-white/10 hover:border-white/20')}>
-                        <span className={cn('mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border', a.id === addressId ? 'border-washo-400 bg-washo-500' : 'border-white/30')}>{a.id === addressId && <Check className="h-3 w-3" strokeWidth={3} />}</span>
-                        <span><span className="block font-semibold">{a.label} · {addressLine(a)}</span><span className="text-xs text-fog">Parking: {a.parking_location}</span></span>
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="mt-2 text-sm text-warn">Add an address so our specialist knows where to come.</p>}
-                <Button variant="glass" size="sm" className="mt-3" icon={<Plus className="h-4 w-4" />} onClick={() => setAddrOpen(true)}>Add an address</Button>
-              </div>
+              <PayAddress addresses={addresses} loaded={addressesLoaded} selectedId={addressId} onSelect={setAddressId} />
               <div className="p-5"><TextArea label="Anything the crew should know?" optional value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} placeholder="Gate code, call before arriving, water point…" /></div>
             </div>
             {(customActive ?? preview.data?.dates) && (
@@ -543,7 +529,6 @@ function Wizard({ renewing }: { renewing?: Membership }) {
           <p>Want every date your own way, even washes on days one after another? You can pick exact dates on the Start step.</p>
         </div>
       </Sheet>
-      <AddressSheet open={addrOpen} onClose={() => setAddrOpen(false)} onSaved={(a) => setAddressId(a.id)} />
     </div>
   );
 }

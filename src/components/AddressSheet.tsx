@@ -26,7 +26,7 @@ const geoErrors: Record<number, string> = {
 };
 
 /** Add or edit a service address: where the crew finds the vehicle. */
-export function AddressSheet({ open, onClose, address, onSaved }: { open: boolean; onClose: () => void; address?: Address | null; onSaved?: (a: Address) => void }) {
+export function AddressSheet({ open, onClose, address, onSaved, notice }: { open: boolean; onClose: () => void; address?: Address | null; onSaved?: (a: Address) => void; /** A red message at the top: why the sheet came up by itself (a booking that cannot be paid without an address). */ notice?: string }) {
   const save = useSaveAddress();
   const toast = useToast();
   const [f, setF] = useState(blank);
@@ -121,6 +121,7 @@ export function AddressSheet({ open, onClose, address, onSaved }: { open: boolea
       footer={<Button type="submit" form="address-form" full size="lg" loading={save.isPending}>{address ? 'Save changes' : 'Save address'}</Button>}
     >
       <form id="address-form" onSubmit={submit} className="space-y-4" noValidate>
+        {notice && <p role="alert" className="rounded-2xl border border-bad/40 bg-bad/10 p-3 text-sm font-medium text-bad">{notice}</p>}
         <div>
           <Button type="button" variant="glass" full icon={<LocateFixed className="h-4 w-4" />} loading={locating} onClick={locate}>Use my current location</Button>
           <p role="status" className={`mt-2 text-xs ${locNote ? 'text-mist' : 'text-fog'}`}>

@@ -26,6 +26,17 @@ async function main() {
   await fake.createStaff('admin', { email: 'admin@washo.test', password: 'Admin-pass-1', name: 'WASHO Admin', phone: '9000000001' });
   await fake.createStaff('worker', { email: 'worker@washo.test', password: 'Worker-pass-1', name: 'Ravi Patil', phone: '9000000002' });
 
+  // Woshi without a key: a scripted stand-in for the model, so the chat screens can be tried by hand (it follows the booking flows; it is not clever). With GEMINI_API_KEY (or GROQ_API_KEY,
+  // OPENROUTER_API_KEY, AGENT_BASE_URL) set, the real model is used.
+  const { config: agentConfig } = await import('../src/config');
+  if (agentConfig.agent.providers.length === 0 && process.env.AGENT_DEV_SCRIPTED !== '0') {
+    const { setLlm } = await import('../src/agent/llm');
+    const { model, friendly } = await import('./scriptedModel');
+    setLlm(model(friendly));
+    console.log('Woshi: no model key is set (GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY), so a scripted stand-in plays the model for typed sentences (AGENT_DEV_SCRIPTED=0 shows the real simple mode instead; buttons are always answered by the fixed rules).');
+  } else if (agentConfig.agent.providers.length) {
+    console.log(`Woshi: real model(s) in this order: ${agentConfig.agent.providers.map((p) => `${p.name} (${p.model})`).join(', ')}`);
+  }
   const { createApp } = await import('../src/app');
   const { setMailTransport } = await import('../src/notify');
   const { config } = await import('../src/config');

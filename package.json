@@ -21,7 +21,10 @@
     "test:all": "npm run typecheck && npm run lint && npm test && npm run db:test && npm run db:test:full && npm run test:api",
     "backend:dev": "TS_NODE_PROJECT=backend/tsconfig.json node --watch -r ts-node/register/transpile-only backend/src/server.ts",
     "dev:stack": "./supabase/tests/run.sh dev",
-    "db:bundle": "./supabase/bundles/build.sh"
+    "db:bundle": "./supabase/bundles/build.sh",
+    "agent:ping": "TS_NODE_PROJECT=backend/tsconfig.json node -r ts-node/register/transpile-only backend/scripts/agent-live.ts ping",
+    "agent:speed": "TS_NODE_PROJECT=backend/tsconfig.json node -r ts-node/register/transpile-only backend/scripts/agent-live.ts speed",
+    "agent:redteam": "TS_NODE_PROJECT=backend/tsconfig.json node -r ts-node/register/transpile-only backend/scripts/agent-live.ts redteam"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",

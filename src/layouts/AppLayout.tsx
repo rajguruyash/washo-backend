@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { Link, NavLink, Navigate, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
 import { AvatarHead } from '../components/brand/Avatar';
 import { Logo } from '../components/brand/Logo';
+import { AgentWidget } from '../components/agent/AgentWidget';
 import { MaintenanceNotice } from '../components/MaintenanceNotice';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
@@ -184,6 +185,7 @@ export function AppLayout() {
         </main>
       </div>
       {!focused && !immersive && <BottomBar />}
+      {!focused && <AgentWidget />}
       <ScrollRestoration />
     </RequireRole>
   );

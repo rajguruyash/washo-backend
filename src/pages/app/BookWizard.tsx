@@ -6,9 +6,10 @@ import { DateSlotPicker } from '../../components/DateSlotPicker';
 import { ErrorState } from '../../components/EmptyState';
 import { CouponBox } from '../../components/CouponBox';
 import { ServicePhoto } from '../../components/ServicePhoto';
+import { PayAddress } from '../../components/PayAddress';
 import { PayPhoneGate } from '../../components/PayPhoneGate';
 import { useNeedsPhone } from '../../lib/useNeedsPhone';
-import { pausedBlocker, phoneBlocker } from '../../lib/payBlockers';
+import { addressBlocker, pausedBlocker, phoneBlocker } from '../../lib/payBlockers';
 import { SlideToPay } from '../../components/SlideToPay';
 import { VehiclePicker } from '../../components/VehiclePicker';
 import { WizardStepper } from '../../components/WizardStepper';
@@ -32,7 +33,7 @@ export default function BookWizard() {
   const { data: catalog, isLoading: catalogLoading, isError: catalogError, error: catalogErr, refetch: refetchCatalog } = useCatalog();
   const { data: vehicles } = useVehicles();
   const { data: crowd } = useCapacity(todayIST(), addDays(todayIST(), 22), true, 'single');
-  const { data: addresses } = useAddresses();
+  const { data: addresses, isSuccess: addressesLoaded } = useAddresses();
   const start = useStartOnDemandPayment();
   const { pay, paying } = usePay();
   const [step, setStep] = useState(0);
@@ -40,6 +41,7 @@ export default function BookWizard() {
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [slot, setSlot] = useState<SlotId | null>(null);
+  const [addressId, setAddressId] = useState<string | null>(null);
   // A coupon typed on the review step: checked by the server for this customer and this wash, then part of the price.
   const [coupon, setCoupon] = useState<string | null>(null);
 
@@ -64,7 +66,8 @@ export default function BookWizard() {
     const r = (await post<{ estimate: SingleWashEstimate }>('/booking-estimate', { vehicle_id: vehicle!.id, service_id: service!.id, coupon: code })).estimate;
     return { code: r.coupon?.code ?? code.toUpperCase(), bp: r.coupon?.bp ?? null };
   };
-  const address = addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
+  // Where we come to wash: the one chosen on the last step, else the vehicle's own, else the default, else the first (a new customer has none until they pay: PayAddress asks for it)
+  const address = addresses?.find((a) => a.id === addressId) ?? addresses?.find((a) => a.id === vehicle?.address_id) ?? addresses?.find((a) => a.is_default) ?? addresses?.[0];
   const ok = [Boolean(vehicle), Boolean(service), Boolean(date && slot), true][step];
   const dir = useStepDirection(step);
   const needsPhone = useNeedsPhone(); // signed in by email: a mobile number first
@@ -74,9 +77,9 @@ export default function BookWizard() {
   // Slide to pay: resolves only when the payment is verified; throws if it was not, so the handle springs back.
   const paidBooking = useRef<string | null>(null);
   const submit = async () => {
-    if (!vehicle || !service || !date || !slot) throw new Error('incomplete');
+    if (!vehicle || !service || !date || !slot || !address) throw new Error('incomplete');
     const result = await pay(
-      () => start.mutateAsync({ vehicle_id: vehicle.id, service_id: service.id, scheduled_date: date, time_slot: slot, address_id: address?.id, parking_location: address?.parking_location, coupon: coupon ?? undefined }),
+      () => start.mutateAsync({ vehicle_id: vehicle.id, service_id: service.id, scheduled_date: date, time_slot: slot, address_id: address.id, parking_location: address.parking_location, coupon: coupon ?? undefined }),
       `${service.name} · ${prettyDate(date)}`
     );
     if (!result?.booking_id) throw new Error('not paid');
@@ -122,6 +125,7 @@ export default function BookWizard() {
             <div className="flex justify-between p-5"><span className="text-fog">Service</span><span className="font-semibold">{service.name}</span></div>
             <div className="flex justify-between p-5"><span className="text-fog">Vehicle</span><span className="font-semibold">{vehicle.model} · {vehicle.registration_number}</span></div>
             <div className="flex justify-between p-5"><span className="text-fog">When</span><span className="font-semibold">{prettyDate(date)}, {slotLabel(slot)}</span></div>
+            <PayAddress addresses={addresses} loaded={addressesLoaded} selectedId={address?.id ?? null} onSelect={setAddressId} />
             {coupon && priced.data?.coupon && (
               <>
                 <div className="flex justify-between p-5"><span className="text-fog">Price</span><span className="font-semibold">{rupees(priced.data.list_cents)}</span></div>
@@ -140,7 +144,7 @@ export default function BookWizard() {
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t lg:left-[17rem] border-white/[0.08] bg-ink-900/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <Button variant="glass" size="lg" disabled={step === 0} onClick={() => setStep(step - 1)} aria-label="Back" icon={<ArrowLeft className="h-5 w-5" />} />
-          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(total) : ''}`.trim()} disabled={paying || start.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone), ...(couponStopped ? [{ label: 'Remove the coupon first', target: 'pay-coupon' }] : [])]} onConfirm={submit} onDone={afterPaid} />}
+          {step < 3 ? <Button size="lg" full disabled={!ok} onClick={() => setStep(step + 1)} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button> : <SlideToPay label={`Slide to pay ${service ? rupees(total) : ''}`.trim()} disabled={paying || start.isPending} blockers={[...pausedBlocker(paused), ...addressBlocker(Boolean(address)), ...phoneBlocker(needsPhone), ...(couponStopped ? [{ label: 'Remove the coupon first', target: 'pay-coupon' }] : [])]} onConfirm={submit} onDone={afterPaid} />}
         </div>
       </div>
     </div>

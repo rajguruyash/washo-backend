@@ -22,9 +22,9 @@ const limits = z.object({
 const missingFunction = (err: unknown) => (err as { code?: string }).code === '42883';
 
 /** The closed days in a range (migration 39, by kind from 46) and the time windows turned off on the other days (49), or null on a database that does not have Working Days yet: then every day is open. */
-type ClosedSlot = { date: string; slot: 'morning' | 'afternoon' | 'night'; reason: string | null };
-type WorkingDays = { weekdays: { weekday: number; open: boolean }[]; closed: { date: string; reason: string | null }[]; closed_slots?: ClosedSlot[]; next_open: string | null };
-async function workingDays(db: (fn: (c: any) => Promise<any>) => Promise<any>, from: string, to: string, kind?: 'single' | 'membership'): Promise<WorkingDays | null> {
+export type ClosedSlot = { date: string; slot: 'morning' | 'afternoon' | 'night'; reason: string | null };
+export type WorkingDays = { weekdays: { weekday: number; open: boolean }[]; closed: { date: string; reason: string | null }[]; closed_slots?: ClosedSlot[]; next_open: string | null };
+export async function workingDays(db: (fn: (c: any) => Promise<any>) => Promise<any>, from: string, to: string, kind?: 'single' | 'membership'): Promise<WorkingDays | null> {
   const ask = (withKind: boolean) =>
     db(async (c) => (await c.query(withKind ? 'SELECT public.get_working_days($1::date, $2::date, $3) AS r' : 'SELECT public.get_working_days($1::date, $2::date) AS r', withKind ? [from, to, kind] : [from, to])).rows[0].r) as Promise<WorkingDays>;
   try {

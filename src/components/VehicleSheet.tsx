@@ -4,6 +4,7 @@ import { formatPlate } from '../lib/format';
 import { ApiError } from '../lib/http';
 import { useSaveVehicle } from '../lib/queries';
 import type { Vehicle, VehicleType } from '../lib/types';
+import { ColourField } from './ColourField';
 import { Button } from './ui/Button';
 import { Input } from './ui/Field';
 import { Sheet } from './ui/Sheet';
@@ -21,17 +22,21 @@ export function VehicleSheet({
   onClose,
   vehicle,
   onSaved,
+  focusColour,
 }: {
   open: boolean;
   onClose: () => void;
   vehicle?: Vehicle | null;
   onSaved?: (v: Vehicle) => void;
+  /** Opened from the red "add the colour" reminder: the colour box is ready to type in. */
+  focusColour?: boolean;
 }) {
   const save = useSaveVehicle();
   const toast = useToast();
   const [type, setType] = useState<VehicleType>('car');
   const [model, setModel] = useState('');
   const [reg, setReg] = useState('');
+  const [colour, setColour] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
 
@@ -40,6 +45,7 @@ export function VehicleSheet({
     setType(vehicle?.vehicle_type ?? 'car');
     setModel(vehicle?.model ?? '');
     setReg(vehicle ? formatPlate(vehicle.registration_number) : '');
+    setColour(vehicle?.color ?? '');
     setErrors({});
     setFormError('');
   }, [open, vehicle]);
@@ -50,8 +56,9 @@ export function VehicleSheet({
     e.preventDefault();
     setErrors({});
     setFormError('');
+    if (!colour.trim()) return setErrors({ color: 'Enter the colour of your vehicle.' });
     try {
-      const saved = await save.mutateAsync({ id: vehicle?.id, vehicle_type: type, model, registration_number: reg.replace(/\s+/g, ''), make: vehicle?.make ?? undefined, color: vehicle?.color ?? undefined, address_id: vehicle?.address_id });
+      const saved = await save.mutateAsync({ id: vehicle?.id, vehicle_type: type, model, registration_number: reg.replace(/\s+/g, ''), make: vehicle?.make ?? undefined, color: colour.trim(), address_id: vehicle?.address_id });
       toast.success(vehicle ? 'Vehicle updated' : 'Vehicle added');
       onSaved?.(saved);
       onClose();
@@ -93,6 +100,7 @@ export function VehicleSheet({
           spellCheck={false}
           required
         />
+        <ColourField value={colour} onChange={(c) => { setColour(c); setErrors((x) => ({ ...x, color: '' })); }} error={errors.color} autoFocus={focusColour} />
         {formError && <p role="alert" className="text-sm text-bad">{formError}</p>}
       </form>
     </Sheet>

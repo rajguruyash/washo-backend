@@ -1,106 +1,52 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRight, Bike, Check } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AddressSheet } from '../../components/AddressSheet';
 import { AvatarHead } from '../../components/brand/Avatar';
 import { Logo } from '../../components/brand/Logo';
-import { VehicleSheet } from '../../components/VehicleSheet';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { ApiError } from '../../lib/http';
-import { useAddresses, useSaveProfile } from '../../lib/queries';
+import { useSaveProfile } from '../../lib/queries';
 import { useAuth } from '../../state/auth';
 
-/** First run: who you are, where we find you, your first vehicle. After this a plan is a few taps. */
+/**
+ * First run: just a name, then the dashboard. Nothing else is asked up front: the vehicle is added when the customer first books (or chats with Woshi), and the address right before
+ * they pay.
+ */
 export default function Welcome() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  // A new customer who came for something specific (the free wash) goes straight back to it when set up.
+  // A new customer who came for something specific (the free wash) goes straight back to it; everyone else lands on the dashboard.
   const from = (useLocation().state as { from?: string } | null)?.from;
-  const after = from && /^\/app\/claim(\?|$)/.test(from) ? from : '/app/membership/new';
+  const after = from && /^\/app\/claim(\?|$)/.test(from) ? from : '/app';
   const save = useSaveProfile();
-  const { data: addresses } = useAddresses();
-  const [step, setStep] = useState<0 | 1 | 2>(user && !user.needs_profile ? 1 : 0);
-  const [form, setForm] = useState({ full_name: user?.full_name ?? '', email: user?.email ?? '' });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState('');
-  const [addrOpen, setAddrOpen] = useState(false);
-  const [vehOpen, setVehOpen] = useState(false);
-  const hasAddress = Boolean(addresses?.length);
+  const [name, setName] = useState(user?.full_name ?? '');
+  const [error, setError] = useState('');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrors({});
-    setFormError('');
+    setError('');
     try {
-      await save.mutateAsync(form);
-      setStep(1); // (a mobile number, if they signed in by email, is asked for and verified when they pay)
+      // (the email, if they signed in with a number, is optional and can be added under Account; a mobile number, if they signed in by email, is asked for and verified when they pay)
+      await save.mutateAsync({ full_name: name, email: user?.email ?? '' });
+      navigate(after, { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields);
-      else setFormError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      setError(err instanceof ApiError ? (err.fields.full_name ?? err.message) : 'Something went wrong. Please try again.');
     }
   };
 
-  const first = form.full_name.trim().split(' ')[0];
-  const slide = { initial: { opacity: 0, x: 30 }, animate: { opacity: 1, x: 0 }, exit: { opacity: 0, x: -30 } };
-
   return (
     <div className="mx-auto max-w-xl">
-      <div className="mb-8 flex items-center justify-between">
-        <Logo />
-        <div className="flex items-center gap-2" aria-label={`Step ${step + 1} of 3`}>
-          {[0, 1, 2].map((i) => (
-            <span key={i} className={`h-1.5 rounded-full transition-all duration-500 ${i === step ? 'w-8 bg-washo-400' : i < step ? 'w-4 bg-washo-600' : 'w-4 bg-white/15'}`} />
-          ))}
+      <div className="mb-8"><Logo /></div>
+      <form onSubmit={submit} className="glass space-y-5 p-6 sm:p-8" noValidate>
+        <div className="flex items-center gap-4">
+          <AvatarHead className="h-16 w-16" />
+          <div className="rounded-2xl rounded-tl-sm border border-white/10 bg-white/[0.05] px-4 py-3 text-sm">Hi! I'm from the WASHO crew. What should we call you?</div>
         </div>
-      </div>
-
-      <AnimatePresence mode="wait" initial={false}>
-        {step === 0 && (
-          <motion.form key="a" {...slide} onSubmit={submit} className="glass space-y-5 p-6 sm:p-8" noValidate>
-            <div className="flex items-center gap-4">
-              <AvatarHead className="h-16 w-16" />
-              <div className="rounded-2xl rounded-tl-sm border border-white/10 bg-white/[0.05] px-4 py-3 text-sm">Hi! I'm from the WASHO crew. Let's get you set up. It takes about a minute.</div>
-            </div>
-            <div>
-              <h1 className="text-2xl font-extrabold">About you</h1>
-              <p className="mt-1 text-sm text-fog">So our crew knows who to look for.</p>
-            </div>
-            <Input label="Full name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} error={errors.full_name} autoComplete="name" autoFocus required />
-            <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={errors.email} hint="For receipts and quotes." optional autoComplete="email" />
-            {formError && <p role="alert" className="text-sm text-bad">{formError}</p>}
-            <Button type="submit" size="lg" full loading={save.isPending} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
-          </motion.form>
-        )}
-        {step === 1 && (
-          <motion.div key="b" {...slide} className="glass p-6 text-center sm:p-8">
-            <AvatarHead className="mx-auto h-20 w-20" />
-            <h1 className="mt-5 text-2xl font-extrabold">Nice to meet you{first ? `, ${first}` : ''}!</h1>
-            <p className="mx-auto mt-2 max-w-sm text-fog">Where should we wash your vehicle? Add the society and parking spot once.</p>
-            <div className="mt-8 space-y-3">
-              {hasAddress ? (
-                <Button size="lg" full icon={<Check className="h-5 w-5" />} onClick={() => setStep(2)}>Address saved. Continue</Button>
-              ) : (
-                <Button size="lg" full onClick={() => setAddrOpen(true)}>Add my address</Button>
-              )}
-            </div>
-          </motion.div>
-        )}
-        {step === 2 && (
-          <motion.div key="c" {...slide} className="glass p-6 text-center sm:p-8">
-            <AvatarHead className="mx-auto h-20 w-20" />
-            <h1 className="mt-5 text-2xl font-extrabold">Add your vehicle</h1>
-            <p className="mx-auto mt-2 max-w-sm text-fog">Save it once and starting a membership is a few taps.</p>
-            <div className="mt-8 space-y-3">
-              <Button size="lg" full icon={<Bike className="h-5 w-5" />} onClick={() => setVehOpen(true)}>Add my vehicle</Button>
-              <Button variant="ghost" full onClick={() => navigate(after === '/app/membership/new' ? '/app' : after, { replace: true })}>I'll do this later</Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AddressSheet open={addrOpen} onClose={() => setAddrOpen(false)} onSaved={() => setStep(2)} />
-      <VehicleSheet open={vehOpen} onClose={() => setVehOpen(false)} onSaved={() => navigate(after, { replace: true })} />
+        <Input label="Your name" value={name} onChange={(e) => { setName(e.target.value); setError(''); }} autoComplete="name" autoFocus required />
+        {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+        <Button type="submit" size="lg" full loading={save.isPending} disabled={!name.trim()} iconRight={<ArrowRight className="h-5 w-5" />}>Continue</Button>
+      </form>
     </div>
   );
 }
