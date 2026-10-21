@@ -29,7 +29,8 @@ export function AgentWidget() {
   const { pathname } = useLocation();
   const status = useAgentStatus();
   const [open, setOpen] = useState(false);
-  const agent = useAgent(open);
+  const available = Boolean(status.data?.enabled) && !HIDDEN.test(pathname);
+  const agent = useAgent(status.data, available, open);
   const [text, setText] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -40,8 +41,6 @@ export function AgentWidget() {
     setSeenPath(pathname);
     setOpen(false);
   }
-
-  const available = Boolean(status.data?.enabled) && !HIDDEN.test(pathname);
 
   useEffect(() => {
     if (!open) return;

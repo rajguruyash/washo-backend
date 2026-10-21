@@ -3,8 +3,8 @@ import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { WoshiSprite } from './WoshiSprite';
 
-const W = 66; // the figure's width in pixels (the picture is 256 x 224)
-const H = 58;
+const W = 56; // the figure's width in pixels (the picture is 256 x 224; 15% smaller than the 66 x 58 he was)
+const H = 49;
 const MARGIN = 12;
 const SPEED = 38; // pixels a second
 
@@ -135,7 +135,7 @@ export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () =
         <button type="button" onClick={onOpen} aria-label="Chat with Woshi, the WASHO assistant" className="pointer-events-auto block outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-washo-400" style={{ width: W, height: H }}>
           <span ref={flip} className="block">
             <span ref={hop} className="block">
-              {missing ? <WoshiSprite className="w-[66px]" /> : <img src="/woshi.png" alt="" draggable={false} onError={() => setMissing(true)} className="block select-none" style={{ width: W, height: H }} />}
+              {missing ? <WoshiSprite className="w-[56px]" /> : <img src="/woshi.png" alt="" draggable={false} onError={() => setMissing(true)} className="block select-none" style={{ width: W, height: H }} />}
             </span>
           </span>
         </button>
