@@ -11,11 +11,11 @@ const SPEED = 38; // pixels a second
 /**
  * Woshi walking along the footer, with nothing around him: no circle, no ring. He ambles one way, stops for a moment, sometimes turns round, and carries on, and a speech box (a rectangle with an arrow
  * pointing down at him) follows (and stays on the screen when he walks to an edge). Tapping him or the bubble opens the chat. On a phone he walks on top of the bottom tab bar; on a computer
- * along the bottom of the page, beside the side menu. The note is there the moment he appears; with nobody touching it for 6 seconds it folds away into him for 3, then pops back up, over and over. For someone who asked their device for less motion he simply stands in the corner.
+ * along the bottom of the page, beside the side menu. The note is there the moment he appears; it stays out for 3 seconds (longer while someone touches it), drops down into him for 6, then pops back up, over and over. For someone who asked their device for less motion he simply stands in the corner.
  * The movement is written straight to the elements once per frame (no React renders), so it costs next to nothing.
  */
-const QUIET_MS = 6000; // with nobody touching the note for this long it folds away...
-const AWAY_MS = 3000; // ...for this long, then pops back up, and so on
+const QUIET_MS = 3000; // the note stays out this long with nobody touching it, then it drops down into him...
+const AWAY_MS = 6000; // ...and stays away this long, then pops back up, and so on
 const OFF = 'woshi_note_off';
 const readOff = (): boolean => {
   try { return sessionStorage.getItem(OFF) === '1'; } catch { return false; }
@@ -35,7 +35,7 @@ export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () =
   const bubble = useRef<HTMLDivElement>(null);
   const arrow = useRef<HTMLSpanElement>(null);
 
-  // the note's cycle: shown at once; after QUIET_MS without activity it folds away for AWAY_MS, then pops back up, for as long as nobody touches it
+  // the note's cycle: shown at once; after QUIET_MS without activity it drops down for AWAY_MS, then pops back up, for as long as nobody touches it
   useEffect(() => {
     if (off) return;
     let timer: ReturnType<typeof setTimeout>;
