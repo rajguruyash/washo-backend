@@ -19,10 +19,11 @@ import { useWorkerPool, useWorkerQueue, useWorkerStep } from '../../lib/queries'
 import { slotLabel, slotWindow } from '../../lib/slots';
 import { useSticky } from '../../lib/sticky';
 import { staffStatus } from '../../lib/status';
-import type { PoolWash, WorkerBucket, WorkerWash } from '../../lib/types';
+import type { PoolWash, WorkerWash } from '../../lib/types';
+import { queueTab, type QueueTab } from '../../lib/workerQueue';
 import { WorkerSearch } from './WorkerSearch';
 
-type Tab = WorkerBucket | 'available';
+type Tab = QueueTab | 'available';
 
 // A wash that is no longer yours has its details hidden, building included, so it can only be found under "All buildings".
 const asRow = (r: WorkerWash) => ({ building_block: r.building_block, society_name: r.society_name, hidden: r.bucket === 'changed' });
@@ -97,10 +98,10 @@ export default function WorkerHome() {
   const buildings = useMemo(() => (tab === 'available' ? (poolHasBuildings ? buildingOptions(poolInSoc.map(poolRow)) : []) : buildingOptions(inSoc.map(asRow))), [tab, poolHasBuildings, poolInSoc, inSoc]);
   const bld = building === ALL_BUILDINGS || buildings.some((b) => b.value === building) ? building : ALL_BUILDINGS;
   const rows = inSoc.filter((r) => inBuilding(asRow(r), bld));
-  const by = (b: WorkerBucket) => rows.filter((r) => r.bucket === b);
+  const by = (b: QueueTab) => rows.filter((r) => queueTab(r) === b);
   // Washes moved but still in the queue also appear under "Cancelled / moved" so nothing changes silently.
   const changedOf = (l: WorkerWash[]) => [...l.filter((r) => r.bucket === 'changed'), ...l.filter((r) => r.bucket !== 'changed' && r.change?.kind === 'rescheduled')];
-  const inOpenTab = (l: WorkerWash[]) => (tab === 'changed' ? changedOf(l) : tab === 'available' ? [] : l.filter((r) => r.bucket === tab));
+  const inOpenTab = (l: WorkerWash[]) => (tab === 'changed' ? changedOf(l) : tab === 'available' ? [] : l.filter((r) => queueTab(r) === tab));
   const changed = changedOf(rows);
   const today = todayIST();
   const completedAll = by('completed');
@@ -135,6 +136,7 @@ export default function WorkerHome() {
       <WorkerSearch all={all} pool={poolRows} onPool={setViewing} />
       <Segmented label="Queue" value={tab} onChange={setTab} options={[
         { value: 'today', label: 'Today', count: by('today').length },
+        { value: 'overdue', label: 'Overdue', count: by('overdue').length, alert: true },
         { value: 'in_progress', label: 'In progress', count: by('in_progress').length },
         { value: 'upcoming', label: 'Upcoming', count: by('upcoming').length },
         { value: 'completed', label: 'Completed', count: doneCount('today') },
@@ -170,7 +172,7 @@ export default function WorkerHome() {
         ) : tab === 'completed' ? (
           <EmptyState title={`No washes completed ${DONE_WORDS[done]}`} text={done === 'all' ? 'Finished washes show up here.' : 'Choose another day above, or All, to see earlier washes.'} />
         ) : (
-          <EmptyState title={{ today: 'Nothing due today', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
+          <EmptyState title={{ today: 'Nothing due today', overdue: 'Nothing overdue', in_progress: 'No wash in progress', upcoming: 'Nothing coming up', completed: 'No completed washes yet', changed: 'No changes', available: '' }[tab]} text="New assignments and changes show up here automatically." />
         )}
       </div>
 

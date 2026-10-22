@@ -145,5 +145,12 @@ export function useAgent(status: AgentStatus | undefined, ready: boolean, open: 
   const markDone = (cardId: string, done: 'saved' | 'paid') =>
     setBubbles((all) => all.map((b) => (b.cards ? { ...b, cards: b.cards.map((c) => (c.id === cardId ? { ...c, done } : c)) } : b)));
 
-  return { bubbles, chips, busy, fallback, send, event, restart, markDone };
+  /** A coupon typed on a pay card, or taken off it (null): the server prices the card again and the new card takes the old one's place. A refused code throws the server's plain words, and the card stays as it was. */
+  const coupon = async (cardId: string, code: string | null) => {
+    const r = await post<{ card: AgentCard }>('/agent/coupon', { card_id: cardId, code });
+    mine.current = true;
+    setBubbles((all) => all.map((b) => (b.cards ? { ...b, cards: b.cards.map((c) => (c.id === cardId ? r.card : c)) } : b)));
+  };
+
+  return { bubbles, chips, busy, fallback, send, event, restart, markDone, coupon };
 }

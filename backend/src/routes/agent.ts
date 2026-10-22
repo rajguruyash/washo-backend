@@ -70,6 +70,16 @@ agentRouter.post(
   })
 );
 
+// A coupon typed on a pay card (or taken off it, code null): the card comes back priced again by the database, or the reason in plain words.
+agentRouter.post(
+  '/agent/coupon',
+  asyncHandler(async (req, res) => {
+    if (!agentEnabled()) throw off();
+    const b = parse(z.object({ card_id: uuid, code: z.string().trim().max(30).nullable() }), req.body);
+    res.json({ success: true, ...(await run(() => agent.couponOnCard(actor(req), b.card_id, b.code || null))) });
+  })
+);
+
 agentRouter.post(
   '/agent/new',
   asyncHandler(async (req, res) => {

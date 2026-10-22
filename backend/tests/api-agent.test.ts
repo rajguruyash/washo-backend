@@ -119,6 +119,117 @@ describe('booking a single wash by chat, to paid and booked', () => {
   });
 });
 
+describe('a coupon on the pay card', () => {
+  const makeCoupon = async (percent: number, applies_to: 'single' | 'membership' | 'both') => {
+    const admin = await staffClient('admin', { access: 'marketing' });
+    const code = `WC${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    expectOk(await admin.c.post('/api/admin/coupons', { code, discount_bp: percent * 100, once_per_customer: true, applies_to }));
+    return code;
+  };
+  const apply = (c: Client, card_id: string, code: string | null) => c.post('/api/agent/coupon', { card_id, code });
+  const singleCard = async (c: Client) => (await talk(c, 'Book a single wash', 'Car', 'Body Wash', 'Tomorrow')).cards[0];
+  /** The newest message the model was sent in a request. */
+  const lastText = (req: { messages: { content: unknown[] }[] }) => (req.messages.at(-1)!.content[0] as { text: string }).text;
+
+  it('a single-wash card is priced again by the database, shows the coupon as its own line, and the payment carries it', async () => {
+    const { c } = await customerWithVehicle('car');
+    const code = await makeCoupon(10, 'single');
+    const a = await talk(c, 'Book a single wash');
+    const b = await talk(c, a.quick_replies[0]);
+    const card = (await talk(c, b.quick_replies[0])).cards[0];
+    expect(card.total_cents).toBe(15000);
+    expect(card.pay.coupon).toBeUndefined();
+
+    const done = expectOk(await apply(c, card.id, code)).body.card;
+    expect(done.total_cents).toBe(13500);
+    expect(done.lines).toEqual([
+      { label: card.lines[0].label, cents: 15000, tone: 'plain' },
+      { label: `Coupon ${code}`, cents: -1500, tone: 'discount' },
+      { label: 'Total', cents: 13500, tone: 'total' },
+    ]);
+    expect(done.pay.coupon).toBe(code);
+    // the chat remembers the card as it now stands (a reload, or closing and opening the chat)
+    const shown = expectOk(await c.get('/api/agent/history')).body.bubbles.flatMap((x: any) => x.cards ?? []).find((x: any) => x.id === card.id);
+    expect(shown.total_cents).toBe(13500);
+
+    // the customer slides to pay: the same call, with the card's payload; the amount is the coupon price
+    const order = expectOk(await c.post('/api/payments/on-demand', done.pay)).body.order;
+    expect(order.amount).toBe(13500);
+    const paid = expectOk(await c.post('/api/payments/verify', fake.checkout(order.order_id))).body.result;
+    expect(paid.status).toBe('fulfilled');
+    // a card that has been paid cannot be changed
+    expectOk(await c.post('/api/agent/event', { type: 'paid', kind: 'single', id: paid.booking_id, card_id: card.id }));
+    expect((await apply(c, card.id, null)).status).toBe(409);
+  });
+
+  it('taking the coupon off puts the plain price back; a code that cannot be used says why and changes nothing', async () => {
+    const { c } = await customerWithVehicle('car');
+    const code = await makeCoupon(10, 'both');
+    const card = await singleCard(c);
+    expectOk(await apply(c, card.id, code));
+    const bad = await apply(c, card.id, 'NOSUCHCODE');
+    expect(bad.status).toBeGreaterThanOrEqual(400);
+    expect(bad.status).toBeLessThan(500);
+    expect(bad.body.message).toMatch(/coupon|code/i);
+    const stillThere = expectOk(await c.get('/api/agent/history')).body.bubbles.flatMap((x: any) => x.cards ?? []).find((x: any) => x.id === card.id);
+    expect(stillThere).toMatchObject({ total_cents: 13500, pay: { coupon: code } });
+
+    const off = expectOk(await apply(c, card.id, null)).body.card;
+    expect(off.total_cents).toBe(15000);
+    expect(off.pay.coupon).toBeUndefined();
+    expect(off.lines.map((l: any) => l.tone)).toEqual(['plain', 'total']);
+    // an empty box is the same as taking it off
+    expect(expectOk(await apply(c, card.id, '  ')).body.card.total_cents).toBe(15000);
+  });
+
+  it('a membership coupon works on the plan card; a single-wash-only coupon is refused there with the database\'s own words', async () => {
+    const { c } = await customerWithVehicle('car');
+    const code = await makeCoupon(5, 'membership');
+    const onlySingle = await makeCoupon(5, 'single');
+    const a = await talk(c, 'Start a membership', '4 washes a month', 'Monday', '3 months', 'Morning');
+    const card = a.cards[0];
+    const wrong = await apply(c, card.id, onlySingle);
+    expect(wrong.status).toBeGreaterThanOrEqual(400);
+    expect(wrong.status).toBeLessThan(500);
+
+    const done = expectOk(await apply(c, card.id, code)).body.card;
+    expect(done.total_cents).toBeLessThan(card.total_cents);
+    expect(done.lines.some((l: any) => l.label === `Coupon ${code}` && l.tone === 'discount')).toBe(true);
+    expect(done.lines.at(-1)).toMatchObject({ tone: 'total', cents: done.total_cents });
+    expect(done.per_month_cents).toBe(Math.round(done.total_cents / 3));
+    expect(done.pay.coupon).toBe(code);
+    const order = expectOk(await c.post('/api/payments/membership-checkout', done.pay)).body.order;
+    expect(order.amount).toBe(done.total_cents);
+  });
+
+  it('the model is told the new total, so it never quotes the old one, and may say it', async () => {
+    const { c } = await customerWithVehicle('car');
+    const code = await makeCoupon(10, 'single');
+    const card = await singleCard(c);
+    expectOk(await apply(c, card.id, code));
+    const m = model(() => say('Your total is now ₹135.'));
+    setLlm(m);
+    const r = expectOk(await chat(c, 'what is my total now?')).body;
+    expect(lastText(m.calls[0])).toContain(`applied coupon ${code}`);
+    expect(lastText(m.calls[0])).toContain('₹135');
+    expect(r.reply).toBe('Your total is now ₹135.'); // the guard allows a figure the server priced
+  });
+
+  it('only the customer whose card it is can change it, and only a card that exists', async () => {
+    const a = await customerWithVehicle('car');
+    const b = await customerWithVehicle('car');
+    const code = await makeCoupon(10, 'single');
+    const card = await singleCard(a.c);
+    expect((await apply(b.c, card.id, code)).status).toBe(404);
+    expect((await apply(a.c, crypto.randomUUID(), code)).status).toBe(404);
+    expect((await a.c.post('/api/agent/coupon', { card_id: 'not-an-id', code })).status).toBe(400);
+    expect((await a.c.post('/api/agent/coupon', { card_id: card.id })).status).toBe(400);
+    expect((await new Client().post('/api/agent/coupon', { card_id: card.id, code })).status).toBe(401);
+    expect((await (await staffClient('admin')).c.post('/api/agent/coupon', { card_id: card.id, code })).status).toBe(403);
+    expect(expectOk(await a.c.get('/api/agent/history')).body.bubbles.flatMap((x: any) => x.cards ?? []).find((x: any) => x.id === card.id).total_cents).toBe(15000);
+  });
+});
+
 describe('starting a membership by chat', () => {
   it('chat -> plan card (every discount as a line) -> pay -> active', async () => {
     const { c } = await customerWithVehicle('car');

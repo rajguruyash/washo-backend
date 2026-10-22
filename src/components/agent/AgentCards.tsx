@@ -1,5 +1,5 @@
-import { Bike, Car, Check, MapPin } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { Bike, Car, Check, MapPin, Tag, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
 import { COLOURS } from '../../lib/colours';
 import { rupees } from '../../lib/format';
@@ -19,6 +19,8 @@ import { SlideToPay } from '../SlideToPay';
 export interface CardActions {
   event: (ev: AgentEvent) => Promise<void> | void;
   markDone: (cardId: string, done: 'saved' | 'paid') => void;
+  /** Put a coupon on a pay card, or take it off (null). The server prices the card again; a code it refuses throws its reason. */
+  coupon: (cardId: string, code: string | null) => Promise<void>;
 }
 
 const expired = (c: AgentCard) => new Date(c.expires_at).getTime() < Date.now();
@@ -144,6 +146,66 @@ function AddressCard({ card, a }: { card: AddressCardData; a: CardActions }) {
   );
 }
 
+/**
+ * "Have a coupon?" on a pay card. The code goes to the server, which asks the database whether this customer can use it for this purchase and sends the card back priced again (the coupon
+ * as its own line); or says in plain words why not, and the card stays as it was. The payment checks the coupon once more.
+ */
+function CardCoupon({ card, a, onBusy }: { card: SingleWashCardData | MembershipCardData; a: CardActions; onBusy: (busy: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const applied = card.pay.coupon;
+  // tapping "Have a coupon?" is asking to type one: the cursor is in the box
+  useEffect(() => { if (open) box.current?.focus(); }, [open]);
+  const run = async (code: string | null) => {
+    setError('');
+    setBusy(true);
+    onBusy(true);
+    try {
+      await a.coupon(card.id, code);
+      setText('');
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setBusy(false);
+      onBusy(false);
+    }
+  };
+  if (applied) {
+    return (
+      <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+        <p className="flex items-center gap-2"><Tag className="h-4 w-4 text-ok" aria-hidden /> <span className="font-bold">{applied}</span> <span className="text-ok">applied</span></p>
+        <button type="button" disabled={busy} onClick={() => void run(null)} className="inline-flex items-center gap-1 font-semibold text-washo-300 hover:text-white disabled:opacity-50"><X className="h-4 w-4" aria-hidden /> Remove</button>
+      </div>
+    );
+  }
+  if (!open) {
+    return <button type="button" onClick={() => setOpen(true)} className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-washo-300 hover:text-white"><Tag className="h-4 w-4" aria-hidden /> Have a coupon?</button>;
+  }
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (text.trim().length >= 3) void run(text.trim()); }} className="mt-3">
+      <div className="flex items-center gap-2">
+        <input
+          ref={box}
+          className={cn(input, 'min-w-0 flex-1 font-mono uppercase tracking-wider')}
+          value={text}
+          onChange={(e) => { setText(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)); setError(''); }}
+          placeholder="Coupon code"
+          aria-label="Coupon code"
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button type="submit" disabled={busy || text.trim().length < 3} className="h-11 shrink-0 rounded-xl border border-washo-400/40 bg-washo-500/10 px-4 text-sm font-semibold text-washo-100 transition-colors hover:bg-washo-500/25 disabled:opacity-50">{busy ? 'Checking…' : 'Apply'}</button>
+      </div>
+      {error && <p role="alert" className="mt-1.5 text-sm text-bad">{error}</p>}
+    </form>
+  );
+}
+
 /** The booking card and the plan card: the details, the exact price, and the slide to pay. */
 function PayCard({ card, a }: { card: SingleWashCardData | MembershipCardData; a: CardActions }) {
   const { pay, paying } = usePay();
@@ -153,6 +215,7 @@ function PayCard({ card, a }: { card: SingleWashCardData | MembershipCardData; a
   const paused = usePublicSettings().data;
   const paid = useRef<{ kind: 'single' | 'membership'; id: string } | null>(null);
   const cancelled = useRef(false);
+  const [pricing, setPricing] = useState(false); // a coupon is being checked: the price is about to change, so not now
   const stale = expired(card);
 
   if (card.done === 'paid') return <div className={frame}><Done>Paid</Done><p className="mt-1 text-sm text-fog">{card.title}</p></div>;
@@ -187,9 +250,10 @@ function PayCard({ card, a }: { card: SingleWashCardData | MembershipCardData; a
         <p className="mt-3 text-sm text-fog">This card has expired, because prices and free days can change. Ask Woshi to show it again.</p>
       ) : (
         <>
+          <CardCoupon card={card} a={a} onBusy={setPricing} />
           {needsPhone && <PayPhoneGate />}
           <div className="mt-4 flex">
-            <SlideToPay label={`Slide to pay ${rupees(card.total_cents)}`} disabled={paying || single.isPending || plan.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone)]} onConfirm={submit} onDone={afterPaid} />
+            <SlideToPay label={`Slide to pay ${rupees(card.total_cents)}`} disabled={paying || pricing || single.isPending || plan.isPending} blockers={[...pausedBlocker(paused), ...phoneBlocker(needsPhone)]} onConfirm={submit} onDone={afterPaid} />
           </div>
           <p className="mt-2 text-xs text-fog">The price is set by WASHO's rate card. Your booking is confirmed once the payment is verified.</p>
         </>

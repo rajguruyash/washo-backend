@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Mail, MapPin, Menu, Phone, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router-dom';
+import { FaqWidget } from '../components/agent/FaqWidget';
 import { Logo } from '../components/brand/Logo';
 import { CampaignBanner } from '../components/CampaignBanner';
 import { OfferBanner } from '../components/OfferBanner';
@@ -103,6 +104,7 @@ export function PublicLayout() {
           © {new Date().getFullYear()} WASHO. All rights reserved.
         </div>
       </footer>
+      <FaqWidget />
       <ScrollRestoration />
     </>
   );

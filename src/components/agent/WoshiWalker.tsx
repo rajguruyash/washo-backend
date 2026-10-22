@@ -2,17 +2,19 @@ import { useReducedMotion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { WoshiSprite } from './WoshiSprite';
+import { stepWalk, type Walk } from './walk';
 
 const W = 56; // the figure's width in pixels (the picture is 256 x 224; 15% smaller than the 66 x 58 he was)
 const H = 49;
 const MARGIN = 12;
-const SPEED = 38; // pixels a second
 
 /**
  * Woshi walking along the footer, with nothing around him: no circle, no ring. He ambles one way, stops for a moment, sometimes turns round, and carries on, and a speech box (a rectangle with an arrow
  * pointing down at him) follows (and stays on the screen when he walks to an edge). Tapping him or the bubble opens the chat. On a phone he walks on top of the bottom tab bar; on a computer
  * along the bottom of the page, beside the side menu. The note is there the moment he appears; it stays out for 3 seconds (longer while someone touches it), drops down into him for 6, then pops back up, over and over. For someone who asked their device for less motion he simply stands in the corner.
- * The movement is written straight to the elements once per frame (no React renders), so it costs next to nothing.
+ * The movement is written straight to the elements once per frame (no React renders), so it costs next to nothing. The walking rules are in walk.ts (tested): at an end of the footer he turns round once, with a
+ * short turn of his own (the picture squeezes through its middle) and never flips to face the wall.
+ * `sidebar` is for the signed-in app on a computer, where the side menu takes the left of the page; on the public site he has the whole width.
  */
 const QUIET_MS = 3000; // the note stays out this long with nobody touching it, then it drops down into him...
 const AWAY_MS = 6000; // ...and stays away this long, then pops back up, and so on
@@ -21,7 +23,7 @@ const readOff = (): boolean => {
   try { return sessionStorage.getItem(OFF) === '1'; } catch { return false; }
 };
 
-export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () => void }) {
+export function WoshiWalker({ message, onOpen, sidebar = true }: { message: string; onOpen: () => void; sidebar?: boolean }) {
   const reduce = useReducedMotion();
   const [missing, setMissing] = useState(false);
   const [shown, setShown] = useState(true); // the note is there at once
@@ -60,15 +62,12 @@ export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () =
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
-    let x = 0;
-    let dir = 1;
-    let mode: 'walk' | 'idle' = 'idle';
-    let until = last + 1400;
+    const walk: Walk = { x: 0, dir: 1, mode: 'idle', until: last + 1400 };
     let placed = false;
     let groundAt = -1000;
     const bounds = () => {
       const vw = window.innerWidth;
-      const min = (vw >= 1024 ? 272 : 0) + MARGIN; // beside the side menu on a computer
+      const min = (sidebar && vw >= 1024 ? 272 : 0) + MARGIN; // beside the side menu on a computer
       return { vw, min, max: Math.max(min, vw - W - MARGIN) };
     };
     // the line he walks on: the top of the phone's tab bar when there is one, else the bottom of the page
@@ -85,31 +84,16 @@ export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () =
       last = t;
       const { vw, min, max } = bounds();
       if (!placed) {
-        x = reduce ? max : min + (max - min) * 0.55;
+        walk.x = reduce ? max : min + (max - min) * 0.55;
         placed = true;
       }
       if (t - groundAt > 400 && strip.current) {
         strip.current.style.bottom = `${ground()}px`;
         groundAt = t;
       }
-      if (!reduce) {
-        if (mode === 'walk') {
-          x += dir * SPEED * dt;
-          if (x >= max || x <= min) {
-            dir = x >= max ? -1 : 1;
-            mode = 'idle';
-            until = t + 1000 + Math.random() * 1400;
-          } else if (t > until) {
-            mode = 'idle';
-            until = t + 900 + Math.random() * 1800;
-          }
-        } else if (t > until) {
-          mode = 'walk';
-          until = t + 2600 + Math.random() * 3600;
-          if (Math.random() < 0.35) dir = -dir;
-        }
-      }
-      x = Math.min(Math.max(x, min), max);
+      if (!reduce) stepWalk(walk, t, dt, min, max, Math.random);
+      else walk.x = Math.min(Math.max(walk.x, min), max);
+      const { x, dir, mode } = walk;
       if (walker.current) walker.current.style.transform = `translateX(${Math.round(x)}px)`;
       if (flip.current) flip.current.style.transform = `scaleX(${dir})`;
       if (hop.current) hop.current.style.transform = reduce ? '' : mode === 'walk' ? (Math.floor(t / 140) % 2 ? 'translateY(-2px)' : '') : Math.floor(t / 700) % 2 ? 'translateY(-1px)' : '';
@@ -127,13 +111,13 @@ export function WoshiWalker({ message, onOpen }: { message: string; onOpen: () =
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [reduce]);
+  }, [reduce, sidebar]);
 
   return (
     <div ref={strip} className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-0">
       <div ref={walker} className="absolute bottom-0 left-0" style={{ width: W, height: H }}>
         <button type="button" onClick={onOpen} aria-label="Chat with Woshi, the WASHO assistant" className="pointer-events-auto block outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-washo-400" style={{ width: W, height: H }}>
-          <span ref={flip} className="block">
+          <span ref={flip} className="block transition-transform duration-200 ease-in-out motion-reduce:transition-none">
             <span ref={hop} className="block">
               {missing ? <WoshiSprite className="w-[56px]" /> : <img src="/woshi.png" alt="" draggable={false} onError={() => setMissing(true)} className="block select-none" style={{ width: W, height: H }} />}
             </span>

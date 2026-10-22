@@ -5,11 +5,12 @@ import { Badge } from '../../components/ui/Badge';
 import { formatPlate, friendlyDay, prettyPhone } from '../../lib/format';
 import { slotLabel } from '../../lib/slots';
 import { staffStatus } from '../../lib/status';
-import type { PoolWash, WorkerBucket, WorkerWash } from '../../lib/types';
+import type { PoolWash, WorkerWash } from '../../lib/types';
+import { queueTab, type QueueTab } from '../../lib/workerQueue';
 import { matchesAll, poolFields, queueFields } from '../../lib/workerSearch';
 
-const GROUP: Record<WorkerBucket, string> = { today: 'Today', in_progress: 'In progress', upcoming: 'Upcoming', completed: 'Completed', changed: 'Cancelled / moved' };
-const ORDER: WorkerBucket[] = ['today', 'in_progress', 'upcoming', 'completed', 'changed'];
+const GROUP: Record<QueueTab, string> = { today: 'Today', overdue: 'Overdue', in_progress: 'In progress', upcoming: 'Upcoming', completed: 'Completed', changed: 'Cancelled / moved' };
+const ORDER: QueueTab[] = ['today', 'overdue', 'in_progress', 'upcoming', 'completed', 'changed'];
 const PER_GROUP = 5;
 
 /**
@@ -40,7 +41,7 @@ export function WorkerSearch({ all, pool, onPool }: { all: WorkerWash[]; pool: P
     const out: { key: string; title: string; rows: { id: string; main: string; sub: string; tail: React.ReactNode; pick: () => void }[] }[] = [];
     for (const b of ORDER) {
       const rows = all
-        .filter((w) => w.bucket === b && matchesAll(q, queueFields(w, friendlyDay(w.scheduled_date))))
+        .filter((w) => queueTab(w) === b && matchesAll(q, queueFields(w, friendlyDay(w.scheduled_date))))
         .slice(0, PER_GROUP)
         .map((w) => ({
           id: w.booking_id,

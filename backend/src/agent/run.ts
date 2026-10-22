@@ -7,7 +7,7 @@ import { callLlm, modelReady, type LlmRequest, type LlmResponse, type Msg, type 
 import { ASSISTANT_NAME, buildContext, CANARY, customerMessage, eventMessage, leaksPrompt, SYSTEM_PROMPT } from './prompt';
 import { finishRules, freshRules, isCommand, isTap, ruleTurn, type RuleInput } from './rules';
 import { MAX_TURNS, modelSpeed, noteCall, peekChat, resetChat, takeTurn, withChat, type Conversation } from './store';
-import { addressLineForModel, istToday, prettyDay, refreshHandles, runTool, slotText, TOOLS, vehicleLine, type ToolCtx } from './tools';
+import { addressLineForModel, istToday, prettyDay, refreshHandles, repriceCard, runTool, slotText, TOOLS, vehicleLine, type ToolCtx } from './tools';
 import { AgentError, type Bubble, type Card, type ChatResult, type Slot } from './types';
 
 /**
@@ -374,6 +374,24 @@ export async function event(actor: Actor, ev: AgentEvent): Promise<ChatResult> {
     // the model is told as little as it needs: the last four characters of a plate, the society and nothing of the flat
     const what = ev.type === 'vehicle_saved' ? `vehicle ${cleanData([row.make, row.model].filter(Boolean).join(' '), 60)} (${row.vehicle_type})` : `address in ${cleanData(row.society_name, 60)}`;
     return converse(actor, conv, eventMessage(`The customer saved this ${what}; it is now on their account. Carry on with what they were doing.`), { saved: ev.type === 'vehicle_saved' ? 'vehicle' : 'address' });
+  });
+}
+
+/**
+ * The customer typed a coupon code on a pay card, or took it off (`code` null). The server prices the card again (the database says in plain words if the code cannot be used) and hands
+ * back the card as it now stands; the screen swaps it in. Only a card of this chat that is still open can be changed, and the payment itself checks the coupon once more.
+ */
+export async function couponOnCard(actor: Actor, cardId: string, code: string | null): Promise<{ card: Card }> {
+  return withChat(actor.sub, async (conv) => {
+    const card = conv.cards.get(cardId);
+    if (!card || (card.type !== 'single_wash' && card.type !== 'membership')) throw new AgentError(404, 'no_card', 'I could not find that booking card. Ask Woshi to show it again.');
+    if (card.done) throw new AgentError(409, 'card_done', 'That one is already paid.');
+    if (new Date(card.expires_at).getTime() < Date.now()) throw new AgentError(410, 'card_expired', 'This card has expired, because prices and free days can change. Ask Woshi to show it again.');
+    await repriceCard({ db: actor.db, sub: actor.sub, amounts: conv.amounts, percents: conv.percents }, card, code);
+    // the model is told, so it never quotes the old total
+    const total = `₹${card.total_cents / 100}`;
+    conv.verified.push(card.pay.coupon ? `The customer applied coupon ${cleanData(card.pay.coupon, 30)} on the booking card; the card's total is now ${total}.` : `The customer took the coupon off the booking card; the card's total is now ${total}.`);
+    return { card };
   });
 }
 

@@ -11,7 +11,7 @@ import { publicSettings } from '../routes/settings';
 import { cleanData, looksLikeAttack } from './guards';
 import type { ToolDef } from './llm';
 import type { Handles } from './store';
-import type { AddressCard, Card, MembershipCard, MoneyLine, SingleWashCard, Slot, VehicleCard, VehicleKind } from './types';
+import { AgentError, type AddressCard, type Card, type MembershipCard, type MoneyLine, type SingleWashCard, type Slot, type VehicleCard, type VehicleKind } from './types';
 
 /**
  * Everything Woshi can DO. Eight tools and no others: no query, no "run this", no way to name a customer. Each one:
@@ -68,13 +68,16 @@ const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
 const dayLabel = (date: string) => new Intl.DateTimeFormat('en-IN', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${date}T00:00:00Z`));
 const startsAt = (date: string, slot: Slot) => new Date(`${date}T${String(slotInfo(slot).startHour).padStart(2, '0')}:00:00+05:30`).getTime();
 
+/** What pricing needs of a chat: the customer's database session, who they are (for counting wrong coupon codes), and the figures the assistant may say. */
+export type PriceCtx = Pick<ToolCtx, 'db' | 'sub' | 'amounts' | 'percents'>;
+
 /** A price, remembered as one the assistant may say. */
-const rupees = (ctx: ToolCtx, cents: number): number => {
+const rupees = (ctx: PriceCtx, cents: number): number => {
   const v = Math.round(cents) / 100;
   ctx.amounts.add(v);
   return v;
 };
-const pct = (ctx: ToolCtx, bp: number): number => {
+const pct = (ctx: PriceCtx, bp: number): number => {
   const v = Math.round(bp) / 100;
   ctx.percents.add(v);
   return v;
@@ -320,13 +323,13 @@ type Breakdown = {
   final_cents: number;
 };
 
-const guarded = <T>(ctx: ToolCtx, code: string | null, run: () => Promise<T>) => (code ? withCouponGuard(ctx.sub, run) : run());
+const guarded = <T>(ctx: PriceCtx, code: string | null, run: () => Promise<T>) => (code ? withCouponGuard(ctx.sub, run) : run());
 
-async function singleEstimate(ctx: ToolCtx, vehicleId: string, serviceId: string, code: string | null): Promise<SingleEstimate> {
+async function singleEstimate(ctx: PriceCtx, vehicleId: string, serviceId: string, code: string | null): Promise<SingleEstimate> {
   return guarded(ctx, code, () => ctx.db(async (c) => (await c.query('SELECT public.estimate_single_wash_with_coupon($1, $2, $3) AS q', [vehicleId, serviceId, code])).rows[0].q as SingleEstimate));
 }
 
-async function membershipEstimate(ctx: ToolCtx, vt: VehicleKind, body: number, deep: number, monthsN: number, code: string | null): Promise<Breakdown> {
+async function membershipEstimate(ctx: PriceCtx, vt: VehicleKind, body: number, deep: number, monthsN: number, code: string | null): Promise<Breakdown> {
   return guarded(ctx, code, () =>
     ctx.db(async (c) =>
       (code
@@ -337,6 +340,55 @@ async function membershipEstimate(ctx: ToolCtx, vt: VehicleKind, body: number, d
   ).catch((err) => {
     throw monthlyNotInstalled(err) ?? err;
   });
+}
+
+/** The money lines of a single-wash card, as the database priced it. */
+const singleLines = (service: string, q: SingleEstimate): MoneyLine[] => [
+  { label: service, cents: q.list_cents, tone: 'plain' },
+  ...(q.coupon ? [{ label: `Coupon ${cleanData(q.coupon.code, 30)}`, cents: -q.coupon.cents, tone: 'discount' as const }] : []),
+  { label: 'Total', cents: q.final_cents, tone: 'total' },
+];
+
+/** The money lines of a membership card, as the database priced it. */
+function membershipLines(q: Breakdown): MoneyLine[] {
+  const lines: MoneyLine[] = q.lines.map((l) => ({ label: `${cleanData(l.name, 50)} × ${l.quantity}`, cents: l.line_cents, tone: 'plain' as const }));
+  if (q.frequency_discount.cents > 0) lines.push({ label: cleanData(q.frequency_discount.label, 50) || 'Frequency discount', cents: -q.frequency_discount.cents, tone: 'discount' });
+  if (q.duration_discount.cents > 0) lines.push({ label: cleanData(q.duration_discount.label, 50) || 'Length discount', cents: -q.duration_discount.cents, tone: 'discount' });
+  if (q.coupon) lines.push({ label: `Coupon ${cleanData(q.coupon.code, 30)}`, cents: -q.coupon.cents, tone: 'discount' });
+  if (q.cap?.applied && q.cap.adjustment_cents) lines.push({ label: 'Discount limit adjustment', cents: q.cap.adjustment_cents, tone: 'plain' });
+  lines.push({ label: 'Total', cents: q.final_cents, tone: 'total' });
+  return lines;
+}
+
+/**
+ * The customer typed a coupon on a pay card (or took it off: `code` null). The card is priced again by the database for this customer (it says in plain words why a code cannot be used,
+ * and counts wrong codes as the booking pages do) and changed in place: its lines, its total and the coupon its payment will carry. A refused code leaves the card exactly as it was.
+ * The payment itself prices everything once more, so a card can never pay less than the database allows.
+ */
+export async function repriceCard(ctx: PriceCtx, card: SingleWashCard | MembershipCard, code: string | null): Promise<void> {
+  if (card.type === 'single_wash') {
+    const q = await singleEstimate(ctx, card.pay.vehicle_id, card.pay.service_id, code);
+    const lines = singleLines(card.lines[0].label, q);
+    card.lines = lines;
+    card.total_cents = q.final_cents;
+    if (q.coupon) card.pay.coupon = q.coupon.code;
+    else delete card.pay.coupon;
+    for (const l of lines) rupees(ctx, Math.abs(l.cents));
+    if (q.coupon) pct(ctx, q.coupon.bp);
+    return;
+  }
+  const vt = (await ctx.db(async (c) => (await c.query('SELECT vehicle_type::text AS vt FROM public.vehicles WHERE is_active AND id = $1', [card.pay.vehicle_id])).rows[0]?.vt as VehicleKind | undefined));
+  if (!vt) throw new AgentError(404, 'vehicle_gone', 'That vehicle is no longer on your account. Ask Woshi to start again.');
+  const q = await membershipEstimate(ctx, vt, card.pay.monthly.body, card.pay.monthly.deep, card.pay.duration_months, code);
+  const lines = membershipLines(q);
+  card.lines = lines;
+  card.total_cents = q.final_cents;
+  card.per_month_cents = Math.round(q.final_cents / card.pay.duration_months);
+  if (q.coupon) card.pay.coupon = q.coupon.code;
+  else delete card.pay.coupon;
+  for (const l of lines) rupees(ctx, Math.abs(l.cents));
+  rupees(ctx, card.per_month_cents);
+  if (q.coupon) pct(ctx, q.coupon.bp);
 }
 
 function checkWashRules(vt: VehicleKind, body: number, deep: number, weekdays: number[]) {
@@ -501,9 +553,7 @@ async function execute(name: string, a: Record<string, any>, ctx: ToolCtx): Prom
       if (!day.open.includes(a.window)) throw new ToolFail('window_not_open', `The ${slotInfo(a.window).label} window is not open on ${day.label}${day.open.length ? `; open that day: ${day.open.map((s) => slotInfo(s).label).join(', ')}` : ' (nothing is open that day)'}. Call get_availability and offer another.`);
       const addr = await pickAddress(ctx, v, a.address);
       const q = await singleEstimate(ctx, v.id, svc.id, a.coupon);
-      const lines: MoneyLine[] = [{ label: cleanData(svc.name, 60), cents: q.list_cents, tone: 'plain' }];
-      if (q.coupon) lines.push({ label: `Coupon ${cleanData(q.coupon.code, 30)}`, cents: -q.coupon.cents, tone: 'discount' });
-      lines.push({ label: 'Total', cents: q.final_cents, tone: 'total' });
+      const lines = singleLines(cleanData(svc.name, 60), q);
       const card: SingleWashCard = {
         id: newId(), type: 'single_wash', expires_at: expiry(),
         title: cleanData(svc.name, 60),
@@ -544,12 +594,7 @@ async function execute(name: string, a: Record<string, any>, ctx: ToolCtx): Prom
       if (noWindow.length) throw new ToolFail('window_off_on_weekday', `The ${slotInfo(a.window).label} window is not available on ${noWindow.map((d) => WEEKDAYS[d]).join(', ')}. Offer another window or other weekdays.`);
       const addr = await pickAddress(ctx, v, a.address);
       const q = await membershipEstimate(ctx, v.vehicle_type, a.body, a.deep, a.months, a.coupon);
-      const lines: MoneyLine[] = q.lines.map((l) => ({ label: `${cleanData(l.name, 50)} × ${l.quantity}`, cents: l.line_cents, tone: 'plain' as const }));
-      if (q.frequency_discount.cents > 0) lines.push({ label: cleanData(q.frequency_discount.label, 50) || 'Frequency discount', cents: -q.frequency_discount.cents, tone: 'discount' });
-      if (q.duration_discount.cents > 0) lines.push({ label: cleanData(q.duration_discount.label, 50) || 'Length discount', cents: -q.duration_discount.cents, tone: 'discount' });
-      if (q.coupon) lines.push({ label: `Coupon ${cleanData(q.coupon.code, 30)}`, cents: -q.coupon.cents, tone: 'discount' });
-      if (q.cap?.applied && q.cap.adjustment_cents) lines.push({ label: 'Discount limit adjustment', cents: q.cap.adjustment_cents, tone: 'plain' });
-      lines.push({ label: 'Total', cents: q.final_cents, tone: 'total' });
+      const lines = membershipLines(q);
       const perMonth = Math.round(q.final_cents / a.months);
       const card: MembershipCard = {
         id: newId(), type: 'membership', expires_at: expiry(),

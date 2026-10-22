@@ -6,6 +6,8 @@ export interface SegmentedOption<T extends string> {
   value: T;
   label: ReactNode;
   count?: number;
+  /** The count is something that needs attention (shown in red). */
+  alert?: boolean;
 }
 
 /** Tabs with a sliding pill. Scrolls horizontally on narrow screens instead of wrapping. */
@@ -47,7 +49,7 @@ export function Segmented<T extends string>({
             <span className="relative flex items-center justify-center gap-2">
               {o.label}
               {o.count !== undefined && o.count > 0 && (
-                <span className={cn('rounded-full px-1.5 text-[11px]', active ? 'bg-washo-500/30 text-washo-300' : 'bg-white/10 text-fog')}>{o.count}</span>
+                <span className={cn('rounded-full px-1.5 text-[11px]', o.alert ? 'bg-bad/20 font-bold text-bad' : active ? 'bg-washo-500/30 text-washo-300' : 'bg-white/10 text-fog')}>{o.count}</span>
               )}
             </span>
           </button>
