@@ -12,7 +12,7 @@ const MARGIN = 12;
  * Woshi walking along the footer, with nothing around him: no circle, no ring. He ambles one way, stops for a moment, sometimes turns round, and carries on, and a speech box (a rectangle with an arrow
  * pointing down at him) follows (and stays on the screen when he walks to an edge). Tapping him or the bubble opens the chat. On a phone he walks on top of the bottom tab bar; on a computer
  * along the bottom of the page, beside the side menu. The note is there the moment he appears; it stays out for 3 seconds (longer while someone touches it), drops down into him for 6, then pops back up, over and over. For someone who asked their device for less motion he simply stands in the corner.
- * The movement is written straight to the elements once per frame (no React renders), so it costs next to nothing. The walking rules are in walk.ts (tested): at an end of the footer he turns round once, with a
+ * The movement is written straight to the elements, thirty times a second (no React renders and no measuring of the page each frame), so it costs next to nothing and never gets in the way of a tap. The walking rules are in walk.ts (tested): at an end of the footer he turns round once, with a
  * short turn of his own (the picture squeezes through its middle) and never flips to face the wall.
  * `sidebar` is for the signed-in app on a computer, where the side menu takes the left of the page; on the public site he has the whole width.
  */
@@ -65,6 +65,11 @@ export function WoshiWalker({ message, onOpen, sidebar = true }: { message: stri
     const walk: Walk = { x: 0, dir: 1, mode: 'idle', until: last + 1400 };
     let placed = false;
     let groundAt = -1000;
+    let groundPx = -1;
+    // the note's width is read when it changes (a resize observer), not every frame: reading it forces the browser to lay the whole page out again
+    let noteWidth = 0;
+    let watched: HTMLElement | null = null;
+    const watcher = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { if (watched) noteWidth = watched.offsetWidth; });
     const bounds = () => {
       const vw = window.innerWidth;
       const min = (sidebar && vw >= 1024 ? 272 : 0) + MARGIN; // beside the side menu on a computer
@@ -80,6 +85,11 @@ export function WoshiWalker({ message, onOpen, sidebar = true }: { message: stri
       return 0;
     };
     const tick = (t: number) => {
+      // thirty frames a second is plenty for a creature that walks 38 pixels a second
+      if (t - last < 32) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
       const { vw, min, max } = bounds();
@@ -87,8 +97,9 @@ export function WoshiWalker({ message, onOpen, sidebar = true }: { message: stri
         walk.x = reduce ? max : min + (max - min) * 0.55;
         placed = true;
       }
-      if (t - groundAt > 400 && strip.current) {
-        strip.current.style.bottom = `${ground()}px`;
+      if (t - groundAt > 1000 && strip.current) {
+        const g = ground();
+        if (g !== groundPx) strip.current.style.bottom = `${(groundPx = g)}px`;
         groundAt = t;
       }
       if (!reduce) stepWalk(walk, t, dt, min, max, Math.random);
@@ -98,8 +109,16 @@ export function WoshiWalker({ message, onOpen, sidebar = true }: { message: stri
       if (flip.current) flip.current.style.transform = `scaleX(${dir})`;
       if (hop.current) hop.current.style.transform = reduce ? '' : mode === 'walk' ? (Math.floor(t / 140) % 2 ? 'translateY(-2px)' : '') : Math.floor(t / 700) % 2 ? 'translateY(-1px)' : '';
       const b = bubble.current;
+      if (b !== watched) {
+        watcher?.disconnect();
+        watched = b;
+        if (b) {
+          noteWidth = b.offsetWidth;
+          watcher?.observe(b);
+        }
+      }
       if (b) {
-        const bw = b.offsetWidth;
+        const bw = noteWidth || b.offsetWidth;
         const centre = x + W / 2;
         const left = Math.min(Math.max(centre - bw / 2, 8), vw - 8 - bw);
         b.style.transform = `translateX(${Math.round(left)}px)`;
@@ -110,12 +129,15 @@ export function WoshiWalker({ message, onOpen, sidebar = true }: { message: stri
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      watcher?.disconnect();
+    };
   }, [reduce, sidebar]);
 
   return (
     <div ref={strip} className="pointer-events-none fixed inset-x-0 bottom-0 z-40 h-0">
-      <div ref={walker} className="absolute bottom-0 left-0" style={{ width: W, height: H }}>
+      <div ref={walker} className="absolute bottom-0 left-0 will-change-transform" style={{ width: W, height: H }}>
         <button type="button" onClick={onOpen} aria-label="Chat with Woshi, the WASHO assistant" className="pointer-events-auto block outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-washo-400" style={{ width: W, height: H }}>
           <span ref={flip} className="block transition-transform duration-200 ease-in-out motion-reduce:transition-none">
             <span ref={hop} className="block">

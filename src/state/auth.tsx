@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { ApiError, onUnauthenticated, post } from '../lib/http';
 import { fetchMe, keys, useMe } from '../lib/queries';
+import { useSiteReady } from '../lib/siteReady';
+import { useWarm } from '../lib/warm';
 import type { User } from '../lib/types';
 
 interface AuthValue {
@@ -19,6 +21,8 @@ const AuthContext = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const me = useMe();
+  // while the browser is idle (and the opening screen is gone), the likely next pages and the home screen's data are loaded ahead of the click
+  useWarm(me.data ?? null, qc, useSiteReady());
 
   // If any request learns the session is gone, forget the user everywhere.
   useEffect(

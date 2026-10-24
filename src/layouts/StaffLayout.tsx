@@ -52,7 +52,7 @@ export function StaffLayout({ role, title, children }: { role: Exclude<Role, 'cu
         </div>
       </header>
       <main className={`mx-auto w-full px-4 pb-24 pt-5 sm:px-6 md:pt-8 ${role === 'admin' ? 'max-w-7xl' : 'max-w-3xl'}`}>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14, ease: 'easeOut' }}>
           {children ?? <Outlet />}
         </motion.div>
       </main>

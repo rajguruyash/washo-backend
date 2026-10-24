@@ -37,6 +37,10 @@ export interface MicroSlatsProps extends Partial<WaveValues> {
   intro?: boolean;
   introDuration?: number;
   paused?: boolean;
+  /** The most pixels per CSS pixel it draws at (a phone's 3x screen need not be filled at 2x or 3x: the picture is soft anyway). Default 2. */
+  maxDpr?: number;
+  /** The most frames it draws a second (0 = as many as the screen shows). */
+  maxFps?: number;
   className?: string;
   style?: CSSProperties;
 }
@@ -58,6 +62,8 @@ interface Settings extends WaveValues {
   intro: boolean;
   introDuration: number;
   paused: boolean;
+  maxDpr: number;
+  maxFps: number;
 }
 
 interface GridLayout {
@@ -457,6 +463,8 @@ const MicroSlats = ({
   intro = true,
   introDuration = 1.5,
   paused = false,
+  maxDpr = 2,
+  maxFps = 0,
   className = '',
   style
 }: MicroSlatsProps) => {
@@ -501,7 +509,9 @@ const MicroSlats = ({
       lean,
       intro,
       introDuration,
-      paused
+      paused,
+      maxDpr,
+      maxFps
     };
     wakeRef.current?.();
   });
@@ -711,7 +721,7 @@ const MicroSlats = ({
     const resize = () => {
       width = Math.max(1, container.clientWidth);
       height = Math.max(1, container.clientHeight);
-      renderer.dpr = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(PIXEL_BUDGET / (width * height)));
+      renderer.dpr = Math.min(window.devicePixelRatio || 1, settingsRef.current?.maxDpr ?? 2, Math.sqrt(PIXEL_BUDGET / (width * height)));
       renderer.setSize(width, height);
       buildFluid();
       start();
@@ -816,6 +826,11 @@ const MicroSlats = ({
       raf = 0;
       if (!alive) return;
       const s = settingsRef.current;
+      // a frame rate ceiling: wait for the next screen refresh instead of drawing (`last` stays the last frame DRAWN, so the motion keeps its true speed)
+      if (s && s.maxFps > 0 && now - last < 1000 / s.maxFps - 2) {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
       const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       if (!s) return;

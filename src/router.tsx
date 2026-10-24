@@ -1,60 +1,68 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
+import { RootLayout } from './layouts/RootLayout';
 import { PublicLayout } from './layouts/PublicLayout';
 import { StaffLayout } from './layouts/StaffLayout';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import NotFound from './pages/NotFound';
+import { type PageName, pages } from './lib/pages';
 
-const page = (loader: () => Promise<{ default: React.ComponentType }>) => ({
-  lazy: async () => ({ Component: (await loader()).default }),
+// A page's code is fetched the first time it is needed (or earlier: lib/warm.ts), by the same call from lib/pages.ts.
+const page = (name: PageName) => ({
+  lazy: async () => ({ Component: (await pages[name]()).default }),
 });
 
 export const router = createBrowserRouter([
   {
-    element: <PublicLayout />,
+    element: <RootLayout />,
     children: [
-      { index: true, element: <Landing /> },
-      { path: 'services', ...page(() => import('./pages/Services')) },
-      { path: 'navratri', ...page(() => import('./pages/Offer')) },
-      { path: 'free-wash', ...page(() => import('./pages/Offer')) },
-      { path: 'privacy', ...page(() => import('./pages/legal/Privacy')) },
-      { path: 'privacy-policy', ...page(() => import('./pages/legal/Privacy')) },
-      { path: 'terms', ...page(() => import('./pages/legal/Terms')) },
-      { path: 'refund-policy', ...page(() => import('./pages/legal/Refunds')) },
-      { path: 'delete-account', ...page(() => import('./pages/legal/DeleteAccount')) },
-      { path: '*', element: <NotFound /> },
+      {
+        element: <PublicLayout />,
+        children: [
+          { index: true, element: <Landing /> },
+          { path: 'services', ...page('services') },
+          { path: 'navratri', ...page('offer') },
+          { path: 'free-wash', ...page('offer') },
+          { path: 'privacy', ...page('privacy') },
+          { path: 'privacy-policy', ...page('privacy') },
+          { path: 'terms', ...page('terms') },
+          { path: 'refund-policy', ...page('refunds') },
+          { path: 'delete-account', ...page('deleteAccount') },
+          { path: '*', element: <NotFound /> },
+        ],
+      },
+      { path: 'login', element: <Login /> },
+      {
+        path: 'app',
+        element: <AppLayout />,
+        children: [
+          { index: true, ...page('dashboard') },
+          { path: 'welcome', ...page('welcome') },
+          { path: 'membership', ...page('membership') },
+          { path: 'membership/new', ...page('membershipNew') },
+          { path: 'membership/requests/:id', ...page('requestDetail') },
+          { path: 'membership/:id', ...page('membershipDetail') },
+          { path: 'book', ...page('book') },
+          { path: 'claim', ...page('claim') },
+          { path: 'bookings', ...page('bookings') },
+          { path: 'bookings/:id', ...page('bookingDetail') },
+          { path: 'vehicles', ...page('vehicles') },
+          { path: 'account', ...page('account') },
+          { path: 'help', ...page('help') },
+          { path: 'help/:id', ...page('helpTicket') },
+          { path: '*', element: <NotFound /> },
+        ],
+      },
+      {
+        path: 'worker',
+        element: <StaffLayout role="worker" title="Specialist" />,
+        children: [
+          { index: true, ...page('workerHome') },
+          { path: 'washes/:id', ...page('workerWash') },
+        ],
+      },
+      { path: 'admin', ...page('admin') },
     ],
   },
-  { path: 'login', element: <Login /> },
-  {
-    path: 'app',
-    element: <AppLayout />,
-    children: [
-      { index: true, ...page(() => import('./pages/app/Dashboard')) },
-      { path: 'welcome', ...page(() => import('./pages/app/Welcome')) },
-      { path: 'membership', ...page(() => import('./pages/app/Membership')) },
-      { path: 'membership/new', ...page(() => import('./pages/app/MembershipWizard')) },
-      { path: 'membership/requests/:id', ...page(() => import('./pages/app/RequestDetail')) },
-      { path: 'membership/:id', ...page(() => import('./pages/app/MembershipDetail')) },
-      { path: 'book', ...page(() => import('./pages/app/BookWizard')) },
-      { path: 'claim', ...page(() => import('./pages/app/ClaimWizard')) },
-      { path: 'bookings', ...page(() => import('./pages/app/Bookings')) },
-      { path: 'bookings/:id', ...page(() => import('./pages/app/BookingDetail')) },
-      { path: 'vehicles', ...page(() => import('./pages/app/Vehicles')) },
-      { path: 'account', ...page(() => import('./pages/app/Account')) },
-      { path: 'help', ...page(() => import('./pages/app/Help')) },
-      { path: 'help/:id', ...page(() => import('./pages/app/HelpTicket')) },
-      { path: '*', element: <NotFound /> },
-    ],
-  },
-  {
-    path: 'worker',
-    element: <StaffLayout role="worker" title="Specialist" />,
-    children: [
-      { index: true, ...page(() => import('./pages/worker/WorkerHome')) },
-      { path: 'washes/:id', ...page(() => import('./pages/worker/WorkerWash')) },
-    ],
-  },
-  { path: 'admin', ...page(() => import('./pages/admin/Admin')) },
 ]);

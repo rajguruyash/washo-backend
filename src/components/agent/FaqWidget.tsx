@@ -1,8 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/cn';
 import { answerFor, byId, replyTo, startingQuestions, type Faq, type FaqLink, type FaqReply } from '../../lib/faq';
-import { useCatalog } from '../../lib/queries';
+import { catalogQuery, useCatalog } from '../../lib/queries';
 import { useSiteReady } from '../../lib/siteReady';
 import { LEGAL } from '../../pages/legal/facts';
 import { BubbleText, ChatSheet } from './ChatSheet';
@@ -89,7 +90,14 @@ function FaqChat({ onClose }: { onClose: () => void }) {
 export function FaqWidget() {
   const siteReady = useSiteReady();
   const { pathname } = useLocation();
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  // the rate card (prices, services, durations) is fetched while the page is quiet, so the first question about prices is answered with live figures at once
+  useEffect(() => {
+    if (!siteReady) return undefined;
+    const t = window.setTimeout(() => void qc.prefetchQuery(catalogQuery), 800);
+    return () => window.clearTimeout(t);
+  }, [siteReady, qc]);
 
   // moving to another page closes the chat (derived while rendering, not in an effect)
   const [seenPath, setSeenPath] = useState(pathname);

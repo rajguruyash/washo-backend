@@ -179,7 +179,7 @@ export function AppLayout() {
         <main className={cn('mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-10', focused ? 'py-8' : 'pb-32 pt-6 md:pt-10 lg:pb-16')}>
           {/* Opacity only: a transform here would become the containing block for the wizards' fixed action bars. */}
           <MaintenanceNotice className="mb-5" />
-          <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+          <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14, ease: 'easeOut' }}>
             <Outlet />
           </motion.div>
         </main>

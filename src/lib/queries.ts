@@ -29,10 +29,12 @@ export const keys = {
 export const fetchMe = async () => (await get<{ user: User }>('/me')).user;
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: fetchMe, retry: false, staleTime: 60_000 });
 
-export const useCatalog = () => useQuery({ queryKey: keys.catalog, queryFn: () => get<Catalog>('/catalog'), staleTime: 5 * 60_000 });
+export const catalogQuery = { queryKey: keys.catalog, queryFn: () => get<Catalog>('/catalog'), staleTime: 5 * 60_000 } as const;
+export const useCatalog = () => useQuery(catalogQuery);
 
 /** The free-wash campaign on offer, what this visitor can do about it, and their pack offer. Open to visitors (no sign-in needed). */
-export const useCampaign = () => useQuery({ queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' });
+export const campaignQuery = { queryKey: keys.campaign, queryFn: () => get<CampaignStatus>('/campaign'), staleTime: 30_000, retry: false, refetchOnMount: 'always' } as const;
+export const useCampaign = () => useQuery(campaignQuery);
 
 /**
  * How crowded each day and time window is, by date, and which days are closed. Marks busy days amber and full ones red (full ones cannot be booked by customers) on the booking pages.
@@ -83,8 +85,9 @@ export function defaultPattern(vehicleType: VehicleType, perWeek: number): Patte
 export const useAddresses = () => useQuery({ queryKey: keys.addresses, queryFn: async () => (await get<{ addresses: Address[] }>('/addresses')).addresses });
 export const useVehicles = () => useQuery({ queryKey: keys.vehicles, queryFn: async () => (await get<{ vehicles: Vehicle[] }>('/vehicles')).vehicles });
 
-export const useRequests = () =>
-  useQuery({ queryKey: keys.requests, queryFn: async () => (await get<{ requests: MembershipRequest[] }>('/membership-requests')).requests });
+// The queries behind the customer's home screen are defined once, so warm.ts can fetch them ahead of a click with exactly the same keys and answers.
+export const requestsQuery = { queryKey: keys.requests, queryFn: async () => (await get<{ requests: MembershipRequest[] }>('/membership-requests')).requests } as const;
+export const useRequests = () => useQuery(requestsQuery);
 
 export const useRequest = (id: string | undefined) =>
   useQuery({
@@ -95,8 +98,8 @@ export const useRequest = (id: string | undefined) =>
     refetchInterval: (q) => (q.state.data?.status === 'submitted' ? 15_000 : false),
   });
 
-export const useMemberships = () =>
-  useQuery({ queryKey: keys.memberships, queryFn: async () => (await get<{ memberships: Membership[] }>('/memberships')).memberships });
+export const membershipsQuery = { queryKey: keys.memberships, queryFn: async () => (await get<{ memberships: Membership[] }>('/memberships')).memberships } as const;
+export const useMemberships = () => useQuery(membershipsQuery);
 
 export const useMembership = (id: string | undefined) =>
   useQuery({
@@ -106,12 +109,12 @@ export const useMembership = (id: string | undefined) =>
   });
 
 /** `live`: check again every 30 seconds while the page is open, so a wash the specialist has just finished shows up without a refresh. */
+export const bookingsQuery = (scope: 'upcoming' | 'past' | 'all') => ({
+  queryKey: keys.bookings(scope),
+  queryFn: async () => (await get<{ bookings: Booking[] }>(`/bookings?scope=${scope}`)).bookings,
+});
 export const useBookings = (scope: 'upcoming' | 'past' | 'all' = 'all', live = false) =>
-  useQuery({
-    queryKey: keys.bookings(scope),
-    queryFn: async () => (await get<{ bookings: Booking[] }>(`/bookings?scope=${scope}`)).bookings,
-    refetchInterval: live ? 30_000 : false,
-  });
+  useQuery({ ...bookingsQuery(scope), refetchInterval: live ? 30_000 : false });
 
 export const useBooking = (id: string | undefined) =>
   useQuery({

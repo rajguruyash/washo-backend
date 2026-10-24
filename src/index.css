@@ -41,6 +41,8 @@
   /* the Woshi chat: only transform and opacity, so the phone's graphics layer runs them by itself even while the page is busy */
   --animate-chat-in: chat-in 220ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
   --animate-chat-dim: chat-dim 180ms ease-out both;
+  /* the thin bar at the top while a page is on its way: it creeps towards the end and is gone the moment the page arrives */
+  --animate-nav-progress: nav-progress 8s cubic-bezier(0.1, 0.7, 0.2, 1) both;
   /* React Bits StarBorder */
   --animate-star-movement-bottom: star-movement-bottom 6s linear infinite alternate;
   --animate-star-movement-top: star-movement-top 6s linear infinite alternate;
@@ -67,6 +69,10 @@
   @keyframes star-movement-top {
     0% { transform: translate(0%, 0%); opacity: 1; }
     100% { transform: translate(100%, 0%); opacity: 0; }
+  }
+  @keyframes nav-progress {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(0.92); }
   }
   @keyframes chat-in {
     from { transform: translate3d(0, 36px, 0); opacity: 0; }
@@ -153,6 +159,13 @@ input, select, textarea { font-size: 16px; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Touch screens: a blur behind a card has to be redone on every frame of the animated background behind it, and there are dozens of cards. A slightly more solid card looks almost the same and
+   costs nothing, so every tap and scroll answers sooner. (Computers keep the frosted glass.) */
+@media (hover: none) and (pointer: coarse) {
+  .glass { background-color: rgb(17 26 47 / 0.62); }
+  .glass, .glass-strong, [class*='backdrop-blur'] { backdrop-filter: none; }
 }
 
 .no-scrollbar { scrollbar-width: none; }

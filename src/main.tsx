@@ -9,6 +9,7 @@ import { SiteLoader } from './components/SiteLoader';
 import { ToastProvider } from './components/ui/Toast';
 import { ApiError } from './lib/http';
 import { captureSource } from './lib/source';
+import { installLinkWarm } from './lib/warm';
 import { router } from './router';
 import { AuthProvider } from './state/auth';
 
@@ -24,6 +25,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+installLinkWarm(queryClient);
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StrictMode>
