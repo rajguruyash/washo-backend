@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 
 export interface SegmentedOption<T extends string> {
@@ -23,8 +23,18 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   const id = useId();
+  const row = useRef<HTMLDivElement>(null);
+  // a row of many tabs scrolls sideways: bring the chosen one into view (only this row moves, never the page), e.g. after a tile on the dashboard opens a tab that was off the edge
+  useEffect(() => {
+    const el = row.current;
+    const on = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!el || !on || el.scrollWidth <= el.clientWidth) return;
+    const a = on.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    el.scrollTo({ left: el.scrollLeft + (a.left - b.left) - (el.clientWidth - a.width) / 2, behavior: 'smooth' });
+  }, [value]);
   return (
-    <div role="tablist" aria-label={label} className="no-scrollbar flex gap-1 overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.03] p-1">
+    <div ref={row} role="tablist" aria-label={label} className="no-scrollbar flex gap-1 overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.03] p-1">
       {options.map((o) => {
         const active = o.value === value;
         return (

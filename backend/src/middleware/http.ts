@@ -8,6 +8,7 @@ import { verifyAccessToken } from '../jwt';
 import * as adminStep from '../adminSession';
 import { Profile, Role, profileFor } from '../profile';
 import { AuthSession, gotrue } from '../supabase';
+import { touchActivity } from '../traffic';
 
 export type { Profile, Role } from '../profile';
 
@@ -113,6 +114,7 @@ export const requireSession = asyncHandler(async (req, res, next) => {
 
   req.session = { accessToken: token, claims, profile };
   req.db = (fn) => withUser(claims, fn);
+  touchActivity(req, claims); // seen just now (at most once a minute, not waited for)
   next();
 });
 

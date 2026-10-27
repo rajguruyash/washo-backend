@@ -36,6 +36,34 @@ adminOpsRouter.get(
   })
 );
 
+// ───────────────────────── traffic: who is on the site ─────────────────────────
+// Activity access (the same area as the activity log). A database without migration 50 answers { ready: false }, and the screens say what to do, instead of failing.
+const trafficReady = async (req: Parameters<typeof one>[0], sql: string, params: unknown[] = []) => {
+  try {
+    return { ready: true, ...(await one<Record<string, unknown>>(req, sql, params)) };
+  } catch (err) {
+    if ((err as { code?: string }).code === '42883') return { ready: false };
+    throw err;
+  }
+};
+
+adminOpsRouter.get(
+  '/admin/traffic/summary',
+  asyncHandler(async (req, res) => {
+    const { ready, ...summary } = await trafficReady(req, 'SELECT public.admin_traffic_summary() AS r');
+    res.json({ success: true, ready, summary: ready ? summary : null });
+  })
+);
+
+adminOpsRouter.get(
+  '/admin/traffic',
+  asyncHandler(async (req, res) => {
+    const q = parse(z.object({ day: isoDate.optional().catch(undefined), days: z.coerce.number().int().min(1).max(60).catch(14) }), req.query);
+    const out = await trafficReady(req, 'SELECT public.admin_traffic($1::date, $2) AS r', [q.day ?? null, q.days]);
+    res.json({ success: true, ...out });
+  })
+);
+
 // ───────────────────────── customers' ratings of washes ─────────────────────────
 // Washes area: whoever may look at washes may read what customers said about them.
 adminOpsRouter.get(

@@ -3,7 +3,7 @@ import { del, get, post, put } from './http';
 import { isLive } from './status';
 import type {
   ActivityEvent, Address, AdminAddress, AdminBooking, AdminCoupon, AdminDashboard, AdminOffer, DayKind, LiveOffer, AdminRenewals, AdminReviews, CouponUse, WashReview, AdminSecurity, AdminSettings, AdminSupportTicket, PublicSettings, SupportThread, SupportTicket, TeamMember, TicketStatus, AdminCampaign, CapacityDay, CapacityRule, ExactDate, PlanPreview, AdminCampaignClaim, AdminHistorySummary, AdminCustomerDetail, AdminCustomerRow, AdminEvent, AdminPricing, AdminService, AdminMembership, AdminOverview, AdminRequest, Attention, Booking, BookingEvent, BookingRefund, Catalog, Membership,
-  AdminSearchResults, AdminWorkingDays, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
+  AdminSearchResults, AdminWorkingDays, Traffic, TrafficSummary, WorkingDays, CampaignStatus, MembershipRequest, MembershipWash, Notification, Order, PatternItem, Photo, PoolWash, PriceEstimate, RequestStatus, SlotId, Specialist, User, Vehicle, VehicleType, WorkerWash,
 } from './types';
 
 export const keys = {
@@ -492,6 +492,14 @@ export const useAdminAction = () => {
 
 // ───────── back-office ─────────
 export const useAdminDashboard = () => useQuery({ queryKey: keys.admin('dashboard'), queryFn: async () => (await get<{ dashboard: AdminDashboard }>('/admin/dashboard')).dashboard, refetchInterval: 60_000 });
+
+/** The dashboard's three traffic numbers: refreshed every half minute while the page is open. `ready` is false until migration 50 is applied. */
+export const useAdminTrafficSummary = (enabled = true) =>
+  useQuery({ queryKey: keys.admin('traffic-summary'), queryFn: () => get<{ ready: boolean; summary: TrafficSummary | null }>('/admin/traffic/summary'), enabled, refetchInterval: 30_000, retry: false });
+
+/** The Traffic tab for a day (null = today). */
+export const useAdminTraffic = (day: string | null) =>
+  useQuery({ queryKey: keys.admin('traffic', day), queryFn: () => get<Traffic & { success: boolean }>(`/admin/traffic${day ? `?day=${day}` : ''}`), refetchInterval: 30_000, placeholderData: keepPreviousData, retry: false });
 
 export const useAdminActivity = (q: string, limit: number) =>
   useQuery({ queryKey: keys.admin('activity', q, limit), queryFn: async () => (await get<{ events: ActivityEvent[] }>(`/admin/activity?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`)).events, placeholderData: keepPreviousData });

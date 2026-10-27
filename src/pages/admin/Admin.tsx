@@ -42,10 +42,11 @@ import Reviews from './Reviews';
 import Settings from './Settings';
 import Support from './Support';
 import Team from './Team';
+import Traffic from './Traffic';
 import { Loading, errText } from './shared';
 import { monthlyDetail, planTitle } from '../../lib/plan';
 
-type Tab = 'overview' | 'requests' | 'bookings' | 'paid' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'workingdays' | 'attention' | 'support' | 'export' | 'activity' | 'team' | 'settings';
+type Tab = 'overview' | 'requests' | 'bookings' | 'paid' | 'history' | 'memberships' | 'people' | 'reviews' | 'services' | 'discounts' | 'campaigns' | 'capacity' | 'workingdays' | 'attention' | 'support' | 'export' | 'traffic' | 'activity' | 'team' | 'settings';
 // Each tab belongs to an area of the console; the admin sees the tabs their role may at least look at (the server checks every request again).
 const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof canDo>[0]) => boolean) }[] = [
   { value: 'overview', label: 'Dashboard', area: 'overview' },
@@ -64,12 +65,13 @@ const TABS: { value: Tab; label: string; area: string | ((a: Parameters<typeof c
   { value: 'attention', label: 'Payments & refunds', area: 'payments' },
   { value: 'support', label: 'Support', area: 'support' },
   { value: 'export', label: 'Export', area: (a) => ['customers', 'washes', 'memberships', 'payments', 'refunds', 'support', 'activity'].some((k) => canDo(a, `export_${k}`, 'manage')) },
+  { value: 'traffic', label: 'Traffic', area: 'activity' },
   { value: 'activity', label: 'Activity log', area: 'activity' },
   { value: 'team', label: 'Team', area: 'team' },
   { value: 'settings', label: 'Settings', area: 'settings' },
 ];
 /** The area a tab's content is governed by (used to say "view only"). */
-const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', paid: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', workingdays: 'capacity', attention: 'payments', support: 'support', activity: 'activity', team: 'team', settings: 'settings' };
+const AREA_OF_TAB: Partial<Record<Tab, string>> = { overview: 'overview', bookings: 'bookings', paid: 'bookings', memberships: 'memberships', people: 'people', reviews: 'bookings', requests: 'requests', history: 'history', services: 'services', discounts: 'services', campaigns: 'campaigns', capacity: 'capacity', workingdays: 'capacity', attention: 'payments', support: 'support', traffic: 'activity', activity: 'activity', team: 'team', settings: 'settings' };
 
 
 // ───────────────────────── overview ─────────────────────────
@@ -89,7 +91,7 @@ function Overview({ go, allowed }: { go: (t: Tab) => void; allowed: (t: Tab) => 
   };
   return (
     <>
-      <Dashboard go={(t) => allowed(t) && go(t)} />
+      <Dashboard go={(t) => allowed(t) && go(t)} traffic={allowed('traffic')} />
       <h2 className="mb-3 text-lg font-bold">Washes and memberships</h2>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         {tile('Requests to quote', o.requests_to_quote, 'requests', true)}
@@ -427,6 +429,7 @@ export default function Admin() {
           {tab === 'attention' && <Attention />}
           {tab === 'support' && <Support canReply={canDo(access, 'support', 'manage')} />}
           {tab === 'export' && <Export />}
+          {tab === 'traffic' && <Traffic />}
           {tab === 'activity' && <Activity />}
           {tab === 'team' && <Team />}
           {tab === 'settings' && <Settings canEdit={canDo(access, 'settings', 'manage')} />}

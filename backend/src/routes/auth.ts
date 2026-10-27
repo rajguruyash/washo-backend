@@ -15,6 +15,7 @@ import { customerPassword, strongPassword } from '../password';
 import { mailConfigured, sendMail } from '../notify';
 import { gotrue, gotrueAdmin } from '../supabase';
 import { verifyAccessToken } from '../jwt';
+import { recordSignIn } from '../traffic';
 
 export const authRouter = Router();
 
@@ -96,6 +97,7 @@ authRouter.post(
     }
     setSessionCookies(res, session);
     await recordSource(claims, source);
+    await recordSignIn(req, claims, 'phone');
     res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
   })
 );
@@ -171,6 +173,7 @@ authRouter.post(
     }
     setSessionCookies(res, session);
     await recordSource(claims, source);
+    await recordSignIn(req, claims, 'signup');
     res.status(201).json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
   })
 );
@@ -200,6 +203,7 @@ authRouter.post(
     }
     if (profile.role !== 'admin') {
       setSessionCookies(res, session);
+      await recordSignIn(req, claims, 'email');
       return res.json({ success: true, role: profile.role, needs_profile: needsProfile(profile) });
     }
 
@@ -267,6 +271,7 @@ authRouter.post(
     adminStep.finish(res, claims.sub);
     // A record of the sign-in for the activity log. Best effort: it never blocks a sign-in.
     await withUser(claims, (c) => c.query(`SELECT public.admin_log_event('admin_signed_in')`)).catch((e) => console.warn('Sign-in not logged:', (e as Error).message));
+    await recordSignIn(req, claims, 'admin_email');
     res.json({ success: true, role: 'admin' });
   })
 );
@@ -375,6 +380,7 @@ authRouter.get(
       return back('admin_use_email');
     }
     setSessionCookies(res, session);
+    await recordSignIn(req, claims, 'google');
     const home = homeFor(profile.role);
     const next = safeNext(saved.n);
     res.redirect(302, needsProfile(profile) ? '/app/welcome' : next && next.startsWith(home) ? next : home);

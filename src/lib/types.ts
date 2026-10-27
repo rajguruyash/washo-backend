@@ -866,3 +866,34 @@ export interface AdminSearchResults {
   memberships: { id: string; status: string; end_at: string; reference_code: string | null; customer_name: string | null; customer_phone: string | null; vehicle_model: string | null; registration_number: string | null }[];
   tickets: { id: string; reference_code: string; subject: string; status: TicketStatus; customer_name: string | null; customer_phone: string | null }[];
 }
+
+// ───────── traffic: who signed in and who is on the site (admin, Activity access) ─────────
+export interface TrafficCounts { customers: number; workers: number; admins: number }
+export interface TrafficSummary {
+  /** "Active now" means seen in this many minutes. */
+  window_minutes: number;
+  today: string;
+  active_now: TrafficCounts;
+  active_today: TrafficCounts;
+  signed_in_today: TrafficCounts & { sign_ins: number };
+}
+export type TrafficSource = 'website' | 'app';
+export type TrafficRole = 'customer' | 'worker' | 'admin';
+export interface TrafficPerson {
+  profile_id: string;
+  name: string;
+  role: TrafficRole;
+  phone: string | null;
+  email: string | null;
+  first_seen_at?: string;
+  last_seen_at: string;
+  source: TrafficSource;
+  /** How many times they signed in on the chosen day. */
+  sign_ins?: number;
+}
+export type SignInMethod = 'phone' | 'email' | 'signup' | 'google' | 'admin_email';
+export interface TrafficSignIn { profile_id: string; name: string; role: TrafficRole; phone: string | null; email: string | null; method: SignInMethod; source: TrafficSource; at: string }
+export interface TrafficDay { date: string; customers_active: number; customers_signed_in: number; team_active: number }
+/** `ready` is false while the database has not had migration 50 applied: there is nothing to show yet. */
+export type Traffic = { ready: false } | { ready: true; today: string; day: string; summary: TrafficSummary; live: TrafficPerson[]; people: TrafficPerson[]; sign_ins: TrafficSignIn[]; days: TrafficDay[] };
+

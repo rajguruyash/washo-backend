@@ -1,13 +1,14 @@
-import { AlertTriangle, Banknote, Gift, LifeBuoy, ShoppingBag, UserPlus, Undo2 } from 'lucide-react';
+import { AlertTriangle, Banknote, Gift, LifeBuoy, LogIn, ShoppingBag, UserPlus, Undo2, Users } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ErrorState } from '../../components/EmptyState';
 import { cn } from '../../lib/cn';
 import { prettyDate, rupees } from '../../lib/format';
-import { useAdminDashboard } from '../../lib/queries';
+import { useAdminDashboard, useAdminTrafficSummary } from '../../lib/queries';
+import { teamLine } from '../../lib/traffic';
 import type { AdminDashboard } from '../../lib/types';
 import { Loading } from './shared';
 
-function Tile({ icon, label, value, sub, tone = 'default', onClick }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: 'default' | 'warn' | 'bad'; onClick?: () => void }) {
+export function Tile({ icon, label, value, sub, tone = 'default', onClick }: { icon: ReactNode; label: string; value: ReactNode; sub?: string; tone?: 'default' | 'warn' | 'bad'; onClick?: () => void }) {
   const body = (
     <>
       <span className={cn('grid h-9 w-9 place-items-center rounded-xl', tone === 'bad' ? 'bg-bad/15 text-bad' : tone === 'warn' ? 'bg-warn/15 text-warn' : 'bg-washo-500/15 text-washo-300')}>{icon}</span>
@@ -20,6 +21,34 @@ function Tile({ icon, label, value, sub, tone = 'default', onClick }: { icon: Re
     <button type="button" onClick={onClick} className="glass p-4 text-left transition-colors hover:border-washo-400/40">{body}</button>
   ) : (
     <div className="glass p-4">{body}</div>
+  );
+}
+
+/** A small green dot that pulses: something is live. */
+export function LiveDot() {
+  return (
+    <span className="relative flex h-2.5 w-2.5" aria-hidden>
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-ok opacity-60" />
+      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-ok" />
+    </span>
+  );
+}
+
+/**
+ * Who is using WASHO: customers active in the last five minutes, customers who used it today, and customers who signed in today (specialists and admins are mentioned underneath, not counted
+ * in the number). Each opens the Traffic tab. Until the database has been set up for it (migration 50) they show dashes and say so.
+ */
+function TrafficTiles({ go }: { go: () => void }) {
+  const { data, isLoading } = useAdminTrafficSummary();
+  const s = data?.summary ?? null;
+  const off = !isLoading && data && !data.ready;
+  const dash = isLoading ? '…' : '–';
+  return (
+    <>
+      <Tile icon={<LiveDot />} label="Customers active now" value={s ? s.active_now.customers : dash} sub={off ? 'Not switched on yet. Open to see how.' : s ? teamLine(s.active_now) || `in the last ${s.window_minutes} minutes` : undefined} onClick={go} />
+      <Tile icon={<Users className="h-[18px] w-[18px]" />} label="Customers active today" value={s ? s.active_today.customers : dash} sub={s ? teamLine(s.active_today) || 'used WASHO today' : undefined} onClick={go} />
+      <Tile icon={<LogIn className="h-[18px] w-[18px]" />} label="Customers signed in today" value={s ? s.signed_in_today.customers : dash} sub={s ? `${s.signed_in_today.sign_ins} sign-in${s.signed_in_today.sign_ins === 1 ? '' : 's'} in all${s.signed_in_today.workers + s.signed_in_today.admins > 0 ? ', incl. team' : ''}` : undefined} onClick={go} />
+    </>
   );
 }
 
@@ -51,7 +80,7 @@ function Series({ d }: { d: AdminDashboard }) {
 }
 
 /** Today's key numbers: new customers, paid orders, money in and out, payments that went wrong, complaints waiting. What a role may not see is simply not shown. */
-export function Dashboard({ go }: { go: (tab: 'attention' | 'support') => void }) {
+export function Dashboard({ go, traffic = false }: { go: (tab: 'attention' | 'support' | 'traffic') => void; /** Show the traffic tiles (the role has Activity access). */ traffic?: boolean }) {
   const { data: d, isLoading, isError, refetch } = useAdminDashboard();
   if (isError) return <ErrorState onRetry={() => void refetch()} />;
   if (isLoading || !d) return <Loading />;
@@ -60,6 +89,7 @@ export function Dashboard({ go }: { go: (tab: 'attention' | 'support') => void }
     <section className="mb-8 space-y-4" aria-label="Today">
       <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-lg font-bold">Today</h2><p className="text-sm text-fog">{prettyDate(d.today)} · Pune time</p></div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+        {traffic && <TrafficTiles go={() => go('traffic')} />}
         <Tile icon={<UserPlus className="h-[18px] w-[18px]" />} label="New customers" value={d.new_customers.today} sub={`${d.new_customers.last_7_days} this week · ${d.new_customers.last_30_days} this month`} />
         <Tile icon={<ShoppingBag className="h-[18px] w-[18px]" />} label="Paid orders" value={d.orders.paid_today} sub={`${d.orders.paid_last_7_days} in 7 days`} />
         <Tile icon={<Gift className="h-[18px] w-[18px]" />} label="Free washes claimed" value={d.orders.free_washes_today} />

@@ -6,6 +6,12 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cd /Users/apple/Documents/washo/washo-website && PORT=5001 exec npm run dev -- --port 5173 --strictPort"],
       "port": 5173
+    },
+    {
+      "name": "remotion-studio",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd /Users/apple/Documents/washo/washo-website/marketing/remotion && exec npx remotion studio src/index.ts --port 3123 --no-open"],
+      "port": 3123
     }
   ]
 }
