@@ -1,37 +1,14 @@
-import { createApp } from './app';
-import { config } from './config';
-import { pool, withApiRole } from './db';
-import { startReminderScheduler } from './reminders';
+/**
+ * The file Render starts: `npx ts-node backend/src/server.ts`. ts-node compiles the WHOLE backend before it listens, which takes 80 seconds or more on the free plan, and the free plan puts an
+ * idle instance to sleep, so every first visit after a quiet spell waited that long (Cloudflare gave up first: error 522, "the site is not loading"). So in production this file hands over to
+ * the compiled copy that `npm run build` makes (backend/dist), and ts-node only has to compile these few lines. Development and tests run the TypeScript (main.ts) exactly as before, and a
+ * production start without a build falls back to it too. The real start-up code is in main.ts.
+ */
+import fs from 'fs';
+import path from 'path';
 
-async function main() {
-  if (!config.supabase.serviceRoleKey) {
-    console.warn('⚠️  SUPABASE_SERVICE_ROLE_KEY is not set: wash photos cannot be uploaded or viewed.');
-  }
-  if (config.isProd && !config.supabase.jwtSecret) {
-    console.log('SUPABASE_JWT_SECRET not set: verifying sessions against the project\'s published signing keys (JWKS).');
-  }
+const compiled = path.join(__dirname, '..', 'dist', 'main.js');
+const alreadyCompiled = path.basename(__dirname) === 'dist'; // `node backend/dist/server.js` is this same file, already compiled
 
-  const app = createApp();
-  const server = app.listen(config.port, () => console.log(`WASHO server running on port ${config.port}`));
-
-  // Quotes nobody accepted in time are marked expired (customers already see them as expired; this just tidies the records).
-  const sweep = () => withApiRole((c) => c.query('SELECT app_private.expire_membership_quotes()')).catch((e) => console.error('Quote sweep failed:', e.message));
-  const timer = setInterval(sweep, 60 * 60_000);
-  timer.unref();
-  void sweep();
-  // Renewal reminder emails: a week before a membership ends (needs RESEND_API_KEY and migration 18; quietly does nothing without them).
-  const stopReminders = startReminderScheduler();
-
-  const shutdown = () => {
-    clearInterval(timer);
-    stopReminders();
-    server.close(() => pool.end().finally(() => process.exit(0)));
-  };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-}
-
-main().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+if (process.env.NODE_ENV === 'production' && !alreadyCompiled && fs.existsSync(compiled)) require(compiled);
+else require('./main');

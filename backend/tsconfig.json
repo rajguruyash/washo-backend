@@ -1,4 +1,6 @@
 {
+  // ts-node (how Render starts the server) only checks types in `npm run typecheck`, never at start-up: that made every start slower.
+  "ts-node": { "transpileOnly": true },
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",

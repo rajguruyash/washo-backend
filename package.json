@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && tsc -p backend/tsconfig.json",
     "lint": "oxlint",
     "preview": "vite preview",
     "backend:build": "tsc -p backend/tsconfig.json",
